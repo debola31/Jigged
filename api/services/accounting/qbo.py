@@ -87,8 +87,6 @@ class QboProvider:
             bill_addr=kwargs.get("bill_addr"),
             lines=kwargs["lines"],
             sales_term_id=kwargs.get("sales_term_id"),
-            po_custom_field_id=kwargs.get("po_custom_field_id"),
-            po_custom_field_name=kwargs.get("po_custom_field_name"),
         )
 
     def create_invoice(self, payload: dict, *, request_id: str) -> CreatedInvoice:

@@ -1163,8 +1163,8 @@ export async function getComputedPartChargeBase(
  *
  * Returns `null` when the part has no markup tier. That is a data gap the caller
  * must surface — never a silent fall back to cost, and never a shop-wide
- * default: `companies.default_markup_*` seed a part's FIRST TIER at write time
- * and are not consulted here. The markup comes back from SQL rather than being
+ * default: a part's FIRST TIER is written at 0% markup when it gets a cost
+ * (`ensureStarterPricingTier`), and nothing shop-wide is consulted here. The markup comes back from SQL rather than being
  * re-derived so the rule has exactly one implementation.
  */
 export interface PartChargePrice {

@@ -1059,9 +1059,10 @@ async def execute_import(
         # nobody will open one at a time. Without this, an imported catalogue
         # arrives un-quotable.
         #
-        # Same rule as the part page, at the other entry point: the shop's
-        # starting markup for the part's source, written ONCE into the part's own
-        # tier. Read here, never by the rollup.
+        # Same rule as the part page, at the other entry point: a 0% starting
+        # markup, written ONCE into the part's own tier (STARTER_MARKUP_PERCENT in
+        # utils/partPricingTiersAccess.ts). It was a per-shop setting until
+        # 2026-11-09, when every shop was still at 0 and the setting was removed.
         #
         # Only for parts that (a) this run created and (b) have a cost to mark up
         # — which at import time means a bought row that supplied one. A made row
@@ -1076,14 +1077,7 @@ async def execute_import(
         ]
         if newly_created_with_cost:
             try:
-                company = (
-                    supabase.table("companies")
-                    .select("default_markup_bought_percent")
-                    .eq("id", request.company_id)
-                    .single()
-                    .execute()
-                ).data or {}
-                starter_markup = company.get("default_markup_bought_percent") or 0
+                starter_markup = 0
 
                 # Silently rewriting a markup is the one thing this must never
                 # do. The cost block above has already made the row exist, so

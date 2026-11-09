@@ -219,8 +219,8 @@ one marks up still comes from its own Pricing card.
 **And a shop-wide default behind it**, `companies.default_material_charge_basis`, so a shop that
 always values materials one way says so once instead of on every new part. Precedence for a newly
 added line is named in [`chargeBasisForNewLine`](../../types/bom.ts): the part's own existing stance
-→ otherwise the shop default. Like the starting markups, it is a **seed read at line-creation
-time**, never by the rollup, so changing it reprices nothing.
+→ otherwise the shop default. It is a **seed read at line-creation time**, never by the rollup, so
+changing it reprices nothing.
 
 **Made and bought children are treated identically**, and that is the whole point of the model: both
 carry costs and pricing tiers, and the rollup has never distinguished them — the price rung resolves
@@ -385,21 +385,17 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   the same engine made parts use.
 - A **new part opens with one unfilled row** (Min qty 1, Markup blank) and stays not-priceable —
   **until it has a cost.** The moment the part's first priced operation or material lands, the card
-  writes that row for itself at the **shop's starting markup** (0% out of the box), and the part
-  becomes quotable with nobody having typed anything.
+  writes that row for itself at **0% markup**, and the part becomes quotable — selling at cost —
+  with nobody having typed anything. The markup is then set on that part's own Pricing card.
 
-  **Where the number comes from.** `companies.default_markup_made_percent` /
-  `default_markup_bought_percent` — the shop's *starting* markup, split by source because a shop
-  marks up purchased goods and its own labour at different rates. Both are `numeric(10,6) NOT NULL
-  DEFAULT 0`, so out of the box a starter tier is 0% and the part sells at cost.
-
-  **They are seed values, not a pricing rule.** They are read at exactly one moment — when a costed
-  part has no tiers — and written into that part's own tier row. Nothing reads them again, so
-  raising the made markup to 30% reprices nothing that already exists; it changes what the *next*
-  part starts at. That write-time boundary is the whole design, and it is why the rollup (above) has
-  no shop-wide fallback: `lib/companyDefaults.ts` records that resolving a shared default at read
-  time, with nothing on screen to say where the number came from, is what got `markup_rates`
-  deleted.
+  **Why always 0%.** Until 2026-11-09 the starting markup was a shop setting, split by source
+  (`companies.default_markup_made_percent` / `default_markup_bought_percent`, "Part pricing
+  markups" in Settings). Every company had left both at 0, so the fields were removed and nothing
+  reads the columns any more (a follow-up migration drops them); the 0 is now
+  `STARTER_MARKUP_PERCENT` in `utils/partPricingTiersAccess.ts`. The rollup (above)
+  still has no shop-wide fallback: `lib/companyDefaults.ts` records that resolving a shared default
+  at read time, with nothing on screen to say where the number came from, is what got
+  `markup_rates` deleted.
 
   **Why a default rather than a prompt.** Before this, the answer to "why can't I quote the part I
   just set up?" was a blank box on a card the user had no reason to open. The step taught nothing —
@@ -425,11 +421,10 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
   **for nothing** — worse than not being quotable at all. So the trigger is a priced labor or
   material item in the breakdown (bought parts: a resolved procurement cost at qty 1).
 
-  While that starter tier is still the only tier and still sitting at the shop's number, a caption
-  under the table names its source — *"…your shop's starting markup for parts you make, from
-  Settings. Change it here for this part alone."* — and, at 0%, says what that means in money
-  ("this part sells for what it costs"), because selling at cost is not something a shop should
-  discover on an accepted quote. It disappears the moment the markup is changed.
+  While that starter tier is still the only tier and still at 0%, a caption under the table says
+  what that means in money — *"Ready to quote at 0% markup — this part sells for what it costs.
+  Change the markup above to price it differently."* — because selling at cost is not something a
+  shop should discover on an accepted quote. It disappears the moment the markup is changed.
 
   **The CSV importer seeds it too**, for rows it creates that arrive with a cost (a bought row with
   `cost_per_unit`). A made row has no routing yet, so it gets its tier from the part page later.
@@ -727,7 +722,7 @@ them had already rotted in this doc). Everything not listed is `automation-pendi
 | Unit-price → markup back-calculation (incl. negative markup, zero base, NaN) | `__tests__/types/quote.test.ts` → `calculateMarkupFromUnitPrice` |
 | Create-mode validation (empty name, duplicate name, success) and existing-mode blur auto-save | `__tests__/components/parts/PartIdentitySection.test.tsx` → `PartIdentitySection` |
 | Staged tier edits surviving a `refreshKey` bump from a sibling save | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — staged tier edits survive sibling saves` (13 its) |
-| Starter tier: written once on first cost at the shop's markup for the part's source; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the source caption clearing on a changed markup | `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — starter tier from the shop default` |
+| Starter tier: written once on first cost at 0% markup; **not** written for a routing with no priced work, no cost basis at all, an existing tier ladder, or a bought part with no vendor cost; the source caption clearing on a changed markup | `__tests__/utils/ensureStarterPricingTier.test.ts` → `ensureStarterPricingTier`; `__tests__/components/parts/PartPricing.test.tsx` → `PartPricing — the starting-markup caption` |
 | Priceability / completeness derivation | `__tests__/components/parts/partSetupStatus.test.ts` → `getPartSetupStatus` (5 its) |
 | Completeness banner render | `__tests__/components/parts/workspace/tabs/WorkspaceTab.test.tsx` → `WorkspaceTab completeness banner` (4 its) |
 | Navigating away with unsaved work | `__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx` → `PartWorkspace — unsaved-changes exit guard` (4 its) |

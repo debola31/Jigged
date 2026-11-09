@@ -69,9 +69,8 @@ class QbdProvider:
     def build_invoice_payload(self, **kwargs) -> dict:
         """Maps the shared push path's canonical kwargs onto the QBD body.
 
-        `po_custom_field_*` is accepted and dropped: QuickBooks Desktop has a
-        NATIVE purchaseOrderNumber field, so none of QBO's custom-field discovery
-        applies here.
+        QuickBooks Desktop has a NATIVE purchaseOrderNumber field, so the PO goes
+        straight into it.
         """
         return qbd.job_to_qbd_invoice_payload(
             customer_id=kwargs["customer_ref"],

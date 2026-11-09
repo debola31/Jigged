@@ -12,13 +12,13 @@ const mockGetComputedPartCost = vi.fn();
 const mockUpdatePartCostingBatchQuantity = vi.fn();
 const mockAddPartPricingNote = vi.fn();
 const mockGetCurrentMember = vi.fn();
-const mockGetCompany = vi.fn();
 const mockGetAllVendors = vi.fn();
 const mockUpdatePartPreferredVendor = vi.fn();
 
 vi.mock('@/utils/partPricingTiersAccess', () => ({
   getTiersForPart: (...a: unknown[]) => mockGetTiersForPart(...a),
   replaceTiersForPart: (...a: unknown[]) => mockReplaceTiersForPart(...a),
+  STARTER_MARKUP_PERCENT: 0,
 }));
 vi.mock('@/utils/routingCostCalculation', () => ({
   calculateRoutingCost: (...a: unknown[]) => mockCalculateRoutingCost(...a),
@@ -39,16 +39,6 @@ vi.mock('@/utils/vendorsAccess', () => ({
 }));
 vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: (...a: unknown[]) => mockGetCurrentMember(...a),
-}));
-vi.mock('@/utils/companyAccess', () => ({
-  getCompany: (...a: unknown[]) => mockGetCompany(...a),
-  readCompanyPricingDefaults: (c: {
-    default_markup_made_percent?: number;
-    default_markup_bought_percent?: number;
-  } | null) => ({
-    made: c?.default_markup_made_percent ?? 0,
-    bought: c?.default_markup_bought_percent ?? 0,
-  }),
 }));
 
 const part = {
@@ -81,10 +71,6 @@ describe('PartPricing — staged tier edits survive sibling saves', () => {
     mockGetComputedPartCost.mockResolvedValue(15);
     mockReplaceTiersForPart.mockResolvedValue(undefined);
     mockGetCurrentMember.mockResolvedValue(null);
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 0,
-      default_markup_bought_percent: 0,
-    });
     mockGetAllVendors.mockResolvedValue([{ id: 'v1', name: 'Atlas Metals Supply' }]);
     mockUpdatePartPreferredVendor.mockResolvedValue(undefined);
   });
@@ -468,10 +454,6 @@ describe('PartPricing — the starting-markup caption', () => {
     mockGetComputedPartCost.mockResolvedValue(15);
     mockReplaceTiersForPart.mockResolvedValue(undefined);
     mockGetCurrentMember.mockResolvedValue({ id: 'u1' });
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 0,
-      default_markup_bought_percent: 0,
-    });
     mockGetAllVendors.mockResolvedValue([{ id: 'v1', name: 'Atlas Metals Supply' }]);
     mockUpdatePartPreferredVendor.mockResolvedValue(undefined);
   });
@@ -485,15 +467,16 @@ describe('PartPricing — the starting-markup caption', () => {
     expect(mockReplaceTiersForPart).not.toHaveBeenCalled();
   });
 
-  it('names Settings as the source, and says what 0% means in money', async () => {
+  // Settings no longer has starting markups (removed 2026-11-09), so the caption
+  // must not send anyone there looking for one.
+  it('says what 0% means in money, without pointing at Settings', async () => {
     mockGetTiersForPart.mockResolvedValue([
       { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 0 },
     ]);
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     await screen.findByText(/sells for what it\s+costs/i);
-    await screen.findByText(/starting markup for parts you\s+make/i);
-    expect(screen.getByRole('link', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Settings' })).toBeNull();
 
     // Changing it is a decision about THIS part; the hint has done its job.
     const markupBox = (await screen.findAllByRole('textbox'))[1];
@@ -501,20 +484,6 @@ describe('PartPricing — the starting-markup caption', () => {
     await user.type(markupBox, '30');
 
     await waitFor(() => expect(screen.queryByText(/sells for what it\s+costs/i)).toBeNull());
-  });
-
-  it('at a non-zero default it names the source without the sells-at-cost line', async () => {
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 35,
-      default_markup_bought_percent: 12,
-    });
-    mockGetTiersForPart.mockResolvedValue([
-      { id: 't-auto', sequence: 10, quantity: 1, markup_percent: 35 },
-    ]);
-    render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
-
-    await screen.findByText(/Ready to quote at 35% markup/);
-    expect(screen.queryByText(/sells for what it costs/i)).toBeNull();
   });
 
   it('says nothing about a ladder the shop has actually built', async () => {
@@ -525,6 +494,6 @@ describe('PartPricing — the starting-markup caption', () => {
     render(<PartPricing companyId="c1" part={part} refreshKey={0} />);
 
     await screen.findByDisplayValue('100');
-    expect(screen.queryByText(/starting markup for parts you/i)).toBeNull();
+    expect(screen.queryByText(/Ready to quote at/i)).toBeNull();
   });
 });

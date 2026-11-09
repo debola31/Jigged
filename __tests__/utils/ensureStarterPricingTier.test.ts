@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
  * The starter tier: a part becomes quotable at the same moment it first has a
- * cost, at the shop's starting markup for its source.
+ * cost, at 0% markup (a per-shop setting until 2026-11-09, when it was dropped).
  *
  * `get_priceable_part_ids` needs a tier carrying a non-null markup, so before
  * this a part could be fully costed and still refuse to go on a quote, with the
@@ -37,7 +37,6 @@ const { mockBuilder, mockSupabase } = vi.hoisted(() => {
 });
 const mockGetComputedPartCost = vi.fn();
 const mockCalculateRoutingCost = vi.fn();
-const mockGetCompany = vi.fn();
 const mockGetCurrentMember = vi.fn();
 const mockAddPartPricingNote = vi.fn();
 
@@ -49,16 +48,6 @@ vi.mock('@/utils/partsAccess', () => ({
 }));
 vi.mock('@/utils/routingCostCalculation', () => ({
   calculateRoutingCost: (...a: unknown[]) => mockCalculateRoutingCost(...a),
-}));
-vi.mock('@/utils/companyAccess', () => ({
-  getCompany: (...a: unknown[]) => mockGetCompany(...a),
-  readCompanyPricingDefaults: (c: {
-    default_markup_made_percent?: number;
-    default_markup_bought_percent?: number;
-  } | null) => ({
-    made: c?.default_markup_made_percent ?? 0,
-    bought: c?.default_markup_bought_percent ?? 0,
-  }),
 }));
 vi.mock('@/utils/operatorAccess', () => ({
   getCurrentMember: (...a: unknown[]) => mockGetCurrentMember(...a),
@@ -103,10 +92,6 @@ describe('ensureStarterPricingTier', () => {
     mockCalculateRoutingCost.mockResolvedValue(pricedBreakdown);
     mockGetComputedPartCost.mockResolvedValue(10);
     mockGetCurrentMember.mockResolvedValue({ id: 'u1' });
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 0,
-      default_markup_bought_percent: 0,
-    });
   });
 
   it('writes one tier at min qty 1 for a made part with priced work', async () => {
@@ -121,19 +106,14 @@ describe('ensureStarterPricingTier', () => {
     });
   });
 
-  it('takes the MADE default for a made part and the BOUGHT default for a bought one', async () => {
-    mockGetCompany.mockResolvedValue({
-      default_markup_made_percent: 35,
-      default_markup_bought_percent: 12,
-    });
-
+  it('starts made and bought parts alike at 0% markup', async () => {
     await ensureStarterPricingTier('c1', 'p1', 'made');
-    expect(insertedTier()).toMatchObject({ markup_percent: 35 });
+    expect(insertedTier()).toMatchObject({ markup_percent: 0 });
 
     (mockBuilder.insert as ReturnType<typeof vi.fn>).mockClear();
     givenCostedRowWithNoMarkup();
     await ensureStarterPricingTier('c1', 'p2', 'bought');
-    expect(updatedTier()).toMatchObject({ markup_percent: 12 });
+    expect(updatedTier()).toMatchObject({ markup_percent: 0 });
   });
 
   it('leaves an audit note saying the app wrote it, not a person', async () => {
@@ -141,8 +121,7 @@ describe('ensureStarterPricingTier', () => {
 
     const body = mockAddPartPricingNote.mock.calls[0][3] as string;
     expect(body).toMatch(/automatically/i);
-    expect(body).toMatch(/shop default/i);
-    expect(body).toMatch(/parts you make/);
+    expect(body).toMatch(/0% markup/);
   });
 
   it('does NOT overwrite a ladder the shop already built', async () => {
@@ -201,14 +180,6 @@ describe('ensureStarterPricingTier', () => {
     await ensureStarterPricingTier('c1', 'p1', 'bought');
     // Same row, same break, same cost — only the markup arrives.
     expect(updatedTier()).toMatchObject({ quantity: 1, cost_per_unit: 4.5, markup_percent: 0 });
-    expect(insertedTier()).toBeUndefined();
-  });
-
-  it('writes nothing when the company row cannot be read', async () => {
-    // Guessing 0 would write a markup the shop never chose.
-    mockGetCompany.mockResolvedValue(null);
-
-    expect(await ensureStarterPricingTier('c1', 'p1', 'made')).toBe(false);
     expect(insertedTier()).toBeUndefined();
   });
 

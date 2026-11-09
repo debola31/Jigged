@@ -599,42 +599,29 @@ def test_po_goes_to_customer_memo_which_actually_prints():
     assert payload["PrivateNote"] == "Jigged job J-0007 · PO Number: PO-789"
 
 
-def test_no_custom_field_when_the_shop_has_not_configured_one():
-    """The default state — and the one that must never guess.
+def test_po_prints_on_lines_and_memo_but_never_in_a_custom_field():
+    """The PO reaches the invoice where it prints with no setup — every line and
+    the customer note — and never in a sales CustomField.
 
-    Verified live that an unconfigured company reports only three booleans, all
-    false, with no field names at all. Writing to a guessed DefinitionId would
-    silently overwrite whatever the shop keeps in that slot (commonly "Sales
-    Rep" or "Job #") and the slot mapping cannot be reassigned afterwards.
+    Writing to a guessed DefinitionId would silently overwrite whatever the shop
+    keeps in that slot (commonly "Sales Rep" or "Job #") and the slot mapping
+    cannot be reassigned afterwards. The lookup that found a shop-made PO field
+    was removed on 2026-11-09, so no slot is ever written.
     """
     payload = qb.quote_to_invoice_payload(
         customer_ref="1", item_ref="1", job_number=None,
         customer_po_number="PO-12", bill_addr=None,
         lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
-        po_custom_field_id=None,
     )
     assert "CustomField" not in payload
+    assert payload["CustomerMemo"] == {"value": "PO Number: PO-12"}
+    assert payload["Line"][0]["Description"].endswith("(PO Number: PO-12)")
 
 
-def test_custom_field_used_only_when_discovery_supplied_an_id():
-    payload = qb.quote_to_invoice_payload(
-        customer_ref="1", item_ref="1", job_number=None,
-        customer_po_number="PO-12", bill_addr=None,
-        lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
-        po_custom_field_id="2",
-        po_custom_field_name="Customer PO #",
-    )
-    assert payload["CustomField"] == [
-        {"DefinitionId": "2", "Type": "StringType",
-         "StringValue": "PO-12", "Name": "Customer PO #"}
-    ]
-
-
-def test_no_po_means_no_memo_and_no_custom_field():
+def test_no_po_means_no_memo():
     payload = qb.quote_to_invoice_payload(
         customer_ref="1", item_ref="1", job_number="J-0007", bill_addr=None,
         lines=[{"quantity": 1, "unit_price": 5.0, "part_name": "P", "description": None}],
-        po_custom_field_id="1",
     )
     assert "CustomerMemo" not in payload
     assert "CustomField" not in payload
@@ -651,15 +638,6 @@ def test_parse_net_days_reads_common_term_shapes():
     assert qb._parse_net_days("Due on Receipt") == 0
     assert qb._parse_net_days("Cash on Delivery") == 0
     assert qb._parse_net_days("") == 0
-
-
-def test_po_field_pattern_matches_real_shop_labels():
-    """Discovery matches on the shop's LABEL, never on slot position — Intuit
-    states definitions "may not appear in numeric order" in Preferences."""
-    for label in ("PO Number", "PO #", "Customer PO", "customer purchase order", "P.O."):
-        assert qb._PO_FIELD_PATTERN.search(label), label
-    for label in ("Sales Rep", "Job #", "Crew", "Priority"):
-        assert not qb._PO_FIELD_PATTERN.search(label), label
 
 
 def test_resolve_term_id_matches_the_truncated_name_it_created(monkeypatch):
@@ -711,87 +689,6 @@ def test_resolve_term_id_is_case_insensitive(monkeypatch):
         qb, "list_qb_terms", lambda db, cid: [{"id": "1", "name": "Due on receipt", "due_days": 0}]
     )
     assert qb.resolve_term_id(None, "c1", "Due on Receipt") == "1"
-
-
-def test_discover_po_custom_field_raises_when_it_cannot_ask(monkeypatch):
-    """"Couldn't check" must never be reported as "there is no field".
-
-    The caller persists this result, so swallowing the error would let one
-    Intuit blip wipe a correctly discovered field id and silently stop the PO
-    reaching invoices."""
-    def _boom(*args, **kwargs):
-        raise RuntimeError("intuit is down")
-
-    monkeypatch.setattr(qb, "qb_query", _boom)
-    with pytest.raises(RuntimeError):
-        qb.discover_po_custom_field(None, "c1")
-
-
-def test_discover_po_custom_field_reports_none_for_an_unconfigured_company(monkeypatch):
-    """An answered question with a negative answer IS returned as None — that is
-    the ordinary starting state, and it must stay distinguishable from the
-    unanswered case above."""
-    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: {"Preferences": [{}]})
-    assert qb.discover_po_custom_field(None, "c1") == {
-        "id": None, "name": None, "candidates": []
-    }
-
-
-def test_discover_po_custom_field_matches_label_not_slot(monkeypatch):
-    """Slot 1 is "Sales Rep" here and the PO lives in slot 3. Writing to a
-    guessed DefinitionId would overwrite whatever the shop keeps in that slot,
-    and the mapping cannot be reassigned afterwards."""
-    prefs = {
-        "Preferences": [
-            {
-                "SalesFormsPrefs": {
-                    "CustomField": [
-                        {
-                            "CustomField": [
-                                {"Name": "SalesFormsPrefs.UseSalesCustom1", "BooleanValue": True},
-                                {"Name": "SalesFormsPrefs.SalesCustomName1",
-                                 "StringValue": "Sales Rep"},
-                                {"Name": "SalesFormsPrefs.UseSalesCustom3", "BooleanValue": True},
-                                {"Name": "SalesFormsPrefs.SalesCustomName3",
-                                 "StringValue": "Customer PO #"},
-                            ]
-                        }
-                    ]
-                }
-            }
-        ]
-    }
-    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
-    found = qb.discover_po_custom_field(None, "c1")
-    assert found["id"] == "3"
-    assert found["name"] == "Customer PO #"
-    assert {c["name"] for c in found["candidates"]} == {"Sales Rep", "Customer PO #"}
-
-
-def test_discover_po_custom_field_ignores_a_disabled_slot(monkeypatch):
-    """A named-but-switched-off field does not print, so offering it would put
-    the PO somewhere nobody sees."""
-    prefs = {
-        "Preferences": [
-            {
-                "SalesFormsPrefs": {
-                    "CustomField": [
-                        {
-                            "CustomField": [
-                                {"Name": "SalesFormsPrefs.UseSalesCustom2", "BooleanValue": False},
-                                {"Name": "SalesFormsPrefs.SalesCustomName2",
-                                 "StringValue": "PO Number"},
-                            ]
-                        }
-                    ]
-                }
-            }
-        ]
-    }
-    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: prefs)
-    found = qb.discover_po_custom_field(None, "c1")
-    assert found["id"] is None
-    assert found["candidates"] == []
 
 
 # ───────────────────────── invoiced-quantity scoping ─────────────────────────

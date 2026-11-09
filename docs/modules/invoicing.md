@@ -151,8 +151,7 @@ refresh queries it again, and an invoice that comes back clears it.
 token, a timeout — none of them touch the row, and the menu keeps showing the last answer **with
 the date it was given**. The route says so out loud (409 `qbo_unreachable`, *"Showing what it last
 said"*) rather than rendering an unchecked invoice as open or unpaid: **"couldn't check" is never
-"nothing was paid"**, which is the same rule the PO-field discovery follows
-([customers.md](customers.md#quickbooks)).
+"nothing was paid"**.
 
 **The monotonic guard.** `apply_qbo_invoice_mirror` ignores a row whose `qb_status_checked_at` is
 already newer than the pass being applied. Two people opening the same job, or a menu open racing
@@ -180,9 +179,8 @@ revoked rather than left live.
 
 **The refusal is unconditional, and the first draft of it was not.** That draft allowed the switch
 when no invoice or customer row was bound to the old realm, on the theory that there was nothing to
-strand. There is: `default_item_id`, `default_income_account_id`, `po_custom_field_id` and
-`po_custom_field_name` live on the connection row, name objects *inside the old company file*, and
-`persist_connection` clears none of them. A "harmless" swap therefore leaves the new company
+strand. There is: `default_item_id` and `default_income_account_id` live on the connection row,
+name objects *inside the old company file*, and `persist_connection` clears neither of them. A "harmless" swap therefore leaves the new company
 pointing at another company's item and income account, and the next push files a **wrong invoice**
 rather than merely failing to read one. One rule with no exception is also the only version a shop
 owner can predict, since the exception turned on state they cannot see.

@@ -18,7 +18,7 @@ const addCustomPaymentTerm = vi.hoisted(() => vi.fn());
 const removeCustomPaymentTerm = vi.hoisted(() => vi.fn());
 const updateCompanyDefaults = vi.hoisted(() => vi.fn());
 const setCompanyDefaultPaymentTerms = vi.hoisted(() => vi.fn());
-const setCompanyPricingDefaults = vi.hoisted(() => vi.fn());
+const setCompanyMaterialChargeBasis = vi.hoisted(() => vi.fn());
 const listQuickBooksTerms = vi.hoisted(() => vi.fn());
 
 // The terms field is the shared PaymentTermsPicker, so this card now depends on
@@ -32,13 +32,12 @@ vi.mock('@/utils/companyAccess', () => ({
   removeCustomPaymentTerm,
   updateCompanyDefaults,
   setCompanyDefaultPaymentTerms,
-  setCompanyPricingDefaults,
+  setCompanyMaterialChargeBasis,
   // Not mocked away: it is a pure read over the company row, and stubbing it
   // would hide a mismatch between what the card renders and what the column is.
-  readCompanyPricingDefaults: (c: { default_markup_made_percent?: number; default_markup_bought_percent?: number } | null) => ({
-    made: c?.default_markup_made_percent ?? 0,
-    bought: c?.default_markup_bought_percent ?? 0,
-  }),
+  readCompanyMaterialChargeBasis: (
+    c: { default_material_charge_basis?: 'cost' | 'price' } | null,
+  ) => c?.default_material_charge_basis ?? 'cost',
 }));
 
 import AppDefaultsCard from '@/components/settings/AppDefaultsCard';
@@ -58,6 +57,7 @@ beforeEach(() => {
   listQuickBooksTerms.mockResolvedValue({ connected: false, terms: [] });
   updateCompanyDefaults.mockResolvedValue(undefined);
   setCompanyDefaultPaymentTerms.mockImplementation(async (_id: string, v: string) => v.trim() || null);
+  setCompanyMaterialChargeBasis.mockImplementation(async (_id: string, v: string) => v);
 });
 
 describe('AppDefaultsCard', () => {
@@ -164,5 +164,32 @@ describe('AppDefaultsCard', () => {
     expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
     expect(updateCompanyDefaults).not.toHaveBeenCalled();
     expect(setCompanyDefaultPaymentTerms).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The "Part pricing markups" pair was removed on 2026-11-09 — every shop had left both at 0%, and
+   * a part's markup is set on its own Pricing card. Only the Materials choice stays.
+   */
+  it('has no starting-markup fields, only the Materials choice', async () => {
+    render(<AppDefaultsCard companyId={CO} />);
+    await screen.findByLabelText(/^payment terms$/i);
+
+    expect(screen.queryByText(/part pricing markups/i)).toBeNull();
+    expect(screen.queryByLabelText(/starting markup/i)).toBeNull();
+    expect(screen.getByRole('group', { name: /materials charge basis/i })).toBeInTheDocument();
+  });
+
+  it('writes the Materials choice only when it changed', async () => {
+    const user = userEvent.setup();
+    render(<AppDefaultsCard companyId={CO} />);
+    await screen.findByLabelText(/^payment terms$/i);
+
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(setCompanyDefaultPaymentTerms).toHaveBeenCalled());
+    expect(setCompanyMaterialChargeBasis).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: /their marked-up price/i }));
+    await user.click(screen.getByRole('button', { name: /^save$/i }));
+    await waitFor(() => expect(setCompanyMaterialChargeBasis).toHaveBeenCalledWith(CO, 'price'));
   });
 });

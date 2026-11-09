@@ -14,16 +14,13 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
-import Divider from '@mui/material/Divider';
 import Card from '@mui/material/Card';
 import Stack from '@mui/material/Stack';
 import {
   getQuickBooksStatus,
   startQuickBooksConnect,
   disconnectQuickBooks,
-  refreshQuickBooksPoField,
   type QuickBooksStatus,
-  type QuickBooksPoField,
 } from '@/utils/quickbooksAccess';
 import SettingsSection from '@/components/settings/SettingsSection';
 import DesktopAuthHandoff from '@/components/settings/quickbooks/DesktopAuthHandoff';
@@ -70,10 +67,6 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
   const [success, setSuccess] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
-  // Null until the admin asks. Deliberately not fetched on mount: it is a round
-  // trip to Intuit for a value that only changes when a human edits their
-  // QuickBooks settings, and nothing on this page is blocked without it.
-  const [poField, setPoField] = useState<QuickBooksPoField | null>(null);
   // A FAILED status check is its own state, distinct from "not connected".
   // Without it, a network blip renders "Connect to QuickBooks" to a shop that is
   // already connected -- a failed check shown as a definitive negative.
@@ -91,27 +84,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
    *  Conductor calls (create the end user, mint an auth session). `busy` only
    *  greys both cards out, which reads as a dead button rather than work in
    *  progress -- the same complaint raised about the panel's buttons. */
-  const [pending, setPending] = useState<null | 'qbo' | 'qbd' | 'po-field'>(null);
-
-  const handleCheckPoField = async () => {
-    setError(null);
-    setBusy(true);
-    setPending('po-field');
-    try {
-      const found = await refreshQuickBooksPoField(companyId);
-      setPoField(found);
-      setSuccess(
-        found.configured
-          ? `Found your "${found.field_name}" field — PO numbers will use it from now on.`
-          : 'No PO field found in QuickBooks yet.',
-      );
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not read QuickBooks settings.');
-    } finally {
-      setBusy(false);
-      setPending(null);
-    }
-  };
+  const [pending, setPending] = useState<null | 'qbo' | 'qbd'>(null);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -270,7 +243,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
       }
       statusChip={statusChip}
-      description="Push invoices from Jigged into QuickBooks, and read back what QuickBooks says about them — what’s still owed, and when it’s due. Jigged only ever adds invoices and reads; it never changes or deletes anything already in your QuickBooks."
+      description="Send invoices to QuickBooks and see what’s still owed. Jigged never changes or deletes anything already in QuickBooks."
     >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -407,70 +380,16 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
                 it the shop still sees correct payment status (opening a job's
                 Invoices menu re-reads anything older than ten minutes), just at
                 the cost of a round trip to Intuit every time, and nobody would
-                ever notice. */}
+                ever notice. Kept to one short line on purpose (2026-11-09). */}
             <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
               {status?.webhook_last_received_at
-                ? `Live payment updates from QuickBooks: last received ${formatReceivedAt(
-                    status.webhook_last_received_at,
-                  )}.`
-                : 'No live payment updates have arrived from QuickBooks yet. Payment status still refreshes whenever someone opens a job’s Invoices menu — but if this stays empty, the QuickBooks notification setup is worth checking.'}
+                ? `Last payment update: ${formatReceivedAt(status.webhook_last_received_at)}.`
+                : 'No payment updates from QuickBooks yet.'}
             </Typography>
 
-            {/* PO number placement.
-                The customer's PO already prints on every invoice line and in
-                the "Note to customer" block — both verified on a real invoice
-                PDF — so this section is an OPTIONAL upgrade, not a warning.
-                It exists because QuickBooks Online has no built-in PO field and
-                the API cannot create one: the REST Preferences write silently
-                does nothing, and the newer GraphQL route needs a paid Intuit
-                partner tier. So the shop has to make it, and we look for it. */}
-            <Divider sx={{ my: 3 }} />
-            <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
-              Customer PO number
-            </Typography>
-
-            {poField?.configured ? (
-              <Alert severity="success" sx={{ mb: 2 }}>
-                PO numbers will appear in your <strong>{poField.field_name}</strong>{' '}
-                field on QuickBooks invoices.
-              </Alert>
-            ) : (
-              <>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                  PO numbers already print on each invoice line and as a note to
-                  the customer. If you&rsquo;d also like one in the invoice
-                  header, where accounts-payable teams usually look, QuickBooks
-                  needs you to add the field — we can&rsquo;t create it for you.
-                </Typography>
-                <Typography variant="body2" component="div" sx={{ mb: 2 }}>
-                  In QuickBooks: <strong>Settings ⚙ → Account and settings →
-                  Sales → Sales form content → Custom fields → Add field</strong>.
-                  Name it <strong>PO Number</strong>, turn on{' '}
-                  <strong>Print on form</strong>, and tick every sales form.
-                  Then check again here.
-                </Typography>
-                {poField && poField.slots_used >= 3 && (
-                  <Alert severity="info" sx={{ mb: 2 }}>
-                    All three of your custom-field slots are in use (
-                    {poField.candidates.map((c) => c.name).join(', ')}). QuickBooks
-                    allows no more, so PO numbers will stay on the invoice lines
-                    and in the customer note.
-                  </Alert>
-                )}
-              </>
-            )}
-
-            <BusyButton
-              size="small"
-              onClick={handleCheckPoField}
-              disabled={busy}
-              pending={pending === 'po-field'}
-              pendingLabel="Reading QuickBooks settings…"
-              sx={{ mb: 3, display: 'block' }}
-            >
-              {poField ? 'Check again' : 'Check QuickBooks settings'}
-            </BusyButton>
-
+            {/* No "Customer PO number" section any more (removed 2026-11-09). The
+                PO still prints on every invoice line and in the customer note
+                without setup; see docs/modules/customers.md#quickbooks. */}
             <Button variant="outlined" color="error" onClick={() => setDisconnectOpen(true)} disabled={busy}>
               Disconnect
             </Button>

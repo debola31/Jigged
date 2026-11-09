@@ -3,6 +3,9 @@ API routes for AI Insights & Charts feature.
 
 Endpoints:
 - POST /{company_id}/chat        - Submit natural language question
+- POST /{company_id}/report      - Submit a one-page summary request
+- POST /{company_id}/query       - Run one caller-written SELECT in the sandbox (no model)
+- GET  /{company_id}/schema      - The schema notes and definitions that SELECT is written against
 
 Note: Saved insights CRUD (get/save/delete) is handled client-side
 via direct Supabase queries with RLS policies. Low-stock surfacing is
@@ -11,18 +14,31 @@ client-side too — it's the shortage lens on the parts page, not an alert feed.
 
 import logging
 import os
+import re
 import time
 
 import sentry_sdk
 from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from supabase import Client, create_client
 
 import routes.company_auth as company_auth
-from models.insights_models import ChatEnqueued, ChatRequest, ReportRequest
+from models.insights_models import (
+    ChatEnqueued,
+    ChatRequest,
+    DataQueryRequest,
+    DataQueryResult,
+    DataSchema,
+    ReportRequest,
+)
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
+from services.insights_service import load_semantics
+from tools import sql_executor
+from tools.schema_context import SCHEMA_CONTEXT
+from tools.sql_validator import validate_query_detailed
 from services.llm.errors import (
     LLMChainExhausted,
     LLMErrorEcho,
@@ -534,6 +550,201 @@ def _log_chat_query(db, company_id: str, question: str, result: dict, duration_m
         }).execute()
     except Exception as exc:  # noqa: BLE001 - telemetry never fails the request
         logger.warning("Failed to log chat query: %s", exc)
+
+
+# ============================================================
+# Data query: the customer's own assistant writes the SQL
+# ============================================================
+#
+# An AI assistant (Claude, ChatGPT) connected through /mcp writes its own SELECT and reads the
+# rows, for answers and charts it draws itself. NO MODEL OF OURS RUNS and no ai_jobs row is
+# created. The statement goes through the insights sandbox exactly as Jigged's own model's do:
+# validate_query_detailed, then execute_sql_query as jigged_ai_readonly with jigged.company_id set
+# per transaction, under MAX_ROWS and STATEMENT_TIMEOUT_MS. So the DATABASE enforces the company,
+# the deleted_at filter and what is readable (the ai_readonly_select policies), not this file.
+#
+# WHAT IS DELIBERATELY NOT HERE, against the two routes above:
+#   * refuse_assistant. Those routes spend AI credits; this one spends none, and an assistant is
+#     who it is for. verify_office_access still refuses an assistant token that did not come
+#     through /mcp (the gateway key) and any operator.
+#   * the ai_insights flag. It switches off Jigged's own chat ("hides the AI area and blocks the
+#     chat endpoint", lib/featureFlags.ts). The rows behind it are the data every other assistant
+#     read tool returns, none of which follows the flag, and assistants have no per-company switch
+#     (the user's call, 2026-11-09).
+#   * the hourly chat cap. It counts ai_jobs, which this never writes. Every call through /mcp is
+#     counted against the per-company limit in lib/mcp/audit.ts before it reaches here.
+#
+# WHO: any office member, as in the app. The ask bar renders for every office user on the
+# dashboard, with no admin gate; operators never reach it.
+
+# WHO DID THE WORK IS NOT QUERYABLE FROM HERE. The sandbox can read job_operations.completed_by,
+# inventory_transactions.operator_id and the other *_by columns (user ids), and
+# `GROUP BY completed_by` is a per-person pace table: what the surveillance guardrail forbids
+# (docs/modules/operator-view.md). Every MCP tool's declared output is checked for these names by
+# __tests__/lib/mcp/catalogue.test.ts; a query's columns are decided at run time, so the same rule
+# is applied here, BY NAME SHAPE rather than as a list of columns, so a new *_by column is covered
+# the day it is added. The durable fix is a column REVOKE from jigged_ai_readonly (a migration),
+# which would cover Jigged's own chat too.
+_PERSON_COLUMN = r"\w+_by|\w+_by_name|operator_id|user_id|user_name|author\w*"
+_NAMES_A_PERSON_COLUMN = re.compile(rf"\b({_PERSON_COLUMN})\b", re.IGNORECASE)
+_IS_A_PERSON_COLUMN = re.compile(rf"(?:{_PERSON_COLUMN})", re.IGNORECASE)
+
+PERSON_COLUMN_DETAIL = (
+    "Jigged doesn't give assistants who did a piece of work, so {column} can't be queried. "
+    "Ask about the work itself: its status, quantities and dates."
+)
+
+# What the endpoint holds a statement to, said once and served with the schema so the two cannot
+# disagree. Every line is enforced above or in the sandbox; none is advice.
+QUERY_RULES = [
+    "One SELECT or WITH statement, PostgreSQL. Anything that changes data is refused.",
+    "Scope every company table with company_id = $1; Jigged binds the id, and a query without $1 is refused.",
+    "$2 is today's date. Pass `today` (the shop's local date) when the query uses it, and write "
+    "$2::date where nothing else fixes its type. CURRENT_DATE, now() and the other clock functions are refused.",
+    "Archived records are invisible: the connection filters deleted_at itself.",
+    f"At most {sql_executor.MAX_ROWS} rows come back; aggregate or filter for more.",
+    f"A query is stopped after {sql_executor.STATEMENT_TIMEOUT_MS // 1000} seconds.",
+    "Columns that record who did a piece of work (completed_by, operator_id and other *_by "
+    "columns) can't be queried.",
+]
+
+
+def _person_columns_in(value: Any, found: set[str]) -> set[str]:
+    """Every key anywhere in a result row that names a person: a `SELECT *`, or `jo.*`, or a
+    json column carrying one. The SQL-text check below cannot see those."""
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            if _IS_A_PERSON_COLUMN.fullmatch(str(key)):
+                found.add(str(key))
+            _person_columns_in(inner, found)
+    elif isinstance(value, list):
+        for inner in value:
+            _person_columns_in(inner, found)
+    return found
+
+
+def _query_today(sql: str, claimed: date | None) -> date | None:
+    """$2 for this statement, or a 400 that says why there is none.
+
+    Bound only when the statement uses it -- the executor's own test, so the two cannot disagree.
+    NEVER the server's date by default: the database is UTC, which is already tomorrow for the
+    last hours of a working day in the Americas, and that is the bug `today` exists to remove
+    (see _client_today). A plausibility window of one day either side, as for the chat.
+    """
+    # Private to the executor, read rather than copied: this is ITS decision whether to bind $2.
+    if not sql_executor._USES_TODAY_PARAM.search(sql):
+        return None
+    if claimed is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This query uses $2, today's date. Send `today` as the shop's local date (YYYY-MM-DD).",
+        )
+    if abs((claimed - datetime.now(timezone.utc).date()).days) > _TODAY_SKEW_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"`today` is {claimed.isoformat()}, more than a day from the actual date. "
+            "Send the shop's local date as it is now.",
+        )
+    return claimed
+
+
+def _query_failure(result: dict) -> HTTPException:
+    """The executor's error, as a sentence for the caller.
+
+    The executor phrases its errors as instructions to Jigged's own model ("Rewrite the query
+    ... Never describe this error to the user"); this caller is another model, writing for a
+    person, so the instruction is cut and the cause kept. The prefixes and the instruction are
+    the executor's own constants, so a rewording there fails test_insights_query_route rather
+    than leaking the instruction through.
+    """
+    error = str(result.get("error") or "")
+    # Not `kind`: test_error_kinds_match_the_check reads every `kind = …` in this file as a
+    # value written to ai_jobs.error_kind. This one is only read.
+    failure_kind = result.get("error_kind")
+    if failure_kind == sql_executor.NOT_PERMITTED_KIND:
+        refused = error.removeprefix("NOT_PERMITTED: ").split(". This object is unavailable", 1)[0]
+        return HTTPException(
+            status_code=400,
+            detail=f"The query names {refused}, which doesn't exist or can't be read from Jigged's "
+            "shop data. The data schema lists what can.",
+        )
+    if failure_kind == sql_executor.SQL_ERROR_KIND:
+        cause = (
+            error.removeprefix("SQL_ERROR: ")
+            .removesuffix(sql_executor._REWRITE_INSTRUCTION)
+            .strip()
+            .rstrip(".")
+        )
+        return HTTPException(status_code=400, detail=f"The query failed: {cause}.")
+    # Neither kind is the caller's to fix: no sandbox connection is configured here
+    # (AI_READONLY_DATABASE_URL), or the pool could not be built. A 5xx, so Sentry hears of it.
+    logger.error("data query could not run: %s", error)
+    return HTTPException(
+        status_code=503, detail="Shop data queries aren't available right now. Try again in a moment."
+    )
+
+
+@router.post("/{company_id}/query", response_model=DataQueryResult)
+async def query(company_id: str, request: DataQueryRequest, http_request: Request):
+    """Run one caller-written SELECT in the insights sandbox and return its rows.
+
+    In this order: the caller (an office member; an assistant only through /mcp), the
+    validator's refusal as a sentence, the person-column rule, today's date, then the
+    executor. The executor validates again; that is its own guard and costs nothing.
+    """
+    await company_auth.verify_office_access(http_request, company_id)
+
+    sql = request.sql
+    ok, message, _reason = validate_query_detailed(sql)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+
+    named = _NAMES_A_PERSON_COLUMN.search(sql)
+    if named:
+        raise HTTPException(status_code=400, detail=PERSON_COLUMN_DETAIL.format(column=named.group(1)))
+
+    today = _query_today(sql, request.today)
+    result = await sql_executor.execute_sql_query(company_id=company_id, sql=sql, today=today)
+    if "error" in result:
+        raise _query_failure(result)
+
+    columns: list[str] = list(result["columns"])
+    rows: list[dict[str, Any]] = list(result["rows"])
+    person = sorted(
+        {c for c in columns if _IS_A_PERSON_COLUMN.fullmatch(c)} | _person_columns_in(rows, set())
+    )
+    if person:
+        raise HTTPException(status_code=400, detail=PERSON_COLUMN_DETAIL.format(column=", ".join(person)))
+
+    row_count = int(result["row_count"])
+    return DataQueryResult(
+        columns=columns,
+        rows=rows,
+        row_count=row_count,
+        row_cap=sql_executor.MAX_ROWS,
+        # The executor appends LIMIT MAX_ROWS (or slices to it), so a full page is the one
+        # ambiguous case: exactly MAX_ROWS matched, or more did. Said as "may match more".
+        capped=row_count >= sql_executor.MAX_ROWS,
+    )
+
+
+@router.get("/{company_id}/schema", response_model=DataSchema)
+async def data_schema(company_id: str, http_request: Request):
+    """What Jigged's own model writes its SQL against, for a caller writing its own.
+
+    SCHEMA_CONTEXT and semantics.md VERBATIM, from the objects the chat's prompt is built from,
+    so there is no second copy to drift. Both are written for the sandbox this route's sibling
+    runs in: "do not filter deleted_at" and "$2 is today" hold there exactly as for the chat.
+    Company-scoped only for the caller check; the text is the same for every company.
+    """
+    await company_auth.verify_office_access(http_request, company_id)
+    return DataSchema(
+        schema_context=SCHEMA_CONTEXT.strip(),
+        semantics=load_semantics(),
+        query_rules=QUERY_RULES,
+        row_cap=sql_executor.MAX_ROWS,
+        timeout_seconds=sql_executor.STATEMENT_TIMEOUT_MS / 1000,
+    )
 
 
 # ---- presentation helpers -----------------------------------------------------

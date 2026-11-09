@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { RefusalError, type ToolEnv } from '@/lib/mcp/defineTool';
+import { RefusalError, UpstreamError, type ToolEnv } from '@/lib/mcp/defineTool';
 import { MCP_GATEWAY_HEADER } from '@/lib/mcp/requestClient';
 
 /**
@@ -69,8 +69,11 @@ export async function callBackend<S extends z.ZodType>(
   if (response.ok) return schema.parse(body);
 
   // 4xx: the backend's sentence for the person (no access, billing, a bad value, QuickBooks not
-  // connected). 5xx: a failure of ours, reported by the wrapper with its generic sentence.
+  // connected). 500: a failure of ours, reported by the wrapper with its generic sentence.
   const detail = detailOf(body);
   if (response.status < 500 && detail) throw new RefusalError(detail);
+  // 502/503/504 carry the backend's sentence about something else being down (QuickBooks
+  // unreachable, the query sandbox unavailable): worth telling the person, still reported.
+  if (response.status >= 502 && response.status <= 504 && detail) throw new UpstreamError(detail);
   throw new Error(`backend ${path} answered ${response.status}${detail ? `: ${detail}` : ''}`);
 }

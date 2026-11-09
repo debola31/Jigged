@@ -37,6 +37,7 @@ from models.vendors_import_models import (
     VendorImportError,
     VENDOR_CONTACT_ROLE_VALUES,
 )
+from models.import_models import describe_skipped_rows
 from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
@@ -283,11 +284,18 @@ async def execute_import(
     Each row writes one vendors row (with merge handling); rows that have any
     primary_contact_* fields populated also write one vendor_contacts row
     with is_primary=true, role defaulting to 'sales' when not specified.
+
+    With dry_run, everything up to the first write runs and the counts come back as they would
+    from a real run; nothing is written.
     """
     # Everything below writes with the service-role key, which bypasses RLS and the billing
     # write-gate, so who may write (an office member of THIS company, while it is entitled)
     # is decided here or nowhere. company_id comes from the body, never trusted on its own.
-    await company_auth.verify_office_write_access(http_request, request.company_id)
+    # A dry run writes nothing, so it needs the office member and not the entitlement.
+    if request.dry_run:
+        await company_auth.verify_office_access(http_request, request.company_id)
+    else:
+        await company_auth.verify_office_write_access(http_request, request.company_id)
 
     try:
         validate_response = await validate_import(
@@ -445,6 +453,28 @@ async def execute_import(
             1 for r in rows_to_write if r["name"].lower() not in existing_vendor_names
         )
         updated_count = len(rows_to_write) - imported_count
+        skipped_rows = describe_skipped_rows(
+            validate_response.validation_errors, validate_response.conflicts, skip_row_numbers
+        )
+
+        if request.dry_run:
+            # The contacts a real run inserts: one per pending contact whose vendor it writes
+            # (the upsert returns exactly the names in rows_to_write).
+            written_names = {r["name"].lower() for r in rows_to_write}
+            return VendorExecuteResponse(
+                success=True,
+                dry_run=True,
+                imported_count=imported_count,
+                updated_count=updated_count,
+                merged_count=merged,
+                contacts_imported_count=sum(
+                    1 for name, _ in pending_contacts if name.lower() in written_names
+                ),
+                skipped_count=skipped,
+                errors=errors,
+                skipped_rows=skipped_rows,
+            )
+
         # name → vendor.id, used to attach pending_contacts (new vendors only) after the write.
         name_to_vendor_id: dict[str, str] = {}
 
@@ -543,6 +573,7 @@ async def execute_import(
             contacts_imported_count=contacts_imported,
             skipped_count=skipped,
             errors=errors,
+            skipped_rows=skipped_rows,
         )
 
     except HTTPException:

@@ -50,6 +50,12 @@ def _route_env(monkeypatch):
     monkeypatch.setenv("QUICK_BOOKS_CLIENT_SECRET", "secret_test")
     monkeypatch.setenv("QUICKBOOKS_REDIRECT_URI", "http://localhost:8000/api/quickbooks/callback")
     monkeypatch.setenv("QUICKBOOKS_STATE_SECRET", "test-state-secret")
+    # The test company has no subscription row, so the billing gate on the invoice push would
+    # refuse every test here. These tests are about invoicing; the gate has its own test below
+    # (test_a_lapsed_company_cannot_push_an_invoice), and its rule has test_billing_enforcement.
+    import routes.company_auth as company_auth
+
+    monkeypatch.setattr(company_auth, "assert_company_can_write", lambda company_id: None)
 
 
 def _now_iso(**delta) -> str:
@@ -260,6 +266,44 @@ async def test_invoice_404_for_missing_job(supabase_admin, seeded_user_a):
             },
         )
         assert resp.status_code == 404
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
+async def test_a_lapsed_company_cannot_push_an_invoice(supabase_admin, seeded_user_a, monkeypatch):
+    """The push writes invoice records with the service role, past the billing RLS, so the route
+    must ask company_can_write itself, and before QuickBooks hears anything."""
+    import routes.company_auth as company_auth
+    from fastapi import HTTPException
+
+    cid = seeded_user_a["company_id"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_quote(supabase_admin, cid, converted=True)
+    asked: list[str] = []
+
+    def _lapsed(company_id: str) -> None:
+        asked.append(company_id)
+        raise HTTPException(status_code=403, detail=company_auth.BILLING_BLOCKED_DETAIL)
+
+    def _never(*_a, **_k):
+        raise AssertionError("QuickBooks was called for a lapsed company")
+
+    monkeypatch.setattr(company_auth, "assert_company_can_write", _lapsed)
+    monkeypatch.setattr(qbservice, "create_invoice", _never)
+    try:
+        resp = await _post(
+            seeded_user_a["access_token"],
+            f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice",
+            {
+                "customer": {"action": "create"},
+                "request_id": str(uuid4()),
+                "lines": [{"job_part_id": seed["job_part_id"], "quantity": 1}],
+            },
+        )
+        assert resp.status_code == 403
+        assert resp.json()["detail"] == company_auth.BILLING_BLOCKED_DETAIL
+        assert asked == [cid]
     finally:
         _cleanup(supabase_admin, cid)
 

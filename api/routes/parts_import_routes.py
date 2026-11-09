@@ -48,6 +48,7 @@ from models.parts_import_models import (
     PartImportError,
     parse_bool,
 )
+from models.import_models import describe_skipped_rows
 from services.uom_normalizer import (
     normalize_uom_alias,
     resolve_units_for_rows,
@@ -176,6 +177,125 @@ def _reject_customer_fields(request) -> None:
 
 
 
+
+
+def _plan_opening_balances(
+    supabase: Client,
+    company_id: str,
+    staged: list[tuple[str, Optional[str], float, float, str, str]],
+    batch_size: int,
+) -> tuple[list[dict], list[tuple[str, str]], list[dict], list[str]]:
+    """Decide what each imported quantity writes. Reads only; the caller writes.
+
+    `staged` is (part_name, part_id, prior_qty, new_qty, unit, place_name) per row that mapped a
+    quantity. A part_id of None is a part this run has not created yet (a dry run), which holds
+    no stock anywhere.
+
+    Returns (balance_rows, zeroed, ledger_rows, skipped_names): the part_location_stock rows to
+    upsert, the (part_id, location_id) balances to delete, the inventory_transactions rows that
+    explain them, and the parts whose quantity is not written at all.
+    """
+    # Resolve the named places to ids, in one read.
+    #
+    # LEAVES only: since 20260806160053 a container holds no stock of its own, so
+    # resolving "Cabinet 3" would stage a row the database refuses. Matched
+    # case-insensitively on the leaf name because that is what a shop types into a
+    # spreadsheet, and ambiguity is REFUSED rather than guessed -- `Bin 1` under four
+    # different shelves is four answers, and picking one silently files a shop's stock
+    # somewhere they will not find it.
+    wanted = {place.lower() for _, _, _, _, _, place in staged if place}
+    by_name: dict[str, list[str]] = {}
+    if wanted:
+        res = (
+            supabase.table("inventory_locations")
+            .select("id, name, parent_id")
+            .eq("company_id", company_id)
+            .execute()
+        )
+        rows = res.data or []
+        parents = {r["parent_id"] for r in rows if r["parent_id"]}
+        for r in rows:
+            key = (r["name"] or "").strip().lower()
+            if key in wanted and r["id"] not in parents:
+                by_name.setdefault(key, []).append(r["id"])
+
+    # Where each part already holds stock, so a CSV cannot silently double a total.
+    part_ids = [part_id for _, part_id, _, _, _, _ in staged if part_id]
+    held_at: dict[str, set[str]] = {}
+    for batch_start in range(0, len(part_ids), batch_size):
+        res = (
+            supabase.table("part_location_stock")
+            .select("part_id, location_id")
+            .in_("part_id", part_ids[batch_start : batch_start + batch_size])
+            .gt("quantity", 0)
+            .execute()
+        )
+        for r in res.data or []:
+            held_at.setdefault(r["part_id"], set()).add(r["location_id"])
+
+    balance_rows: list[dict] = []
+    zeroed: list[tuple[str, str]] = []
+    ledger_rows: list[dict] = []
+    skipped_names: list[str] = []
+    for name, part_id, prior_qty, new_qty, unit, place in staged:
+        matches = by_name.get(place.lower(), []) if place else []
+        if len(matches) != 1:
+            # No column, an unknown place, or a name that is not unique. All three
+            # mean the same thing: this row has not said WHERE the stock is, and
+            # since 20260906182638 there is nowhere to put stock that has no place.
+            # Reported rather than dropped, so a shop is told which rows need a
+            # location instead of finding the quantities missing later.
+            skipped_names.append(name)
+            continue
+        location_id = matches[0]
+
+        # Already somewhere ELSE. "240 on hand" from a spreadsheet cannot say which of
+        # two shelves to correct, and writing it at the named one would leave the
+        # other standing and inflate the total. A row naming the shelf the stock is
+        # already on is unambiguous and goes through.
+        if held_at.get(part_id, set()) - {location_id}:
+            skipped_names.append(name)
+            continue
+
+        # Unchanged numbers need no write and no ledger row -- re-importing the same
+        # file twice should be a no-op, not a wall of zero-delta "adjustments".
+        if prior_qty == new_qty:
+            continue
+        # A zero opening balance is a DELETE, not an upsert: `part_location_stock`
+        # CHECKs `quantity > 0` since 20260802144310, so writing a 0 raises.
+        if new_qty == 0:
+            zeroed.append((part_id, location_id))
+        else:
+            balance_rows.append(
+                {
+                    "company_id": company_id,
+                    "part_id": part_id,
+                    "location_id": location_id,
+                    "quantity": new_qty,
+                }
+            )
+        # Shape matches the location RPCs so there is ONE adjustment convention per
+        # table: quantity is abs(delta) in the primary unit (the
+        # inventory_transactions_quantity_positive CHECK makes a signed delta
+        # unstorable), and direction lives in the notes text.
+        delta = abs(new_qty - prior_qty)
+        ledger_rows.append(
+            {
+                "company_id": company_id,
+                "part_id": part_id,
+                "item_name": name,
+                "type": "adjustment",
+                "quantity": delta,
+                "unit": unit,
+                "converted_quantity": delta,
+                "location_id": location_id,
+                "notes": (
+                    f"Opening balance from import \u2014 set from {prior_qty} "
+                    f"to {new_qty} {unit}"
+                ),
+            }
+        )
+    return balance_rows, zeroed, ledger_rows, skipped_names
 
 
 # No longer an HTTP route. The per-entity import wizards that called /validate are gone;
@@ -482,11 +602,18 @@ async def execute_import(
 
     Customer fields on the request are rejected with 400 — parts no longer
     link to customers at the data layer.
+
+    With dry_run, everything up to the first write runs and the counts come back as they would
+    from a real run, including which quantities would not be written; nothing is written.
     """
     # Everything below writes with the service-role key, which bypasses RLS and the billing
     # write-gate, so who may write (an office member of THIS company, while it is entitled)
     # is decided here or nowhere. company_id comes from the body, never trusted on its own.
-    await company_auth.verify_office_write_access(http_request, request.company_id)
+    # A dry run writes nothing, so it needs the office member and not the entitlement.
+    if request.dry_run:
+        await company_auth.verify_office_access(http_request, request.company_id)
+    else:
+        await company_auth.verify_office_write_access(http_request, request.company_id)
 
     _reject_customer_fields(request)
     logger.info(
@@ -761,6 +888,33 @@ async def execute_import(
             1 for r in rows_to_upsert if r["part_name"].lower() not in existing_by_name
         )
         updated_count = len(rows_to_upsert) - imported_count
+        skipped_rows = describe_skipped_rows(
+            validate_response.validation_errors, validate_response.conflicts, skip_row_numbers
+        )
+
+        if request.dry_run:
+            # Every pending balance belongs to a row in rows_to_upsert, so a real run stages all
+            # of them; an existing part keeps its id, a new one has none yet and holds no stock.
+            _, _, _, quantity_skips = _plan_opening_balances(
+                supabase,
+                request.company_id,
+                [
+                    (name, (existing_by_name.get(name.lower()) or {}).get("id"), prior, new, unit, place)
+                    for name, prior, new, unit, place in pending_balances
+                ],
+                BATCH_SIZE,
+            )
+            return PartExecuteResponse(
+                success=True,
+                dry_run=True,
+                imported_count=imported_count,
+                updated_count=updated_count,
+                skipped_count=skipped,
+                errors=errors,
+                skipped_rows=skipped_rows,
+                quantity_skipped_already_placed=quantity_skips,
+            )
+
         id_by_part_name: dict[str, str] = {}
 
         # Reusing an archived part's name CREATES a new part; it no longer revives the
@@ -826,113 +980,17 @@ async def execute_import(
         # `is_location_tracked` check made, on the condition that actually matters.
         if pending_balances:
             try:
-                staged = [
-                    (name, prior_qty, new_qty, unit, place)
-                    for name, prior_qty, new_qty, unit, place in pending_balances
-                    if name in id_by_part_name
-                ]
-                part_ids = [id_by_part_name[name] for name, _, _, _, _ in staged]
-
-                # Resolve the named places to ids, in one read.
-                #
-                # LEAVES only: since 20260806160053 a container holds no stock of its own, so
-                # resolving "Cabinet 3" would stage a row the database refuses. Matched
-                # case-insensitively on the leaf name because that is what a shop types into a
-                # spreadsheet, and ambiguity is REFUSED rather than guessed -- `Bin 1` under four
-                # different shelves is four answers, and picking one silently files a shop's stock
-                # somewhere they will not find it.
-                wanted = {place.lower() for _, _, _, _, place in staged if place}
-                by_name: dict[str, list[str]] = {}
-                if wanted:
-                    res = (
-                        supabase.table("inventory_locations")
-                        .select("id, name, parent_id")
-                        .eq("company_id", request.company_id)
-                        .execute()
-                    )
-                    rows = res.data or []
-                    parents = {r["parent_id"] for r in rows if r["parent_id"]}
-                    for r in rows:
-                        key = (r["name"] or "").strip().lower()
-                        if key in wanted and r["id"] not in parents:
-                            by_name.setdefault(key, []).append(r["id"])
-
-                # Where each part already holds stock, so a CSV cannot silently double a total.
-                held_at: dict[str, set[str]] = {}
-                for batch_start in range(0, len(part_ids), BATCH_SIZE):
-                    res = (
-                        supabase.table("part_location_stock")
-                        .select("part_id, location_id")
-                        .in_("part_id", part_ids[batch_start : batch_start + BATCH_SIZE])
-                        .gt("quantity", 0)
-                        .execute()
-                    )
-                    for r in res.data or []:
-                        held_at.setdefault(r["part_id"], set()).add(r["location_id"])
-
-                balance_rows: list[dict] = []
-                zeroed: list[tuple[str, str]] = []
-                ledger_rows: list[dict] = []
-                for name, prior_qty, new_qty, unit, place in staged:
-                    part_id = id_by_part_name[name]
-
-                    matches = by_name.get(place.lower(), []) if place else []
-                    if len(matches) != 1:
-                        # No column, an unknown place, or a name that is not unique. All three
-                        # mean the same thing: this row has not said WHERE the stock is, and
-                        # since 20260906182638 there is nowhere to put stock that has no place.
-                        # Reported rather than dropped, so a shop is told which rows need a
-                        # location instead of finding the quantities missing later.
-                        already_placed_skips.append(name)
-                        continue
-                    location_id = matches[0]
-
-                    # Already somewhere ELSE. "240 on hand" from a spreadsheet cannot say which of
-                    # two shelves to correct, and writing it at the named one would leave the
-                    # other standing and inflate the total. A row naming the shelf the stock is
-                    # already on is unambiguous and goes through.
-                    if held_at.get(part_id, set()) - {location_id}:
-                        already_placed_skips.append(name)
-                        continue
-
-                    # Unchanged numbers need no write and no ledger row -- re-importing the same
-                    # file twice should be a no-op, not a wall of zero-delta "adjustments".
-                    if prior_qty == new_qty:
-                        continue
-                    # A zero opening balance is a DELETE, not an upsert: `part_location_stock`
-                    # CHECKs `quantity > 0` since 20260802144310, so writing a 0 raises.
-                    if new_qty == 0:
-                        zeroed.append((part_id, location_id))
-                    else:
-                        balance_rows.append(
-                            {
-                                "company_id": request.company_id,
-                                "part_id": part_id,
-                                "location_id": location_id,
-                                "quantity": new_qty,
-                            }
-                        )
-                    # Shape matches the location RPCs so there is ONE adjustment convention per
-                    # table: quantity is abs(delta) in the primary unit (the
-                    # inventory_transactions_quantity_positive CHECK makes a signed delta
-                    # unstorable), and direction lives in the notes text.
-                    delta = abs(new_qty - prior_qty)
-                    ledger_rows.append(
-                        {
-                            "company_id": request.company_id,
-                            "part_id": part_id,
-                            "item_name": name,
-                            "type": "adjustment",
-                            "quantity": delta,
-                            "unit": unit,
-                            "converted_quantity": delta,
-                            "location_id": location_id,
-                            "notes": (
-                                f"Opening balance from import \u2014 set from {prior_qty} "
-                                f"to {new_qty} {unit}"
-                            ),
-                        }
-                    )
+                balance_rows, zeroed, ledger_rows, quantity_skips = _plan_opening_balances(
+                    supabase,
+                    request.company_id,
+                    [
+                        (name, id_by_part_name[name], prior_qty, new_qty, unit, place)
+                        for name, prior_qty, new_qty, unit, place in pending_balances
+                        if name in id_by_part_name
+                    ],
+                    BATCH_SIZE,
+                )
+                already_placed_skips.extend(quantity_skips)
 
                 for batch_start in range(0, len(balance_rows), BATCH_SIZE):
                     (
@@ -1141,6 +1199,7 @@ async def execute_import(
             updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
+            skipped_rows=skipped_rows,
             quantity_skipped_already_placed=already_placed_skips,
         )
 

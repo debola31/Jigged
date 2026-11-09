@@ -32,7 +32,7 @@ import { getShipmentsForJob, listShipmentsForCompany } from '@/utils/shipmentsAc
  * job is archived, the way the dashboard and the outside-shipments register do.
  */
 
-const SHIPPING_METHODS = [
+export const SHIPPING_METHODS = [
   'customer_pickup',
   'personal_delivery',
   'shipment',
@@ -40,7 +40,7 @@ const SHIPPING_METHODS = [
   'restock',
 ] as const satisfies readonly ShippingMethod[];
 
-const FREIGHT_TERMS = ['prepaid', 'collect', 'third_party', 'customer_arranged'] as const satisfies readonly FreightTerms[];
+export const FREIGHT_TERMS = ['prepaid', 'collect', 'third_party', 'customer_arranged'] as const satisfies readonly FreightTerms[];
 
 const jobFilter = {
   job_id: z.guid().optional().describe('Only this job, by id.'),
@@ -125,7 +125,7 @@ async function hydrateShipments(rows: Shipment[]): Promise<{
   return { jobNumbers, lines };
 }
 
-const shipmentOutput = z.object({
+export const shipmentOutput = z.object({
   shipment_id: z.string(),
   packing_slip_number: z.string(),
   job_id: z.string(),
@@ -224,7 +224,7 @@ export const listShipments = defineCompanyTool({
 
 const OUTSIDE_STATUSES = ['open', 'received', 'closed'] as const;
 
-const outsideShipmentOutput = z.object({
+export const outsideShipmentOutput = z.object({
   outside_shipment_id: z.string(),
   slip_number: z.string().describe('The vendor packing slip that travelled with the parts.'),
   vendor_id: z.string(),
@@ -251,7 +251,7 @@ const outsideShipmentOutput = z.object({
   url: urlOutput.describe('The job\'s page in Jigged.'),
 });
 
-function outsideStatus(s: OutsideShipmentWithRelations): (typeof OUTSIDE_STATUSES)[number] {
+export function outsideStatus(s: OutsideShipmentWithRelations): (typeof OUTSIDE_STATUSES)[number] {
   if (s.closed_at) return 'closed';
   return outstandingOn(s) > 0 ? 'open' : 'received';
 }

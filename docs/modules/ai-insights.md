@@ -794,8 +794,25 @@ doc separately said in another section.)*
 
 ## Interfaces
 
-`POST /api/insights/{company_id}/chat` is the **only** FastAPI insights route. It takes
-`{question}` and returns `{job_id, status, executor}`; the answer arrives on the `ai_jobs` row.
+`POST /api/insights/{company_id}/chat` takes `{question}` and returns `{job_id, status, executor}`;
+the answer arrives on the `ai_jobs` row. `/report` is the same door for a one-page summary. Those
+two are the only routes that run a model.
+
+**The sandbox without the model (2026-11-09).** `POST /{company_id}/query` runs one SELECT the
+*caller* wrote — a customer's own assistant, through the MCP tool `query_shop_data`
+([`lib/mcp/tools/query.ts`](../../lib/mcp/tools/query.ts)) — through the same validator and
+executor, so the policies above decide what it sees; `GET /{company_id}/schema` serves
+`SCHEMA_CONTEXT` and `semantics.md` verbatim for it to write against. No model, no `ai_jobs` row,
+so neither `refuse_assistant`, the `ai_insights` flag nor the hourly cap applies; the caller is
+`verify_office_access` (an assistant only with the gateway key, never an operator), and the
+per-company limit is the MCP server's. `$2` is the caller's `today`, refused rather than defaulted
+to UTC. Two rules are the route's own: the executor's instructions to our model are cut from its
+errors, and **a `*_by` / `operator_id` column is refused** in the statement and in the result —
+the sandbox can read `job_operations.completed_by` and `inventory_transactions.operator_id`, and
+`GROUP BY completed_by` is a per-person pace table
+([guardrail](operator-view.md#surveillance-guardrail-non-negotiable)). That rule is by name, so a
+`row_to_json` of a whole row gets past it; the durable fix is a column `REVOKE` from
+`jigged_ai_readonly`, which would cover the chat too.
 
 **Operators never see the ask bar**, because `InsightsChat` renders only from
 `app/dashboard/[companyId]/page.tsx` and [`homePathForRole`](../../utils/companyAccess.ts) sends

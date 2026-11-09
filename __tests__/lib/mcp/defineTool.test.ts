@@ -5,6 +5,7 @@ import {
   BILLING_BLOCKED_MESSAGE,
   GATEWAY_REFUSED_MESSAGE,
   UNEXPECTED_ERROR_MESSAGE,
+  SAVED_BUT_UNREADABLE_MESSAGE,
   defineCompanyTool,
   registerCompanyTool,
 } from '@/lib/mcp/defineTool';
@@ -223,10 +224,18 @@ describe('registerCompanyTool', () => {
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
   });
 
-  it("passes the access layer's own sentence through, and reports it", async () => {
+  it("passes the access layer's own rule through as a refusal, unreported", async () => {
     run.mockRejectedValue(new Error('Quantity must be greater than zero'));
     const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
     expect(res).toEqual({ content: [{ type: 'text', text: 'Quantity must be greater than zero' }], isError: true });
+    expect(mockCapture).not.toHaveBeenCalled();
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'refused' }));
+  });
+
+  it("passes the access layer's report of its own failure through, and reports it", async () => {
+    run.mockRejectedValue(new Error('Failed to load job parts.'));
+    const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
+    expect(res).toEqual({ content: [{ type: 'text', text: 'Failed to load job parts.' }], isError: true });
     expect(mockCapture).toHaveBeenCalledTimes(1);
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
   });
@@ -246,6 +255,14 @@ describe('registerCompanyTool', () => {
     run.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'id')"));
     const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
     expect(res).toEqual({ content: [{ type: 'text', text: UNEXPECTED_ERROR_MESSAGE }], isError: true });
+  });
+
+  it("says a write was saved when its reply doesn't fit, so the assistant doesn't repeat it", async () => {
+    run.mockResolvedValue({ ok: true, data: { archived: 'yes' } });
+    const res = await register(writeTool).cb({ widget_id: 'w-1', company_id: COMPANY_ID }, ctx());
+    expect(res).toEqual({ content: [{ type: 'text', text: SAVED_BUT_UNREADABLE_MESSAGE }], isError: true });
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error', isWrite: true }));
   });
 
   it('never runs without a caller', async () => {

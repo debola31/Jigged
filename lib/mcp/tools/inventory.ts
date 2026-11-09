@@ -40,18 +40,18 @@ import { getPartTransactions } from '@/utils/partsAccess';
  * those is dropped by building each output object field by field. That holds for admins too.
  */
 
-const PATH_SEPARATOR = ' › ';
+export const PATH_SEPARATOR = ' › ';
 
 /** PostgREST's `max_rows`: one read returns at most this many rows. */
 const READ_PAGE = 1000;
 
-const ADMIN_ONLY = 'Only for company admins; null otherwise.';
+export const ADMIN_ONLY = 'Only for company admins; null otherwise.';
 
 // ---------------------------------------------------------------------------------------------
 // Location tree
 // ---------------------------------------------------------------------------------------------
 
-interface LocationIndex {
+export interface LocationIndex {
   byId: Map<string, InventoryLocation>;
   childrenOf: Map<string, InventoryLocation[]>;
   /** "Rack A › Shelf 2 › Bin 3", outermost first. */
@@ -62,7 +62,7 @@ interface LocationIndex {
   rootOf: (id: string) => string;
 }
 
-function indexLocations(locations: InventoryLocation[]): LocationIndex {
+export function indexLocations(locations: InventoryLocation[]): LocationIndex {
   const byId = new Map(locations.map((l) => [l.id, l] as const));
   const childrenOf = new Map<string, InventoryLocation[]>();
   for (const loc of locations) {
@@ -133,7 +133,7 @@ function binsUnder(id: string, places: LocationIndex): string[] {
   return bins;
 }
 
-function locationLink(env: CompanyToolEnv, places: LocationIndex, id: string): string | null {
+export function locationLink(env: CompanyToolEnv, places: LocationIndex, id: string): string | null {
   return companyLink(env, `/inventory/locations?view=places&unit=${places.rootOf(id)}`);
 }
 
@@ -155,13 +155,13 @@ interface Balance {
   heatNumber: string | null;
 }
 
-const lotOutput = z.object({
+export const lotOutput = z.object({
   lot_code: z.string().nullable(),
   heat_number: z.string().nullable(),
   quantity: z.number().describe('How much of this lot is here, in the part\'s unit.'),
 });
 
-const LOTS_HELP = 'The lots (heats) held here, most first, for lot-tracked material; empty otherwise.';
+export const LOTS_HELP = 'The lots (heats) held here, most first, for lot-tracked material; empty otherwise.';
 
 type LotOut = z.infer<typeof lotOutput>;
 
@@ -199,7 +199,7 @@ function placesOf(balances: Balance[], places: LocationIndex): PlaceOut[] {
 }
 
 /** Summed money, rounded to the cent; null when none of it has a cost (never a zero). */
-function sumMoney(values: Array<number | null>): number | null {
+export function sumMoney(values: Array<number | null>): number | null {
   let total = 0;
   let any = false;
   for (const v of values) {
@@ -419,7 +419,7 @@ const NAME_THE_LOCATION = 'Give a location_id or a location name or path.';
 const AMBIGUOUS_LISTED = 10;
 
 /** The location a tool names by id, name or path, or a sentence saying why there isn't one. */
-function findLocation(
+export function findLocation(
   args: { location_id?: string; location?: string },
   places: LocationIndex,
   env: CompanyToolEnv,
@@ -474,12 +474,12 @@ async function readContents(bins: string[]): Promise<{ rows: LocationContent[]; 
   return { rows, truncated: false };
 }
 
-function balanceKey(partId: string, locationId: string, lotId: string | null): string {
+export function balanceKey(partId: string, locationId: string, lotId: string | null): string {
   return `${partId}|${locationId}|${lotId ?? ''}`;
 }
 
 /** What each balance at these bins cost, keyed by balanceKey. Admins only; the caller checks. */
-async function readBalanceValues(companyId: string, bins: string[]): Promise<Map<string, number | null>> {
+export async function readBalanceValues(companyId: string, bins: string[]): Promise<Map<string, number | null>> {
   const out = new Map<string, number | null>();
   for (const ids of chunks(bins, ID_CHUNK)) {
     for (let offset = 0; ; offset += READ_PAGE) {
@@ -626,7 +626,7 @@ export const getLocationContents = defineCompanyTool({
 
 const NAME_THE_PART = 'Give a part_id or a part_name.';
 
-interface FoundPart {
+export interface FoundPart {
   id: string;
   part_name: string;
   primary_unit: string | null;
@@ -634,7 +634,7 @@ interface FoundPart {
 }
 
 /** The part a tool names by id or exact part number, in this company, or why there isn't one. */
-async function findPart(
+export async function findPart(
   args: { part_id?: string; part_name?: string },
   env: CompanyToolEnv,
 ): Promise<{ part: FoundPart } | { message: string }> {

@@ -28,6 +28,7 @@ from models.vendor_services_import_models import (
     VendorServiceExecuteResponse,
     VendorServiceImportError,
 )
+from models.import_models import describe_skipped_rows
 from utils.db_pagination import fetch_all_by_company
 
 logger = logging.getLogger(__name__)
@@ -177,11 +178,19 @@ async def execute_import(
     http_request: Request,
     supabase: Client = Depends(get_supabase),
 ):
-    """Execute the vendor services import."""
+    """Execute the vendor services import.
+
+    With dry_run, everything up to the first write runs and the counts come back as they would
+    from a real run; nothing is written.
+    """
     # Everything below writes with the service-role key, which bypasses RLS and the billing
     # write-gate, so who may write (an office member of THIS company, while it is entitled)
     # is decided here or nowhere. company_id comes from the body, never trusted on its own.
-    await company_auth.verify_office_write_access(http_request, request.company_id)
+    # A dry run writes nothing, so it needs the office member and not the entitlement.
+    if request.dry_run:
+        await company_auth.verify_office_access(http_request, request.company_id)
+    else:
+        await company_auth.verify_office_write_access(http_request, request.company_id)
 
     try:
         validate_response = await validate_import(
@@ -276,6 +285,20 @@ async def execute_import(
             if (r["vendor_id"], r["name"].lower()) not in existing_pairs
         )
         updated_count = len(rows_to_write) - imported_count
+        skipped_rows = describe_skipped_rows(
+            validate_response.validation_errors, validate_response.conflicts, skip_row_numbers
+        )
+
+        if request.dry_run:
+            return VendorServiceExecuteResponse(
+                success=True,
+                dry_run=True,
+                imported_count=imported_count,
+                updated_count=updated_count,
+                skipped_count=skipped,
+                errors=errors,
+                skipped_rows=skipped_rows,
+            )
 
         # Re-importing an archived service revives it, matching every other
         # importer: clearing deleted_at on the DO UPDATE un-archives the row
@@ -303,6 +326,7 @@ async def execute_import(
             updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,
+            skipped_rows=skipped_rows,
         )
 
     except HTTPException:

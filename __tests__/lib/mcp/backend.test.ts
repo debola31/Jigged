@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { z } from 'zod';
 
 import { BACKEND_UNREACHABLE_MESSAGE, callBackend } from '@/lib/mcp/backend';
-import { RefusalError, type ToolEnv } from '@/lib/mcp/defineTool';
+import { RefusalError, UpstreamError, type ToolEnv } from '@/lib/mcp/defineTool';
 
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}), registerScopedClientResolver: () => {} }));
 
@@ -71,6 +71,13 @@ describe('callBackend', () => {
     const err = await callBackend(env, '/api/x', ok).catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(RefusalError);
     expect((err as Error).message).toMatch(/^backend \/api\/x answered 500/);
+  });
+
+  it("passes an outage behind the backend through as an upstream error", async () => {
+    fetchMock.mockReturnValue(reply(503, { detail: "QuickBooks isn't answering right now. Try again shortly." }));
+    const err = await callBackend(env, '/api/x', ok).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    expect((err as Error).message).toBe("QuickBooks isn't answering right now. Try again shortly.");
   });
 
   it('says plainly when the backend did not answer in time', async () => {

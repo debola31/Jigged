@@ -164,7 +164,7 @@ const lineOutput = z.object({
   job_number: z.string().nullable().describe('The job this line was converted into, if it was.'),
 });
 
-const quoteDetail = {
+export const quoteDetail = {
   quote_id: z.string(),
   quote_number: z.string(),
   status: z.enum(STATUSES),
@@ -205,7 +205,7 @@ const NAME_THE_QUOTE = 'Give a quote_id or a quote_number.';
  * an archived quote is found too and says so; `Quote` doesn't carry `deleted_at`, hence the
  * lookup reads it alongside the id.
  */
-async function findQuote(
+export async function findQuote(
   args: { quote_id?: string; quote_number?: string },
   env: CompanyToolEnv,
 ): Promise<{ quote: QuoteWithRelations; archived: boolean } | { message: string }> {

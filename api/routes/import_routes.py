@@ -16,6 +16,7 @@ from models.import_models import (
     ExecuteRequest,
     ExecuteResponse,
     CUSTOMER_SCHEMA,
+    describe_skipped_rows,
 )
 from utils.db_pagination import fetch_all_by_company
 
@@ -126,6 +127,7 @@ async def validate_import(
                         row_number=row_number,
                         error_type="missing_name",
                         field="name",
+                        message="Customer name is required",
                     )
                 )
                 validation_error_row_set.add(row_number)
@@ -155,7 +157,7 @@ async def validate_import(
                             csv_name=csv_name,
                             conflict_type="csv_duplicate_name",
                             existing_customer_id="",
-                            existing_value=f"Rows {', '.join(map(str, other_rows))}",
+                            existing_value=f"Duplicate in CSV at rows {', '.join(map(str, other_rows))}",
                         )
                     )
                     conflict_row_set.add(row_number)
@@ -208,11 +210,18 @@ async def execute_import(
 
     If skip_conflicts is True, only imports rows without conflicts.
     Otherwise, fails if any conflicts exist.
+
+    With dry_run, everything up to the first write runs and the counts come back as they would
+    from a real run; nothing is written.
     """
     # Everything below writes with the service-role key, which bypasses RLS and the billing
     # write-gate, so who may write (an office member of THIS company, while it is entitled)
     # is decided here or nowhere. company_id comes from the body, never trusted on its own.
-    await company_auth.verify_office_write_access(http_request, request.company_id)
+    # A dry run writes nothing, so it needs the office member and not the entitlement.
+    if request.dry_run:
+        await company_auth.verify_office_access(http_request, request.company_id)
+    else:
+        await company_auth.verify_office_write_access(http_request, request.company_id)
 
     try:
         # First validate to get conflict info
@@ -349,6 +358,21 @@ async def execute_import(
         # keyed by the customer id read back from the upsert.
         imported_count = sum(1 for p in prepared if p["is_new"])
         updated_count = len(prepared) - imported_count
+        skipped_rows = describe_skipped_rows(
+            validate_response.validation_errors, validate_response.conflicts, skip_row_numbers
+        )
+
+        if request.dry_run:
+            return ExecuteResponse(
+                success=True,
+                dry_run=True,
+                imported_count=imported_count,
+                updated_count=updated_count,
+                skipped_count=skipped,
+                errors=errors,
+                skipped_rows=skipped_rows,
+            )
+
         if prepared:
             try:
                 BATCH_SIZE = 500
@@ -424,6 +448,7 @@ async def execute_import(
             updated_count=updated_count,
             skipped_count=skipped,
             errors=errors,  # Only unexpected DB errors
+            skipped_rows=skipped_rows,
         )
 
     except HTTPException:

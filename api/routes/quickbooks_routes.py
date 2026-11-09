@@ -1174,6 +1174,10 @@ def _job_has_unverified_invoice(db: Client, company_id: str, job_id: str) -> dic
 @router.post("/{company_id}/jobs/{job_id}/invoice")
 async def push_invoice(company_id: str, job_id: str, request: Request, body: CommitBody):
     _, access = await _verify_company_access(request, company_id)
+    # The billing write-gate. This route writes Jigged's invoice records with the service role,
+    # which bypasses the `billing_gate_*` RLS policies, so a lapsed company could otherwise still
+    # invoice (CLAUDE.md, "Billing write-gate"). Checked before QuickBooks is touched.
+    company_auth.assert_company_can_write(company_id)
     db = _service_client()
     provider = accounting.get_provider(db, company_id)
     if provider is None or provider.requires_reconnect:

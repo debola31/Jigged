@@ -107,6 +107,12 @@ const memberFlights = new Map<string, Promise<CurrentMember | null>>();
  * Concurrent callers share one request — see `memberFlights`.
  */
 export function getCurrentMember(companyId: string): Promise<CurrentMember | null> {
+  // ON THE SERVER, NEVER SHARE A FLIGHT. The map is keyed by company because a browser holds one
+  // person. A server holds many: the MCP route answers several people of the same company at
+  // once, each in their own request scope, and a shared flight would hand the second caller the
+  // first one's row, the author of their note or the completer of their step.
+  if (typeof window === 'undefined') return fetchCurrentMember(companyId);
+
   const inFlight = memberFlights.get(companyId);
   if (inFlight) return inFlight;
 

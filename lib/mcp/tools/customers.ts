@@ -113,6 +113,7 @@ const customerDetail = {
   jobs_count: z.number(),
   contacts: z.array(
     z.object({
+      contact_id: z.string().describe('What save_customer_contact takes to change this contact.'),
       name: z.string(),
       role: z.enum(CONTACT_ROLES),
       role_label: z.string().nullable().describe('The role in words, when role is `other`.'),
@@ -122,7 +123,11 @@ const customerDetail = {
       is_billing_default: z.boolean().describe('Invoices go to this person.'),
     }),
   ),
-  addresses: z.array(customerAddressOutput),
+  addresses: z.array(
+    customerAddressOutput.extend({
+      address_id: z.string().describe('What save_customer_address takes to change this address.'),
+    }),
+  ),
   bill_to: addressOutput.nullable().describe('Where new quotes and jobs bill to, or null when that is ambiguous.'),
   ship_to: addressOutput
     .nullable()
@@ -149,7 +154,7 @@ const NAME_THE_CUSTOMER = 'Give a customer_id or a name.';
  * surrounding space (customers_company_name_ci_unique), archived ones included, so a name finds
  * at most one.
  */
-async function findCustomer(
+export async function findCustomer(
   args: { customer_id?: string; name?: string },
   env: CompanyToolEnv,
 ): Promise<{ customer: CustomerWithRelations } | { message: string }> {
@@ -211,6 +216,7 @@ export const getCustomer = defineCompanyTool({
         quotes_count: customer.quotes_count,
         jobs_count: customer.jobs_count,
         contacts: contacts.map((c) => ({
+          contact_id: c.id,
           name: c.name,
           role: c.role,
           role_label: c.role_label,
@@ -220,6 +226,7 @@ export const getCustomer = defineCompanyTool({
           is_billing_default: c.is_billing_default,
         })),
         addresses: addresses.map((a) => ({
+          address_id: a.id,
           address_line1: a.address_line1,
           address_line2: a.address_line2,
           city: a.city,

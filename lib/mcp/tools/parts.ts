@@ -34,8 +34,8 @@ import { getVendor } from '@/utils/vendorsAccess';
  * admin-only. Inventory (on hand, stock value) belongs to the inventory tools, not here.
  */
 
-const SOURCES = ['made', 'bought'] as const satisfies readonly Part['source'][];
-const SOURCE_HELP = '`made` in the shop, or `bought` from a vendor.';
+export const SOURCES = ['made', 'bought'] as const satisfies readonly Part['source'][];
+export const SOURCE_HELP = '`made` in the shop, or `bought` from a vendor.';
 
 const STAGES = [
   'not_started',
@@ -72,7 +72,7 @@ function known<T extends string>(values: readonly T[], value: string, what: stri
   return hit;
 }
 
-const partLink = (env: CompanyToolEnv, partId: string): string | null => companyLink(env, `/parts/${partId}`);
+export const partLink = (env: CompanyToolEnv, partId: string): string | null => companyLink(env, `/parts/${partId}`);
 
 /** id → name for a handful of vendors or customers. A by-id read: archived ones still resolve. */
 async function namesById(table: 'vendors' | 'customers', ids: Array<string | null>): Promise<Map<string, string>> {
@@ -167,7 +167,7 @@ function bestNameMatch(rows: NameMatch[], name: string): NameMatch | null {
 }
 
 /** The part a tool names by id or name, in this company, or a sentence saying it isn't there. */
-async function findPart(
+export async function findPart(
   args: { part_id?: string; part_name?: string },
   env: CompanyToolEnv,
 ): Promise<{ part: Part; archived: boolean } | { message: string }> {
@@ -205,7 +205,7 @@ async function findPart(
 
 // ─── get_part ─────────────────────────────────────────────────────────────────────────────────
 
-const tierOutput = z.object({
+export const tierOutput = z.object({
   quantity: z.number().describe('The quantity break. Its price holds from this quantity up to the next break.'),
   unit_price: z
     .number()
@@ -218,7 +218,7 @@ const tierOutput = z.object({
     .describe('What a bought part costs at this break; null for a made part, whose cost comes from its routing and BOM.'),
 });
 
-const bomLineOutput = z.object({
+export const bomLineOutput = z.object({
   part_id: z.string(),
   part_name: z.string(),
   description: z.string().nullable(),
@@ -231,7 +231,7 @@ const bomLineOutput = z.object({
   url: urlOutput,
 });
 
-const stepOutput = z.object({
+export const stepOutput = z.object({
   sequence: z.number(),
   operation: z.string().describe('The work center or outside service the step runs at.'),
   kind: z.enum(STEP_KINDS),

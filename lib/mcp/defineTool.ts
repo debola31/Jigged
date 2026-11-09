@@ -32,9 +32,10 @@ import { isBillingWriteBlocked, isFriendlyError, toError } from '@/lib/supabaseE
  *
  * Errors come back as a sentence with `isError: true`, never a protocol failure, so the assistant
  * can tell the person what went wrong. The access layer's own sentences ("That part already
- * exists", "Quantity must be greater than zero") pass through as written; a constraint the person
- * can fix is a refusal, anything else also goes to Sentry. Programming errors (TypeError and
- * kin) never show their text: the person gets UNEXPECTED_ERROR_MESSAGE.
+ * exists", "Quantity must be greater than zero") pass through as written, as refusals: the person
+ * can act on them. Its reports of its own failure ("Failed to …") pass through too, but count as
+ * errors and go to Sentry. Programming errors (TypeError and kin) never show their text: the
+ * person gets UNEXPECTED_ERROR_MESSAGE.
  *
  * Annotations are explicit on every tool, `false` included: the ChatGPT directory requires
  * `readOnlyHint`, `destructiveHint` and `openWorldHint` to be set, and Claude prompts before a
@@ -216,8 +217,17 @@ async function finish(frame: CallFrame, outcome: CallOutcome, result: CallToolRe
  */
 export class RefusalError extends Error {}
 
+/**
+ * A service behind the backend is down (QuickBooks, the query sandbox). Its message is for the
+ * person as written, but it is not theirs to fix: logged as `error` and reported.
+ */
+export class UpstreamError extends Error {}
+
 /** Postgres codes a person can act on: a name taken, a row still referenced, a bad value, a trigger's own message. */
 const CORRECTABLE_CODES = new Set(['23505', '23503', '23514', '23502', 'P0001', '22023', '22P02']);
+
+/** How the access layer words its own failures, as opposed to a rule the person broke. */
+const OUR_FAILURE = /^(failed to|could not|couldn't|unable to|something went wrong)\b/i;
 
 /** Errors that mean a bug in our code. Their text is for developers, never for a shop. */
 const PROGRAMMING_ERRORS = [TypeError, ReferenceError, SyntaxError, RangeError];
@@ -232,13 +242,16 @@ function messageFor(err: unknown): { text: string; correctable: boolean } | null
   if (PROGRAMMING_ERRORS.some((kind) => err instanceof kind)) return null;
   const text = err.message.trim();
   if (err instanceof RefusalError) return text ? { text, correctable: true } : null;
+  if (err instanceof UpstreamError) return text ? { text, correctable: false } : null;
   if (isFriendlyError(err)) {
     const code = (err as Error & { code?: unknown }).code;
     return text ? { text, correctable: typeof code === 'string' && CORRECTABLE_CODES.has(code) } : null;
   }
   // A plain Error is copy only when it reads as a sentence: the access layer's own checks do
-  // ("Quantity must be greater than zero"); a transport's do not ("connection reset").
-  return /^[A-Z]/.test(text) && text.includes(' ') ? { text, correctable: false } : null;
+  // ("Quantity must be greater than zero"); a transport's do not ("connection reset"). A
+  // sentence that reports our own failure ("Failed to load job parts.") is still a failure.
+  if (!/^[A-Z]/.test(text) || !text.includes(' ')) return null;
+  return { text, correctable: !OUR_FAILURE.test(text) };
 }
 
 async function failure(frame: CallFrame, err: unknown): Promise<CallToolResult> {
@@ -253,13 +266,28 @@ async function failure(frame: CallFrame, err: unknown): Promise<CallToolResult> 
   return finish(frame, 'error', errorResult(message?.text ?? UNEXPECTED_ERROR_MESSAGE));
 }
 
+export const SAVED_BUT_UNREADABLE_MESSAGE =
+  "That change was saved in Jigged, but the reply describing it couldn't be put together. Check " +
+  'the record in Jigged before trying again, so it is not done twice.';
+
+/**
+ * The SDK checks `structuredContent` against the tool's output schema AFTER the tool has run,
+ * and answers a mismatch with a bare error. For a write that is the worst reply there is: the
+ * change happened, the assistant is told it failed, and it tries again. So the wrapper checks
+ * first, and a write whose result doesn't fit says it was saved.
+ */
 async function settle<T extends Record<string, unknown>>(
   frame: CallFrame,
   result: ToolResult<T>,
+  output: z.ZodObject<z.ZodRawShape>,
 ): Promise<CallToolResult> {
-  return result.ok
-    ? finish(frame, 'ok', successResult(result.data, result.text))
-    : finish(frame, 'refused', errorResult(result.message));
+  if (!result.ok) return finish(frame, 'refused', errorResult(result.message));
+  const checked = output.safeParse(result.data);
+  if (!checked.success) {
+    Sentry.captureException(toError(checked.error), { tags: { mcp_tool: frame.tool, mcp: 'output_schema' } });
+    return finish(frame, 'error', errorResult(frame.isWrite ? SAVED_BUT_UNREADABLE_MESSAGE : UNEXPECTED_ERROR_MESSAGE));
+  }
+  return finish(frame, 'ok', successResult(result.data, result.text));
 }
 
 export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawShape>(
@@ -318,7 +346,7 @@ export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawS
             origin,
             link: (path) => (origin ? `${origin}${path}` : null),
           });
-          return settle(frame, result);
+          return settle(frame, result, z.object(tool.output));
         } catch (err) {
           return failure(frame, err);
         }
@@ -354,7 +382,7 @@ export function registerAccountTool<O extends z.ZodRawShape>(server: McpServer, 
           const limited = await rateLimitRefusal({ companyId: null, userId: caller.userId, isWrite: frame.isWrite });
           if (limited) return finish(frame, 'rate_limited', errorResult(limited));
           const result = await tool.run({ caller, origin, link: (path) => (origin ? `${origin}${path}` : null) });
-          return settle(frame, result);
+          return settle(frame, result, z.object(tool.output));
         } catch (err) {
           return failure(frame, err);
         }

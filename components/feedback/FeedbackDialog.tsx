@@ -16,7 +16,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { useTheme } from '@mui/material/styles';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getSupabase } from '@/lib/supabase';
+import { createFeedback, notifyFeedback } from '@/utils/feedbackAccess';
 import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import { PARTS_SUBROUTES } from '@/lib/partsSubroutes';
 
@@ -131,16 +131,15 @@ export default function FeedbackDialog({ open, onClose, onSuccess, userId }: Fee
     setError(null);
 
     try {
-      const supabase = getSupabase();
-      const { error: insertError } = await supabase.from('feedback').insert({
+      const feedbackId = await createFeedback({
         company_id: companyId,
         user_id: resolvedUserId,
         page_path: pathname,
         page_title: pageTitle,
         feedback_text: feedbackText.trim(),
       });
-
-      if (insertError) throw insertError;
+      // Saved, so the person is told it went; the email reports its own failure to Sentry.
+      await notifyFeedback(feedbackId);
 
       setFeedbackText('');
       onClose();

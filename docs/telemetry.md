@@ -143,6 +143,7 @@ fails, and so does a listed property nothing passes.
 |---|---|---|---|
 | `user signed in` | The login form is submitted successfully | — | [Login.tsx](../components/auth/Login.tsx) |
 | `user signed out` | Supabase emits `SIGNED_OUT` | — | [AuthProvider.tsx](../components/providers/AuthProvider.tsx) |
+| `ai assistant connected` | Someone approves an AI assistant (Claude, ChatGPT, …) on `/oauth/consent` and Supabase returns the redirect back to it. `client_kind` is `claude`, `chatgpt` or `other`, read from the name the assistant registered under, which is a claim and not an identity: it counts connections, it proves nothing | `client_kind` | [OAuthConsent.tsx](../components/auth/OAuthConsent.tsx) |
 | `invitation sent` | An admin submits the invite form and the edge function answers | `role`, `email_sent` | [members/new/page.tsx](../app/dashboard/[companyId]/team/members/new/page.tsx) |
 | `invitation link expired` | An invitee lands on /login because their link no longer verified | `can_self_resend` | [Login.tsx](../components/auth/Login.tsx) |
 | `invitation link resend requested` | An invitee asks for a fresh link from that screen | — | [Login.tsx](../components/auth/Login.tsx) |

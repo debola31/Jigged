@@ -374,13 +374,18 @@ enabled = false
 # domain = "example.clerk.accounts.dev"
 
 # OAuth server configuration
+# Supabase Auth as the OAuth 2.1 authorization server for the Jigged MCP server (app/mcp):
+# Claude and ChatGPT sign a user in here and present the resulting token to /mcp. The consent
+# page is app/oauth/consent (site_url + authorization_url_path). Production is configured in the
+# Supabase dashboard, not from this file.
 [auth.oauth_server]
 # Enable OAuth server functionality
-enabled = false
+enabled = true
 # Path for OAuth consent flow UI
 authorization_url_path = "/oauth/consent"
-# Allow dynamic client registration
-allow_dynamic_registration = false
+# Allow dynamic client registration. Required: neither Claude nor ChatGPT can register any other
+# way against an authorization server without Client ID Metadata Document support.
+allow_dynamic_registration = true
 
 [edge_runtime]
 enabled = true

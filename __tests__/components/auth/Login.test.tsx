@@ -97,6 +97,18 @@ describe('Login', () => {
     expect(getPostLoginRoute).not.toHaveBeenCalled();
   });
 
+  it('returns to the AI-assistant consent page with its authorization_id intact', async () => {
+    // Connecting Claude or ChatGPT while signed out goes through /login. Losing the query here
+    // would strand the assistant's sign-in on a page that cannot tell which request to approve.
+    render(<Login returnTo="/oauth/consent?authorization_id=abc-123" />);
+    await fillAndSubmit();
+
+    await waitFor(() => {
+      expect(routerMocks.push).toHaveBeenCalledWith('/oauth/consent?authorization_id=abc-123');
+    });
+    expect(getPostLoginRoute).not.toHaveBeenCalled();
+  });
+
   it('falls back to getPostLoginRoute when returnTo is an open-redirect attempt', async () => {
     render(<Login returnTo="https://evil.example.com/steal" />);
     await fillAndSubmit();

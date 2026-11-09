@@ -52,7 +52,10 @@ function isValidReturnTo(path: string): boolean {
     // returnTo silently rejected and the operator is dropped in the office — which for
     // a role='operator' user means an immediate AuthGuard bounce back out. It also broke
     // the scanned-traveler-QR path, which deep-links into /operator/{id}/login.
-    const allowedPrefixes = ['/dashboard', '/operator', '/accept-invite'];
+    // `/oauth/consent` is where Supabase Auth sends someone connecting an AI assistant (Claude,
+    // ChatGPT) to Jigged; signed out, they come here first and must land back on it, with its
+    // `authorization_id` query intact, or the assistant's sign-in dead-ends.
+    const allowedPrefixes = ['/dashboard', '/operator', '/accept-invite', '/oauth/consent'];
     return allowedPrefixes.some(p => normalized.pathname.startsWith(p)) && normalized.origin === window.location.origin;
   } catch {
     return false;

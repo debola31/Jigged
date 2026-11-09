@@ -138,8 +138,9 @@ const operationOutput = z.object({
   work_center: z.string().nullable(),
   outside_vendor: z.string().nullable(),
   outside_service: z.string().nullable(),
-  estimated_setup_minutes: z.number(),
-  estimated_run_minutes_per_unit: z.number(),
+  // Nullable in the database (an outside step has no estimate), whatever types/job.ts says.
+  estimated_setup_minutes: z.number().nullable(),
+  estimated_run_minutes_per_unit: z.number().nullable(),
   completed_at: z.string().nullable(),
   sent_at: z.string().nullable(),
   instructions: z.string().nullable(),
@@ -197,7 +198,7 @@ const NAME_THE_JOB = 'Give a job_id or a job_number.';
  * archived job is found too and says so; `JobWithRelations` doesn't carry `deleted_at`, hence the
  * lookup reads it alongside the id. By number, a live job wins over an archived namesake.
  */
-async function findJob(
+export async function findJob(
   args: { job_id?: string; job_number?: string },
   env: CompanyToolEnv,
 ): Promise<{ job: JobWithRelations; archived: boolean } | { message: string }> {

@@ -110,6 +110,7 @@ const vendorDetail = {
   archived: z.boolean().describe('Deleted in Jigged, so it no longer appears in lists.'),
   contacts: z.array(
     z.object({
+      contact_id: z.string().describe('What save_vendor_contact takes to change this contact.'),
       name: z.string(),
       role: z.enum(CONTACT_ROLES),
       role_label: z.string().nullable().describe('The role in words, when role is `other`.'),
@@ -118,7 +119,12 @@ const vendorDetail = {
       is_primary: z.boolean(),
     }),
   ),
-  addresses: z.array(addressOutput.extend({ is_default: z.boolean() })),
+  addresses: z.array(
+    addressOutput.extend({
+      address_id: z.string().describe('What save_vendor_address takes to change this address.'),
+      is_default: z.boolean(),
+    }),
+  ),
   services: z.array(serviceOutput.extend({ description: z.string().nullable() })),
   preferred_parts: z
     .array(z.object({ part_id: z.string(), part_name: z.string(), unit: z.string().nullable(), url: urlOutput }))
@@ -143,7 +149,7 @@ interface FoundVendor {
  * archived ones included), so a name finds at most one. Read here rather than through getVendor,
  * which neither scopes to the company nor carries `deleted_at`, and a vendor row is only this.
  */
-async function findVendor(
+export async function findVendor(
   args: { vendor_id?: string; name?: string },
   env: CompanyToolEnv,
 ): Promise<{ vendor: FoundVendor } | { message: string }> {
@@ -200,6 +206,7 @@ export const getVendor = defineCompanyTool({
         name: vendor.name,
         archived: vendor.deleted_at !== null,
         contacts: contacts.map((c) => ({
+          contact_id: c.id,
           name: c.name,
           role: c.role,
           role_label: c.role_label,
@@ -208,6 +215,7 @@ export const getVendor = defineCompanyTool({
           is_primary: c.is_primary,
         })),
         addresses: addresses.map((a) => ({
+          address_id: a.id,
           address_line1: a.address_line1,
           address_line2: a.address_line2,
           city: a.city,

@@ -12,7 +12,7 @@ upsert targets both columns.
 from typing import Optional
 from pydantic import BaseModel
 
-from models.import_models import ColumnMapping  # noqa: F401
+from models.import_models import ColumnMapping, SkippedRow  # noqa: F401
 
 
 class VendorServiceConflictInfo(BaseModel):
@@ -73,14 +73,19 @@ class VendorServiceExecuteRequest(BaseModel):
     mappings: dict[str, str]
     rows: list[dict[str, str]]
     skip_conflicts: bool = False
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
 
 
 class VendorServiceExecuteResponse(BaseModel):
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_count: int
     updated_count: int = 0  # Rows upserted via the (vendor_id, name) ON CONFLICT path
     skipped_count: int
     errors: list[VendorServiceImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
 
 
 # Target schema for the vendor_services table (for AI mapping)

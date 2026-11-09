@@ -35,6 +35,7 @@ from models.routings_import_models import (
     RoutingExecuteResponse,
     RoutingImportError,
 )
+from models.import_models import describe_skipped_rows
 from utils.db_pagination import fetch_all_by_company, fetch_all_in
 
 logger = logging.getLogger(__name__)
@@ -534,11 +535,18 @@ async def execute_import(
     Groups rows by part_name. For each part, creates a `routings` row if one
     doesn't already exist (the schema's UNIQUE on routings.part_id makes this
     idempotent), then bulk-inserts the routing_operations.
+
+    With dry_run, everything up to the first write runs and the counts come back as they would
+    from a real run; nothing is written.
     """
     # Everything below writes with the service-role key, which bypasses RLS and the billing
     # write-gate, so who may write (an office member of THIS company, while it is entitled)
     # is decided here or nowhere. company_id comes from the body, never trusted on its own.
-    await company_auth.verify_office_write_access(http_request, request.company_id)
+    # A dry run writes nothing, so it needs the office member and not the entitlement.
+    if request.dry_run:
+        await company_auth.verify_office_access(http_request, request.company_id)
+    else:
+        await company_auth.verify_office_write_access(http_request, request.company_id)
 
     try:
         validate_response = await validate_import(
@@ -725,6 +733,34 @@ async def execute_import(
                 if seq is not None:
                     existing_op_pairs.add((op["routing_id"], int(seq)))
 
+        skipped_rows = describe_skipped_rows(
+            validate_response.validation_errors, validate_response.conflicts, skip_row_numbers
+        )
+
+        if request.dry_run:
+            # What a real run reports: a routing for every part that has none yet; every op
+            # written, split into those landing on an existing (routing_id, sequence) and the rest.
+            planned_updates = sum(
+                1
+                for part_id, ops in per_part_ops.items()
+                if part_id in part_id_to_routing_id
+                for op in ops
+                if (part_id_to_routing_id[part_id], int(op["sequence"])) in existing_op_pairs
+            )
+            planned_ops = sum(len(ops) for ops in per_part_ops.values())
+            return RoutingExecuteResponse(
+                success=True,
+                dry_run=True,
+                imported_routings_count=sum(
+                    1 for part_id in per_part_ops if part_id not in part_id_to_routing_id
+                ),
+                imported_operations_count=max(0, planned_ops - planned_updates),
+                updated_count=planned_updates,
+                skipped_count=skipped,
+                errors=errors,
+                skipped_rows=skipped_rows,
+            )
+
         imported_routings = 0
         imported_operations = 0
         updated_operations = 0
@@ -809,6 +845,7 @@ async def execute_import(
             updated_count=updated_operations,
             skipped_count=skipped,
             errors=errors,
+            skipped_rows=skipped_rows,
         )
 
     except HTTPException:

@@ -13,7 +13,7 @@ Field set differs by work_center.kind:
 from typing import Optional
 from pydantic import BaseModel
 
-from models.import_models import ColumnMapping  # noqa: F401
+from models.import_models import ColumnMapping, SkippedRow  # noqa: F401
 
 
 
@@ -107,17 +107,22 @@ class RoutingExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
 
 
 class RoutingExecuteResponse(BaseModel):
     """Response with import results for routings."""
 
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_routings_count: int  # routings table rows created
     imported_operations_count: int  # routing_operations rows created (new)
     updated_count: int = 0  # routing_operations rows updated in place on re-import
     skipped_count: int
     errors: list[RoutingImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
 
 
 # Target schema for routings + routing_operations (for AI mapping)

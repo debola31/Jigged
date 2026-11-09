@@ -23,7 +23,7 @@ import (multiple contacts per vendor in one CSV) is deferred to a separate
 from typing import Optional
 from pydantic import BaseModel
 
-from models.import_models import ColumnMapping  # noqa: F401
+from models.import_models import ColumnMapping, SkippedRow  # noqa: F401
 
 
 
@@ -120,6 +120,9 @@ class VendorExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
     confirmed_merges: list[VendorMergeConfirmation] = []
 
 
@@ -127,12 +130,14 @@ class VendorExecuteResponse(BaseModel):
     """Response with import results for vendors."""
 
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_count: int
     updated_count: int = 0  # Rows upserted via (company_id, name) ON CONFLICT path
     merged_count: int = 0  # Rows folded into a canonical name via confirmed_merges
     contacts_imported_count: int = 0  # vendor_contacts rows created from primary_contact_* fields
     skipped_count: int
     errors: list[VendorImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
 
 
 # Allowed values for primary_contact_role (mirrors the vendor_contacts.role

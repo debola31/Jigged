@@ -9,7 +9,7 @@ of one-at-a-time when the DB trigger fires during execute.
 from typing import Optional
 from pydantic import BaseModel
 
-from models.import_models import ColumnMapping  # noqa: F401
+from models.import_models import ColumnMapping, SkippedRow  # noqa: F401
 
 
 
@@ -86,16 +86,21 @@ class BomExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
 
 
 class BomExecuteResponse(BaseModel):
     """Response with import results for BOM."""
 
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_count: int  # new BOM lines created
     updated_count: int = 0  # existing (parent, child) lines updated in place on re-import
     skipped_count: int
     errors: list[BomImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
 
 
 # Target schema for parts_bom table (for AI mapping)

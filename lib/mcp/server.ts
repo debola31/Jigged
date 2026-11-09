@@ -3,16 +3,28 @@ import { z } from 'zod';
 
 import { defineAccountTool, registerAccountTool } from '@/lib/mcp/defineTool';
 import { OFFICE_ROLES, isOfficeRole } from '@/lib/mcp/roles';
+import { registerArchiveTools } from '@/lib/mcp/tools/archive';
 import { registerCustomerTools } from '@/lib/mcp/tools/customers';
+import { registerCustomerWriteTools } from '@/lib/mcp/tools/customersWrites';
+import { registerImportTools } from '@/lib/mcp/tools/imports';
 import { registerInventoryTools } from '@/lib/mcp/tools/inventory';
+import { registerInventoryWriteTools } from '@/lib/mcp/tools/inventoryWrites';
 import { registerInvoiceTools } from '@/lib/mcp/tools/invoices';
+import { registerInvoiceWriteTools } from '@/lib/mcp/tools/invoicesWrites';
 import { registerJobTools } from '@/lib/mcp/tools/jobs';
+import { registerJobWriteTools } from '@/lib/mcp/tools/jobsWrites';
 import { registerOverviewTools } from '@/lib/mcp/tools/overview';
 import { registerPartTools } from '@/lib/mcp/tools/parts';
+import { registerPartWriteTools } from '@/lib/mcp/tools/partsWrites';
+import { registerQueryTools } from '@/lib/mcp/tools/query';
 import { registerQuoteTools } from '@/lib/mcp/tools/quotes';
+import { registerQuoteWriteTools } from '@/lib/mcp/tools/quotesWrites';
 import { registerShippingTools } from '@/lib/mcp/tools/shipping';
+import { registerShippingWriteTools } from '@/lib/mcp/tools/shippingWrites';
 import { registerVendorTools } from '@/lib/mcp/tools/vendors';
+import { registerVendorWriteTools } from '@/lib/mcp/tools/vendorsWrites';
 import { registerWorkCenterTools } from '@/lib/mcp/tools/workCenters';
+import { registerWorkCenterWriteTools } from '@/lib/mcp/tools/workCentersWrites';
 import { getUserCompanies } from '@/utils/companyAccess';
 
 export { OFFICE_ROLES, isOfficeRole, type OfficeRole } from '@/lib/mcp/roles';
@@ -97,4 +109,19 @@ export function registerJiggedTools(server: McpServer): void {
   registerInventoryTools(server);
   registerShippingTools(server);
   registerInvoiceTools(server);
+  registerQueryTools(server);
+
+  // Changes, one area at a time; the consequential ones (convert, cancel, void, archive, the
+  // QuickBooks push, imports) are marked destructive so the assistant asks before running them.
+  registerCustomerWriteTools(server);
+  registerVendorWriteTools(server);
+  registerPartWriteTools(server);
+  registerWorkCenterWriteTools(server);
+  registerQuoteWriteTools(server);
+  registerJobWriteTools(server);
+  registerInventoryWriteTools(server);
+  registerShippingWriteTools(server);
+  registerInvoiceWriteTools(server);
+  registerImportTools(server);
+  registerArchiveTools(server);
 }

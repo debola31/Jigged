@@ -138,6 +138,24 @@ export type TypedSupabaseClient = ReturnType<typeof createClient>;
 let supabaseInstance: TypedSupabaseClient | null = null;
 
 /**
+ * Where `getSupabase()` finds a per-request client when the access layer runs on the SERVER on
+ * someone's behalf. Today that is only the MCP route (`app/mcp/route.ts`), acting with the
+ * OAuth token an AI assistant presented, so the access layer's RLS and billing gate apply to
+ * that user exactly as they do in their browser.
+ *
+ * A resolver rather than an import because the per-request store is `AsyncLocalStorage`
+ * (`node:async_hooks`), and this module ships in the browser bundle. The server-only module
+ * `lib/mcp/requestClient.ts` registers it at load; the browser never does, so in the browser
+ * this is null and `getSupabase()` behaves exactly as it always has.
+ */
+type ScopedClientResolver = () => TypedSupabaseClient | undefined;
+let resolveScopedClient: ScopedClientResolver | null = null;
+
+export function registerScopedClientResolver(resolver: ScopedClientResolver): void {
+  resolveScopedClient = resolver;
+}
+
+/**
  * THE Supabase browser client. One getter, always typed: every
  * `.from('quotes').select('…')` chain is validated against types/database.ts at
  * compile time, which is what would have caught the May 2026 `jobs.status`
@@ -156,8 +174,16 @@ let supabaseInstance: TypedSupabaseClient | null = null;
  * exemption list is easy to keep and hard to notice. Don't reintroduce an
  * untyped view of this client — if a query won't type-check, the query is
  * wrong. Never paper over it with `as any` or `as unknown as`.
+ *
+ * **On the server, inside an MCP request, it returns that request's client** (see
+ * `registerScopedClientResolver` above). Outside one it falls through to the singleton, which on
+ * the server holds no session and so reads and writes as `anon`: RLS gives it nothing. That is
+ * deliberately a closed failure rather than a throw, because client components also run during
+ * SSR. The MCP tool wrapper asserts its scope is live before calling into the access layer.
  */
 export function getSupabase(): TypedSupabaseClient {
+  const scoped = resolveScopedClient?.();
+  if (scoped) return scoped;
   if (!supabaseInstance) {
     supabaseInstance = createClient();
   }

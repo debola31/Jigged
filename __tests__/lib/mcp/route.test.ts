@@ -24,6 +24,13 @@ vi.mock('@/utils/companyAccess', () => ({
   getUserCompanies: (...args: unknown[]) => mockGetUserCompanies(...args),
 }));
 
+// The call log and rate limit run as service role against a real table; here they only record.
+const mockRecordCall = vi.fn();
+vi.mock('@/lib/mcp/audit', () => ({
+  rateLimitRefusal: async () => null,
+  recordCall: (...args: unknown[]) => mockRecordCall(...args),
+}));
+
 const AUTH_INFO = {
   token: 'oauth-token',
   clientId: 'client-9',
@@ -59,6 +66,7 @@ describe('/mcp', () => {
   beforeEach(() => {
     mockVerify.mockReset();
     mockGetUserCompanies.mockReset();
+    mockRecordCall.mockReset();
     mockVerify.mockImplementation(async (_req: Request, token?: string) =>
       token === 'oauth-token' ? AUTH_INFO : undefined,
     );
@@ -107,6 +115,9 @@ describe('/mcp', () => {
 
     expect(mockGetUserCompanies).toHaveBeenCalledWith('user-1');
     expect(scoped).toBe(true);
+    expect(mockRecordCall).toHaveBeenCalledWith(
+      expect.objectContaining({ tool: 'list_my_companies', companyId: null, clientId: 'client-9', outcome: 'ok' }),
+    );
     expect(body.result.isError).toBeFalsy();
     expect(body.result.structuredContent.companies).toEqual([
       { company_id: 'co-admin', name: 'Acme Machining', role: 'admin', url: 'https://jigged.test/dashboard/co-admin', demo: null },
@@ -158,6 +169,7 @@ describe('/mcp', () => {
       await call({ method: 'tools/call', params: { name: 'list_my_companies', arguments: {} } }, 'oauth-token'),
     );
     expect(body.result.isError).toBe(true);
-    expect(body.result.content[0].text).toMatch(/couldn't load your companies/);
+    expect(body.result.content[0].text).toMatch(/couldn't finish that just now/);
+    expect(mockRecordCall).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
   });
 });

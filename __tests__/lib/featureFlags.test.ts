@@ -50,10 +50,12 @@ describe('featureFlags: ai_insights (opt-out / default-on)', () => {
 describe('featureFlags: the registry itself', () => {
   it('readCompanyFeatures returns a dense map resolved against each default', () => {
     const noneSet = readCompanyFeatures({ settings: { features: {} } });
-    expect(noneSet).toEqual({ ai_insights: true });
+    expect(noneSet).toEqual({ ai_insights: true, ai_assistants: true, ai_assistant_writes: true });
 
-    const allOff = readCompanyFeatures({ settings: { features: { ai_insights: false } } });
-    expect(allOff).toEqual({ ai_insights: false });
+    const allOff = readCompanyFeatures({
+      settings: { features: { ai_insights: false, ai_assistants: false, ai_assistant_writes: false } },
+    });
+    expect(allOff).toEqual({ ai_insights: false, ai_assistants: false, ai_assistant_writes: false });
   });
 
   it('readCompanyFeatures drops keys the registry does not know', () => {

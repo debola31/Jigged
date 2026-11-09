@@ -85,6 +85,12 @@ holding the demo's own `company_id`, which every tool accepts; the consent page 
 ("and its demo"). It is offered exactly when its company is, to the same people. **Setting up and
 resetting a demo stay on the website** — no assistant tool does either.
 
+An assistant's call into a demo **answers to the real company**
+([`lib/mcp/company.ts`](../../lib/mcp/company.ts)): the caller's role there, and its
+`ai_assistants` settings, decide — not the demo's mirrored copies, which converge only when
+someone next enters the demo. A caller with no mirrored row yet (joined after the demo was made)
+gets one from the same `sync_demo_access` entry uses.
+
 ### The operator surface has its own way in and out
 
 **Corrected 2026-08-08.** This section previously read *"operators already have mirrored access,

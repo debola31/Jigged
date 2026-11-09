@@ -1986,6 +1986,53 @@ export type Database = {
           },
         ]
       }
+      mcp_tool_calls: {
+        Row: {
+          client_id: string
+          client_name: string | null
+          company_id: string | null
+          created_at: string
+          duration_ms: number
+          id: string
+          is_write: boolean
+          outcome: string
+          tool: string
+          user_id: string
+        }
+        Insert: {
+          client_id: string
+          client_name?: string | null
+          company_id?: string | null
+          created_at?: string
+          duration_ms: number
+          id?: string
+          is_write: boolean
+          outcome: string
+          tool: string
+          user_id: string
+        }
+        Update: {
+          client_id?: string
+          client_name?: string | null
+          company_id?: string | null
+          created_at?: string
+          duration_ms?: number
+          id?: string
+          is_write?: boolean
+          outcome?: string
+          tool?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "mcp_tool_calls_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       note_media: {
         Row: {
           company_id: string

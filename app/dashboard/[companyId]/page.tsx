@@ -75,7 +75,7 @@ export default function DashboardPage() {
 
       {/* The person's own assistant. A sibling of Insights, not part of it: it renders whatever
           the Insights flag says, so retiring Jigged's chat leaves it standing. */}
-      <ConnectAssistantStrip companyId={companyId} />
+      <ConnectAssistantStrip />
     </Box>
   );
 }

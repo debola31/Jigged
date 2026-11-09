@@ -11,11 +11,8 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import Divider from '@mui/material/Divider';
-import Snackbar from '@mui/material/Snackbar';
 import Typography from '@mui/material/Typography';
 import Alert from '@mui/material/Alert';
-import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import type { OAuthGrant } from '@supabase/supabase-js';
 import posthog from 'posthog-js';
 import * as Sentry from '@sentry/nextjs';
@@ -23,7 +20,7 @@ import * as Sentry from '@sentry/nextjs';
 import BusyButton from '@/components/common/BusyButton';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import { useLoad } from '@/hooks/useLoad';
-import { CHATGPT_URL, claudeInstallLink, mcpServerUrl } from '@/lib/mcp/connectLinks';
+import ConnectAssistantMenu from '@/components/aiAssistants/ConnectAssistantMenu';
 import { clientKindOf } from '@/lib/mcp/clientKind';
 import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import { disconnectAssistant, listConnectedAssistants } from '@/utils/aiAssistantAccess';
@@ -31,41 +28,18 @@ import { disconnectAssistant, listConnectedAssistants } from '@/utils/aiAssistan
 const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 /**
- * Connect an AI assistant to Jigged, and see or disconnect the ones already connected.
- *
- * Connecting always ends on Jigged's own consent page (/oauth/consent): these buttons only start
- * it. Claude's link opens its Add-connector dialog already filled in; ChatGPT has no such link
- * for an app outside its directory, so the server URL is copied for the person to paste.
+ * The assistants this person has connected to Jigged, each with Disconnect. Reached from the
+ * account menu. Connecting happens from the "Connect your assistant" menu (on the dashboard, and
+ * here in the header), never by sending someone to this page first.
  */
 export default function AiAssistantsPanel() {
-  const [copied, setCopied] = useState(false);
-  const [copyFailed, setCopyFailed] = useState(false);
   const [confirming, setConfirming] = useState<OAuthGrant | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
 
-  const serverUrl = mcpServerUrl(typeof window === 'undefined' ? '' : window.location.origin);
-
   const { data: grants, loading, error, reload } = useLoad(listConnectedAssistants, [], {
     onError: (err) => Sentry.captureException(toError(err)),
   });
-
-  const copyServerUrl = async (): Promise<boolean> => {
-    try {
-      await navigator.clipboard.writeText(serverUrl);
-      setCopied(true);
-      return true;
-    } catch {
-      setCopyFailed(true);
-      return false;
-    }
-  };
-
-  const openChatGpt = async () => {
-    posthog.capture('ai assistant connect started', { client_kind: 'chatgpt' });
-    await copyServerUrl();
-    window.open(CHATGPT_URL, '_blank', 'noopener,noreferrer');
-  };
 
   const confirmDisconnect = async () => {
     if (!confirming) return;
@@ -88,59 +62,12 @@ export default function AiAssistantsPanel() {
     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3, maxWidth: 720 }}>
       <Card elevation={2}>
         <CardContent sx={{ p: 2.5 }}>
-          <Typography variant="h6" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Connect an assistant
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Ask ChatGPT or Claude about your jobs, quotes, parts and stock, and have it make changes
-            for you. It works with your Jigged access, never more. You sign in to Jigged and click
-            Allow once.
-          </Typography>
-          <Box sx={{ display: 'flex', gap: 1.5, flexWrap: 'wrap', mb: 2 }}>
-            <Button
-              variant="contained"
-              href={claudeInstallLink(serverUrl)}
-              target="_blank"
-              rel="noopener noreferrer"
-              endIcon={<OpenInNewIcon />}
-              onClick={() => posthog.capture('ai assistant connect started', { client_kind: 'claude' })}
-            >
-              Add to Claude
-            </Button>
-            <Button variant="outlined" endIcon={<OpenInNewIcon />} onClick={() => void openChatGpt()}>
-              Copy link &amp; open ChatGPT
-            </Button>
-          </Box>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-            ChatGPT has no one-click link yet: paste the link when you add an app in ChatGPT&apos;s
-            settings (developer mode). Other assistants that support MCP use the same link.
-          </Typography>
-          <Box
-            sx={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 1,
-              flexWrap: 'wrap',
-              p: 1.5,
-              borderRadius: 1,
-              bgcolor: 'action.hover',
-            }}
-          >
-            <Typography component="code" sx={{ fontFamily: 'monospace', wordBreak: 'break-all', flex: 1 }}>
-              {serverUrl}
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap', mb: 0.5 }}>
+            <Typography variant="h6" component="h2" sx={{ fontWeight: 600, flex: 1 }}>
+              Connected assistants
             </Typography>
-            <Button size="small" startIcon={<ContentCopyIcon />} onClick={() => void copyServerUrl()}>
-              Copy link
-            </Button>
+            <ConnectAssistantMenu />
           </Box>
-        </CardContent>
-      </Card>
-
-      <Card elevation={2}>
-        <CardContent sx={{ p: 2.5 }}>
-          <Typography variant="h6" component="h2" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Connected assistants
-          </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Every assistant you have allowed, in all your companies. Disconnecting one stops it
             within the hour; you can connect it again any time.
@@ -207,18 +134,6 @@ export default function AiAssistantsPanel() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={copied}
-        autoHideDuration={3000}
-        onClose={() => setCopied(false)}
-        message="Link copied"
-      />
-      <Snackbar
-        open={copyFailed}
-        autoHideDuration={6000}
-        onClose={() => setCopyFailed(false)}
-        message="Couldn't copy. Select the link and copy it yourself."
-      />
     </Box>
   );
 }

@@ -6,12 +6,11 @@
 // don't change. Both stay resident and swap by `visible`, so a swap is instant both ways.
 
 import { useFrame, useThree, type RootState } from '@react-three/fiber';
-import * as Sentry from '@sentry/nextjs';
 import { useEffect, useMemo } from 'react';
 import { Frustum, MathUtils, Matrix4, Mesh, MeshStandardMaterial, Sphere, Texture, Vector3, type Group, type Object3D, type PerspectiveCamera, type WebGLRenderer } from 'three';
-import { toError } from '@/lib/supabaseErrors';
 import { spotBox, type Catalog } from './catalog';
 import { realisticManifest, type Manifest } from './realisticManifest';
+import { reportLoadFailure } from './reportLoad';
 import { redrawRoom, roomProbe, roomStatus } from './Room';
 import { mediaUrl, type ShopItem } from './showcaseData';
 
@@ -50,10 +49,10 @@ interface Item {
 /** For scripts and tests: how far the stream has got, and what the swap shows. */
 export const realisticStatus = { assets: 0, loaded: 0, failed: 0, shown: 0, triangles: 0, done: false };
 
-let failures = 0;
+let reported = false;
 function report(error: unknown) {
   // The light model stays; one report per page, as for the light models.
-  if (failures++ === 0) Sentry.captureException(toError(error, 'Showcase: a realistic shop model failed to load'));
+  if (!reported) reported = reportLoadFailure(error, 'Showcase: a realistic shop model failed to load');
 }
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));

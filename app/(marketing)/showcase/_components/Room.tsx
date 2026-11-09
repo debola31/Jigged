@@ -11,7 +11,6 @@
 
 import { Environment, Lightformer, useProgress } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
-import * as Sentry from '@sentry/nextjs';
 import { useEffect, useMemo, useState } from 'react';
 import {
   BoxGeometry,
@@ -57,8 +56,8 @@ import { FullScreenQuad } from 'three/addons/postprocessing/Pass.js';
 import { HorizontalBlurShader } from 'three/addons/shaders/HorizontalBlurShader.js';
 import { VerticalBlurShader } from 'three/addons/shaders/VerticalBlurShader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { toError } from '@/lib/supabaseErrors';
 import { toScene, type Catalog, type Vec3 } from './catalog';
+import { reportLoadFailure } from './reportLoad';
 import { mediaUrl, type Rect } from './showcaseData';
 
 const AMBER = '#D4872A';
@@ -458,10 +457,10 @@ async function loadMedia(gl: WebGLRenderer): Promise<Media> {
   return { floor: [floorColour, floorNormal, floorRough], wall: [wallColour, wallNormal, wallRough], line, env };
 }
 
-let mediaFailures = 0;
+let mediaReported = false;
 function reportMedia(error: unknown) {
   // The room stays in its plain colours; one report per page.
-  if (mediaFailures++ === 0) Sentry.captureException(toError(error, "Showcase: the shop room's textures failed to load"));
+  if (!mediaReported) mediaReported = reportLoadFailure(error, "Showcase: the shop room's textures failed to load");
 }
 
 function buildRoom(cat: Catalog) {

@@ -452,8 +452,6 @@ export type Database = {
           city: string | null
           country: string | null
           created_at: string | null
-          default_markup_bought_percent: number
-          default_markup_made_percent: number
           default_material_charge_basis: string
           demo_company_id: string | null
           email: string | null
@@ -475,8 +473,6 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_markup_bought_percent?: number
-          default_markup_made_percent?: number
           default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
@@ -498,8 +494,6 @@ export type Database = {
           city?: string | null
           country?: string | null
           created_at?: string | null
-          default_markup_bought_percent?: number
-          default_markup_made_percent?: number
           default_material_charge_basis?: string
           demo_company_id?: string | null
           email?: string | null
@@ -3102,11 +3096,8 @@ export type Database = {
           default_item_id: string | null
           environment: string
           id: string
-          po_custom_field_id: string | null
-          po_custom_field_name: string | null
           qb_company_name: string | null
           qb_invoices_stale_since: string | null
-          qb_settings_checked_at: string | null
           realm_id: string
           reconnect_required: boolean
           refresh_expires_at: string | null
@@ -3125,11 +3116,8 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
-          po_custom_field_id?: string | null
-          po_custom_field_name?: string | null
           qb_company_name?: string | null
           qb_invoices_stale_since?: string | null
-          qb_settings_checked_at?: string | null
           realm_id: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null
@@ -3148,11 +3136,8 @@ export type Database = {
           default_item_id?: string | null
           environment?: string
           id?: string
-          po_custom_field_id?: string | null
-          po_custom_field_name?: string | null
           qb_company_name?: string | null
           qb_invoices_stale_since?: string | null
-          qb_settings_checked_at?: string | null
           realm_id?: string
           reconnect_required?: boolean
           refresh_expires_at?: string | null

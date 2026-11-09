@@ -16,9 +16,10 @@ import time
 import sentry_sdk
 from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from supabase import Client, create_client
 
+import routes.company_auth as company_auth
 from models.insights_models import ChatEnqueued, ChatRequest, ReportRequest
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
@@ -324,16 +325,21 @@ def _client_today(claimed: date) -> date:
 
 
 @router.post("/{company_id}/chat", response_model=ChatEnqueued, status_code=202)
-async def chat(company_id: str, request: ChatRequest):
+async def chat(company_id: str, request: ChatRequest, http_request: Request):
     """Enqueue a question. The answer arrives on the job row.
 
     THE ONLY THING THAT CREATES AN ai_jobs ROW. That is the carve-out the polling
     design rests on: a poll may discover work and may never create it, so the
     feature flag and the per-company rate limit sit in front of the only door.
 
-    Gated on the per-company ai_insights flag (403) and the company's hourly cap
-    (429). Returns 202 with a job id; the browser polls ai_jobs under RLS.
+    Gated, in this order, on the caller being an office member of the company (401 /
+    403), the per-company ai_insights flag (403) and the company's hourly cap (429).
+    Returns 202 with a job id; the browser polls ai_jobs under RLS.
     """
+    # First, before the flag or the cap: the company id is the URL's, and everything
+    # after this runs with the service-role key, so without it anyone could read any
+    # shop's data and spend its hourly cap.
+    await company_auth.verify_office_access(http_request, company_id)
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
     if not ai_enabled:
         raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
@@ -393,7 +399,7 @@ async def chat(company_id: str, request: ChatRequest):
 
 
 @router.post("/{company_id}/report", response_model=ChatEnqueued, status_code=202)
-async def report(company_id: str, request: ReportRequest):
+async def report(company_id: str, request: ReportRequest, http_request: Request):
     """Enqueue a one-page executive summary. The spec arrives on the job row.
 
     The direct door. The composer has no Report verb since 2026-09-08: a report
@@ -406,6 +412,7 @@ async def report(company_id: str, request: ReportRequest):
     the single slot for a few minutes; the browser renders the resulting spec to
     PDF itself (utils/reportPdf.ts). No storage object, no backend rendering.
     """
+    await company_auth.verify_office_access(http_request, company_id)
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
     if not ai_enabled:
         raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")

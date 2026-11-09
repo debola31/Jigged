@@ -8,12 +8,13 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
 from fastapi import HTTPException
 
+import routes.company_auth as company_auth
 from models.insights_models import ChatRequest, ReportRequest
 from routes import insights_routes as routes
 from services import ai_jobs
@@ -29,6 +30,24 @@ from services.llm.errors import (
 )
 
 pytestmark = pytest.mark.unit
+
+# The HTTP request the routes read the caller's token from. Its contents only matter
+# in TestWhoMayAsk; everywhere else the office check is stubbed by `office_caller`.
+REQ = SimpleNamespace(headers={"Authorization": "Bearer t"})
+# Captured at import, before `office_caller` replaces it for each test.
+_REAL_OFFICE_ACCESS = company_auth.verify_office_access
+
+
+@pytest.fixture(autouse=True)
+def office_caller(monkeypatch):
+    """Every door below is entered by an office member of co-1, unless a test says not.
+
+    TestWhoMayAsk swaps this out to pin the check itself; the rest of the file is about
+    what happens AFTER it.
+    """
+    guard = AsyncMock(return_value=("user-1", {"id": "access-1", "role": "user"}))
+    monkeypatch.setattr(company_auth, "verify_office_access", guard)
+    return guard
 
 
 ALL_FAILURES = [
@@ -98,6 +117,64 @@ def test_the_error_kind_separates_downtime_from_an_incident(exc, kind):
     assert routes._error_kind(exc) == kind
 
 
+class TestWhoMayAsk:
+    """The first lock on both doors: an office member of THIS company.
+
+    The company id is the URL's and everything after the check runs with the
+    service-role key, so before this check anyone could read any shop's data through
+    the model and spend that shop's hourly cap. The check runs before the flag and the
+    cap, so a stranger learns nothing about either.
+    """
+
+    @staticmethod
+    def _doors():
+        today = datetime.now(timezone.utc).date()
+        return [
+            lambda req: routes.chat("co-1", ChatRequest(question="how many jobs are late?", today=today), req),
+            lambda req: routes.report("co-1", ReportRequest(request="a summary", today=today), req),
+        ]
+
+    @pytest.mark.parametrize("door", [0, 1], ids=["chat", "report"])
+    async def test_no_token_is_refused_before_the_flag_is_read(self, door, monkeypatch):
+        # The real check, not the file's stub: a missing token is refused before any
+        # client is built, so this needs no database.
+        monkeypatch.setattr(company_auth, "verify_office_access", _REAL_OFFICE_ACCESS)
+        with patch.object(routes, "_get_company_ai_settings") as settings, \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._doors()[door](SimpleNamespace(headers={}))
+        assert exc.value.status_code == 401
+        settings.assert_not_called()
+        enqueue.assert_not_called()
+
+    @pytest.mark.parametrize("door", [0, 1], ids=["chat", "report"])
+    async def test_an_operator_is_refused(self, door, monkeypatch):
+        monkeypatch.setattr(company_auth, "verify_office_access", _REAL_OFFICE_ACCESS)
+        monkeypatch.setattr(
+            company_auth,
+            "verify_company_access",
+            AsyncMock(return_value=("op-1", {"id": "access-op", "role": "operator"})),
+        )
+        with patch.object(routes, "_get_company_ai_settings") as settings, \
+             patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._doors()[door](REQ)
+        assert exc.value.status_code == 403
+        assert exc.value.detail == company_auth.OFFICE_ONLY_DETAIL
+        settings.assert_not_called()
+        enqueue.assert_not_called()
+
+    @pytest.mark.parametrize("door", [0, 1], ids=["chat", "report"])
+    async def test_the_check_is_for_the_company_in_the_url(self, door, office_caller):
+        office_caller.side_effect = HTTPException(status_code=403, detail="No access to this company")
+        with patch.object(routes.ai_jobs, "enqueue") as enqueue:
+            with pytest.raises(HTTPException) as exc:
+                await self._doors()[door](REQ)
+        assert exc.value.status_code == 403
+        office_caller.assert_awaited_once_with(REQ, "co-1")
+        enqueue.assert_not_called()
+
+
 class TestTheOnlyDoor:
     """Exactly one thing may create an ai_jobs row. These are the locks on it.
 
@@ -120,6 +197,7 @@ class TestTheOnlyDoor:
                 today=today or datetime.now(timezone.utc).date(),
                 thread_id=thread_id,
             ),
+            REQ,
         )
 
     async def test_a_disabled_company_cannot_enqueue(self):
@@ -250,6 +328,7 @@ class TestTheThread:
                 today=today or datetime.now(timezone.utc).date(),
                 thread_id=thread_id,
             ),
+            REQ,
         )
 
     def test_the_replay_set_is_the_latest_summary_and_every_turn_after_it(self):
@@ -371,7 +450,9 @@ class TestTheReportDoor:
 
     async def _post(self, request="operations summary for June to September", thread_id=None):
         return await routes.report(
-            "co-1", ReportRequest(request=request, today=datetime.now(timezone.utc).date(), thread_id=thread_id),
+            "co-1",
+            ReportRequest(request=request, today=datetime.now(timezone.utc).date(), thread_id=thread_id),
+            REQ,
         )
 
     async def test_a_disabled_company_cannot_enqueue_a_report(self):
@@ -538,6 +619,7 @@ class TestTheDateReachesTheQueue:
                 "co-1",
                 ChatRequest(question="how many jobs are late?",
                             today=datetime.now(timezone.utc).date()),
+                REQ,
             )
 
         payload = enqueue.call_args.kwargs["payload"]

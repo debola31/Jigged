@@ -5,6 +5,10 @@ routers share one copy rather than drifting. Both are company-scoped and both
 need the same two things: a service-role Supabase client, and proof that the
 caller belongs to the company (optionally as an admin).
 
+The import `execute` routes and the AI Insights routes use it too, through the
+office-only variants below. Those routes once took a company id with no token at
+all, from the URL or the request body, and acted on it with the service-role key.
+
 `stripe_routes.py` keeps its own private variants; unifying those is out of scope
 here and would touch a working billing path for no functional gain.
 """
@@ -13,10 +17,16 @@ from __future__ import annotations
 import logging
 import os
 
+import sentry_sdk
 from fastapi import HTTPException, Request
 from supabase import Client, create_client
 
 logger = logging.getLogger(__name__)
+
+OFFICE_ONLY_DETAIL = "This is for office users. Ask an admin for an office login."
+BILLING_BLOCKED_DETAIL = (
+    "Your shop's subscription isn't active, so nothing was saved. An admin can start one in Settings."
+)
 
 
 def service_client() -> Client:
@@ -67,4 +77,47 @@ async def verify_company_access(
     row = access.data[0]
     if require_admin and row.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
+    return user_id, row
+
+
+async def verify_office_access(request: Request, company_id: str) -> tuple[str, dict]:
+    """`verify_company_access`, refusing role='operator'.
+
+    RLS does not tell an operator from an office user: `get_user_company_ids()` is
+    membership-only, and the office/shop-floor split is AuthGuard's redirect. So a route
+    that does office work (imports, AI Insights) has to draw the line itself, or an
+    operator's token reaches it the moment someone calls it outside the browser.
+    """
+    user_id, row = await verify_company_access(request, company_id)
+    if row.get("role") == "operator":
+        raise HTTPException(status_code=403, detail=OFFICE_ONLY_DETAIL)
+    return user_id, row
+
+
+def assert_company_can_write(company_id: str) -> None:
+    """The billing write-gate, for a route that writes with the service-role key.
+
+    The gate is RLS (`billing_gate_*` policies calling `company_can_write`), and the
+    service role bypasses RLS, so a service-role write skips it unless the route asks the
+    same function first. Fails CLOSED: a write we cannot prove is entitled does not run,
+    exactly as the RLS policy would refuse it.
+    """
+    try:
+        res = service_client().rpc("company_can_write", {"check_company_id": company_id}).execute()
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.error("company_can_write check failed for %s: %s", company_id, exc)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(
+            status_code=503, detail="Couldn't check your shop's subscription. Try again in a moment."
+        ) from exc
+    if res.data is not True:
+        raise HTTPException(status_code=403, detail=BILLING_BLOCKED_DETAIL)
+
+
+async def verify_office_write_access(request: Request, company_id: str) -> tuple[str, dict]:
+    """An office member of `company_id`, whose company may write. For service-role writes."""
+    user_id, row = await verify_office_access(request, company_id)
+    assert_company_can_write(company_id)
     return user_id, row

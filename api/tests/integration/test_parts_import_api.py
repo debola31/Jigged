@@ -21,6 +21,11 @@ from fastapi import HTTPException
 from routes.parts_import_routes import get_supabase, validate_import
 from models.parts_import_models import PartValidateRequest
 
+# The execute route checks who is calling before it writes. These tests are about what an
+# import writes, so that check is stubbed: see conftest.office_writer_auth, and
+# tests/unit/test_import_routes_auth.py for the check itself.
+pytestmark = pytest.mark.usefixtures("office_writer_auth")
+
 async def call_validate(request_data: dict):
     """Exercise validate_import() the way execute_import does.
 

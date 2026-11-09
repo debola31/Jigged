@@ -22,7 +22,8 @@ from difflib import SequenceMatcher
 
 import sentry_sdk
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
+import routes.company_auth as company_auth
 from supabase import Client
 
 from models.vendors_import_models import (
@@ -274,6 +275,7 @@ async def validate_import(
 @router.post("/execute", response_model=VendorExecuteResponse)
 async def execute_import(
     request: VendorExecuteRequest,
+    http_request: Request,
     supabase: Client = Depends(get_supabase),
 ):
     """Execute the vendors import.
@@ -282,6 +284,11 @@ async def execute_import(
     primary_contact_* fields populated also write one vendor_contacts row
     with is_primary=true, role defaulting to 'sales' when not specified.
     """
+    # Everything below writes with the service-role key, which bypasses RLS and the billing
+    # write-gate, so who may write (an office member of THIS company, while it is entitled)
+    # is decided here or nowhere. company_id comes from the body, never trusted on its own.
+    await company_auth.verify_office_write_access(http_request, request.company_id)
+
     try:
         validate_response = await validate_import(
             VendorValidateRequest(

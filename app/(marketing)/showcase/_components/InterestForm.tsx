@@ -18,7 +18,7 @@ import { submitWaitlist } from '@/app/actions/waitlist';
 import BusyButton from '@/components/common/BusyButton';
 import { isValidEmail } from '@/lib/validators';
 import { GENERIC_ALERT_MESSAGE, SKEW_ALERT_MESSAGE, reportWaitlistSubmitFailure } from '@/lib/serverActionSkew';
-import { PILOT_FILE_ACCEPT, PILOT_FILE_FORMATS_LABEL, pilotFileType } from '@/lib/pilotRequest';
+import { PILOT_FILE_ACCEPT, PILOT_FILE_FORMATS_LABEL, pilotFileExtension, pilotFileType } from '@/lib/pilotRequest';
 
 /** The waitlist `source` a pilot sign-up is recorded under; notify-waitlist reads it to pick the confirmation. */
 export const PILOT_SOURCE = 'showcase_pilot';
@@ -70,7 +70,13 @@ export default function InterestForm() {
   const onFileChosen = (event: ChangeEvent<HTMLInputElement>) => {
     const chosen = event.target.files?.[0] ?? null;
     event.target.value = ''; // so choosing the same file again still fires onChange
-    if (chosen) setFile(chosen);
+    if (!chosen) return;
+    setFile(chosen);
+    // Its format only, never its name: what shops reach for decides which formats get read first.
+    posthog.capture('pilot file chosen', {
+      file_type: pilotFileType(chosen.name) ?? 'unsupported',
+      extension: pilotFileExtension(chosen.name),
+    });
   };
 
   const submit = async (event: FormEvent) => {

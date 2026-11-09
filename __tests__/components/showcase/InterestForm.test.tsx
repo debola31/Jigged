@@ -34,6 +34,15 @@ describe('InterestForm', () => {
     expect(screen.queryByLabelText(/Email/)).not.toBeInTheDocument();
   });
 
+  it('says which format was chosen, and nothing of the name', () => {
+    const { container } = render(<InterestForm />);
+    chooseFile(container, 'acme-bracket-rev3.step');
+    chooseFile(container, 'flange.dxf');
+    expect(posthog.capture).toHaveBeenNthCalledWith(1, 'pilot file chosen', { file_type: 'step', extension: 'step' });
+    expect(posthog.capture).toHaveBeenNthCalledWith(2, 'pilot file chosen', { file_type: 'unsupported', extension: 'dxf' });
+    expect(JSON.stringify(vi.mocked(posthog.capture).mock.calls)).not.toContain('acme');
+  });
+
   it('refuses a format it cannot take, at the field', () => {
     const { container } = render(<InterestForm />);
     chooseFile(container, 'model.stl');

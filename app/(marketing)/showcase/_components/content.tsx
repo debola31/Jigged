@@ -118,7 +118,7 @@ export function Uses({ cat, uses }: { cat: Catalog; uses: Use[] }) {
             variant="outlined"
             onClick={() => {
               openItem(u.item!);
-              posthog.capture('showcase item opened', { category: category ?? 'unknown', source: 'step' });
+              posthog.capture('showcase item opened', { item: u.item!, category: category ?? 'unknown', source: 'step' });
             }}
             sx={{ borderColor: 'secondary.main' }}
           />

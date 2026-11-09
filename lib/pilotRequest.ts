@@ -78,6 +78,18 @@ export function pilotFileType(fileName: string): PilotFileType | null {
 }
 
 /**
+ * A file's extension for analytics, and nothing else of its name: `step`, `dxf`, `stl`… — or
+ * `none` when it has none, `other` when it is not a short run of letters and digits. The name is
+ * the visitor's own business ("acme-bracket-rev3.step"); the extension says only which format
+ * they reached for, which decides what the planning pipeline should learn to read next.
+ */
+export function pilotFileExtension(fileName: string): string {
+  const ext = extensionOf(fileName);
+  if (!ext) return 'none';
+  return /^[a-z0-9]{1,8}$/.test(ext) ? ext : 'other';
+}
+
+/**
  * The Content-Type the browser sends with the upload. Chosen by us, not read off the File, and
  * the bucket's `allowed_mime_types` holds exactly these two.
  */

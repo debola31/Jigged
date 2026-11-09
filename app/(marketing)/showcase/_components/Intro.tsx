@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import ButtonBase from '@mui/material/ButtonBase';
@@ -75,7 +76,14 @@ function OwnPart() {
       <Typography sx={{ color: 'text.secondary', fontSize: '0.9rem' }}>A CAD file or drawing.</Typography>
       {UPLOADS_OPEN ? (
         <>
-          <Button variant="contained" onClick={() => setOpen(true)} sx={gradientButtonSx}>
+          <Button
+            variant="contained"
+            onClick={() => {
+              setOpen(true);
+              posthog.capture('pilot form opened', { source: 'intro' });
+            }}
+            sx={gradientButtonSx}
+          >
             Upload a part
           </Button>
           <PilotDialog open={open} onClose={() => setOpen(false)} />

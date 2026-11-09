@@ -4,6 +4,7 @@ import {
   PILOT_MAX_FILE_BYTES,
   parsePilotRequestBody,
   pilotContentType,
+  pilotFileExtension,
   pilotFileProblem,
   pilotFileType,
   pilotStoragePath,
@@ -43,6 +44,21 @@ describe('pilotFileType — by extension, never by MIME', () => {
     expect(pilotContentType('pdf')).toBe('application/pdf');
     expect(pilotContentType('step')).toBe('application/octet-stream');
     expect(pilotContentType('parasolid')).toBe('application/octet-stream');
+  });
+});
+
+describe('pilotFileExtension — the format for analytics, never the name', () => {
+  it.each([
+    ['acme-bracket-rev3.STEP', 'step'],
+    ['flange.dxf', 'dxf'],
+    ['housing.x_t', 'other'],
+    ['no-extension', 'none'],
+    ['.hidden', 'none'],
+    ['trailing.', 'none'],
+    ['weird.verylongextension', 'other'],
+    ['customer name.with spaces', 'other'],
+  ])('%s → %s', (name, ext) => {
+    expect(pilotFileExtension(name)).toBe(ext);
   });
 });
 

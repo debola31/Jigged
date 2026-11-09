@@ -99,4 +99,12 @@ if (posthogToken) {
     capture_exceptions: false,
     debug: process.env.NODE_ENV === "development",
   });
+
+  // Mark this browser as ours: open any page once with `?internal=1` (`?internal=0` undoes it).
+  // A super property, so it rides on every later event from this browser, anonymous visits
+  // included. Those have no person profile (`identified_only`), so the internal-traffic filter's
+  // email rules can never see them. See docs/telemetry.md § "Internal traffic".
+  const internal = new URLSearchParams(window.location.search).get("internal");
+  if (internal === "1") posthog.register({ internal_user: true });
+  else if (internal === "0") posthog.unregister("internal_user");
 }

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import posthog from 'posthog-js';
 import Box from '@mui/material/Box';
 import Button, { type ButtonProps } from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
@@ -114,6 +115,7 @@ export function PartMenu({
             onClick={() => {
               setAnchor(null);
               setPilot(true);
+              posthog.capture('pilot form opened', { source });
             }}
             sx={{ gap: 1.5, borderTop: '1px solid rgba(255, 255, 255, 0.08)' }}
           >

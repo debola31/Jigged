@@ -87,6 +87,8 @@ function getPageTitle(pathname: string): string {
   // /parts.
   if (segments.includes('count')) return 'Count Inventory';
 
+  if (segments.includes('ai-assistants')) return 'AI Assistants';
+
   // Check for settings routes
   if (segments.includes('settings')) {
     return 'Settings';

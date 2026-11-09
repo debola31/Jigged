@@ -146,6 +146,8 @@ describe('partsAccess utilities', () => {
 
       expect(mockSupabase.from).toHaveBeenCalledWith('job_parts');
       expect(mockQueryBuilder.eq).toHaveBeenCalledWith('part_id', 'part-1');
+      // Archived jobs leave the Usage tab (CLAUDE.md: every list filters deleted_at).
+      expect(mockQueryBuilder.is).toHaveBeenCalledWith('jobs.deleted_at', null);
       expect(result).toHaveLength(2);
       // newest job first (j2 created March > j1 created Jan)
       expect(result[0].job_id).toBe('j2');
@@ -200,6 +202,7 @@ describe('partsAccess utilities', () => {
       const result = await getQuotesForPart('part-1');
 
       expect(mockSupabase.from).toHaveBeenCalledWith('quote_line_items');
+      expect(mockQueryBuilder.is).toHaveBeenCalledWith('quotes.deleted_at', null);
       expect(result).toHaveLength(2); // q1's two tiers collapsed to one
       expect(result[0].quote_id).toBe('q2'); // newest first
       expect(result[1].quote_id).toBe('q1');
@@ -491,6 +494,9 @@ describe('partsAccess utilities', () => {
       //   parts (for the row), quote_line_items (distinct quote_ids), job_parts
       //   (count), routings (with operations join), parts_bom × 2 (lines as
       //   parent + parents as child).
+      // The quote and job counts each end on `.is('<table>.deleted_at', null)`: archived ones
+      // don't count.
+      const isFilter = vi.fn();
       (mockSupabase.from as ReturnType<typeof vi.fn>).mockImplementation((table) => {
         if (table === 'parts') {
           return {
@@ -514,15 +520,17 @@ describe('partsAccess utilities', () => {
             select: vi.fn().mockReturnValue({
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
-                data: [
-                  { quote_id: 'q-1' },
-                  { quote_id: 'q-2' },
-                  { quote_id: 'q-3' },
-                  { quote_id: 'q-4' },
-                  { quote_id: 'q-5' },
-                  { quote_id: 'q-1' },
-                ],
-                error: null,
+                is: isFilter.mockReturnValueOnce({
+                  data: [
+                    { quote_id: 'q-1' },
+                    { quote_id: 'q-2' },
+                    { quote_id: 'q-3' },
+                    { quote_id: 'q-4' },
+                    { quote_id: 'q-5' },
+                    { quote_id: 'q-1' },
+                  ],
+                  error: null,
+                }),
               }),
             }),
           };
@@ -532,8 +540,7 @@ describe('partsAccess utilities', () => {
             select: vi.fn().mockReturnValue({
               ...mockQueryBuilder,
               eq: vi.fn().mockReturnValue({
-                count: 3,
-                error: null,
+                is: isFilter.mockReturnValueOnce({ count: 3, error: null }),
               }),
             }),
           };
@@ -575,6 +582,9 @@ describe('partsAccess utilities', () => {
       expect(result?.id).toBe(mockPart.id);
       expect(result?.quotes_count).toBe(5);
       expect(result?.jobs_count).toBe(3);
+      // The tab counts leave archived jobs and quotes out, like the rows they count.
+      expect(isFilter).toHaveBeenCalledWith('quotes.deleted_at', null);
+      expect(isFilter).toHaveBeenCalledWith('jobs.deleted_at', null);
       expect(result?.routing).toEqual({
         id: 'routing-1',
         nodes_count: 1,

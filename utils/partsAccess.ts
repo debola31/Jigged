@@ -311,24 +311,26 @@ export async function getPartWithRelations(partId: string): Promise<Part | null>
   if (!part) return null;
 
   // Quotes count: walk through line items and de-dupe by quote_id (a multi-tier quote on
-  // the same part should still count as one quote).
+  // the same part should still count as one quote). Archived quotes don't count, the same rule
+  // as getQuotesForPart, which lists them: the tab's count and its rows must agree.
   const { data: liQuoteRows, error: quotesError } = await supabase
     .from('quote_line_items')
-    .select('quote_id')
-    .eq('part_id', partId);
-  const quotesCount = quotesError
-    ? 0
-    : new Set(((liQuoteRows ?? []) as Array<{ quote_id: string }>).map((r) => r.quote_id)).size;
+    .select('quote_id, quotes!inner(deleted_at)')
+    .eq('part_id', partId)
+    .is('quotes.deleted_at', null);
+  const quotesCount = quotesError ? 0 : new Set((liQuoteRows ?? []).map((r) => r.quote_id)).size;
 
   if (quotesError) {
     console.error('Error fetching quotes count:', quotesError);
   }
 
-  // Jobs count derived from job_parts (jobs is parent, job_parts owns the part FK).
+  // Jobs count derived from job_parts (jobs is parent, job_parts owns the part FK). Archived jobs
+  // don't count, matching getJobsForPart.
   const { count: jobsCount, error: jobsError } = await supabase
     .from('job_parts')
-    .select('*', { count: 'exact', head: true })
-    .eq('part_id', partId);
+    .select('id, jobs!inner(deleted_at)', { count: 'exact', head: true })
+    .eq('part_id', partId)
+    .is('jobs.deleted_at', null);
 
   if (jobsError) {
     console.error('Error fetching jobs count:', jobsError);
@@ -412,7 +414,9 @@ export async function getJobsForPart(partId: string): Promise<PartJobUsage[]> {
         customers ( name )
       )
     `)
-    .eq('part_id', partId);
+    .eq('part_id', partId)
+    // An archived job leaves every list (CLAUDE.md); `!inner` drops the row with its job.
+    .is('jobs.deleted_at', null);
 
   if (error) {
     console.error('Error fetching jobs for part:', error);
@@ -480,7 +484,8 @@ export async function getQuotesForPart(partId: string): Promise<PartQuoteUsage[]
         customers ( name )
       )
     `)
-    .eq('part_id', partId);
+    .eq('part_id', partId)
+    .is('quotes.deleted_at', null);
 
   if (error) {
     console.error('Error fetching quotes for part:', error);

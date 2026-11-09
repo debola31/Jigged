@@ -46,6 +46,8 @@ export interface CostWarning {
 
 export interface LaborItem {
   operation_name: string;
+  /** An outside service priced by the piece (no minutes, no rate), not an in-house step. */
+  outside: boolean;
   run_time_minutes: number;
   setup_time_minutes: number;
   labor_rate: number;
@@ -185,6 +187,7 @@ export async function calculateRoutingCost(
         }
         laborItems.push({
           operation_name: operationName,
+          outside: true,
           run_time_minutes: 0,
           setup_time_minutes: 0,
           labor_rate: 0,
@@ -220,6 +223,7 @@ export async function calculateRoutingCost(
       const setupCost = (Number(setupMinutes) / 60) * Number(laborRate);
       laborItems.push({
         operation_name: operationName,
+        outside: false,
         run_time_minutes: Number(cycleMinutes),
         setup_time_minutes: Number(setupMinutes),
         labor_rate: Number(laborRate),

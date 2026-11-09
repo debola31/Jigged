@@ -68,8 +68,10 @@ interface ToolMeta<O extends z.ZodRawShape> {
 }
 
 /** The input every company tool shares, added by the wrapper. */
+// `guid`, not `uuid`: Zod 4's uuid() accepts RFC-variant ids only, Postgres accepts any well-formed
+// one, and seeded and hand-made rows carry ids like 22222222-2222-...
 export const companyIdInput = z
-  .uuid()
+  .guid()
   .describe('The company to work in: a company_id from list_my_companies, or the company_id of one of its demos.');
 
 

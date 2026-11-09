@@ -3,6 +3,16 @@ import { z } from 'zod';
 
 import { defineAccountTool, registerAccountTool } from '@/lib/mcp/defineTool';
 import { OFFICE_ROLES, isOfficeRole } from '@/lib/mcp/roles';
+import { registerCustomerTools } from '@/lib/mcp/tools/customers';
+import { registerInventoryTools } from '@/lib/mcp/tools/inventory';
+import { registerInvoiceTools } from '@/lib/mcp/tools/invoices';
+import { registerJobTools } from '@/lib/mcp/tools/jobs';
+import { registerOverviewTools } from '@/lib/mcp/tools/overview';
+import { registerPartTools } from '@/lib/mcp/tools/parts';
+import { registerQuoteTools } from '@/lib/mcp/tools/quotes';
+import { registerShippingTools } from '@/lib/mcp/tools/shipping';
+import { registerVendorTools } from '@/lib/mcp/tools/vendors';
+import { registerWorkCenterTools } from '@/lib/mcp/tools/workCenters';
 import { getUserCompanies } from '@/utils/companyAccess';
 
 export { OFFICE_ROLES, isOfficeRole, type OfficeRole } from '@/lib/mcp/roles';
@@ -11,9 +21,10 @@ export { OFFICE_ROLES, isOfficeRole, type OfficeRole } from '@/lib/mcp/roles';
  * The Jigged MCP server's tools.
  *
  * Every tool is declared with `defineCompanyTool` / `defineAccountTool` and registered through
- * the wrapper in lib/mcp/defineTool.ts, which checks the caller, the company, the company's
- * assistant settings and the rate limit, and logs every call. The catalogue arrives milestone by
- * milestone; the plan is `docs/modules/ai-assistants.md` once written.
+ * the wrapper in lib/mcp/defineTool.ts, which checks the caller, the company and the rate limit,
+ * and logs every call. Company tools live in lib/mcp/tools/, one file per area, each with its own
+ * register function. The catalogue arrives milestone by milestone; the plan is
+ * `docs/modules/ai-assistants.md` once written.
  */
 
 const DemoSchema = z.object({
@@ -48,7 +59,7 @@ export const listMyCompanies = defineAccountTool({
       if (!isOfficeRole(row.role)) return [];
       // The demo belongs to the company: offered exactly when the company is, to the same
       // people. The tool wrapper resolves a demo through its company (lib/mcp/company.ts), so
-      // the company's role and settings are the ones that decide.
+      // the company's role is the one that decides.
       const demoId = row.companies?.demo_company_id ?? null;
       return [
         {
@@ -76,4 +87,14 @@ export const listMyCompanies = defineAccountTool({
 
 export function registerJiggedTools(server: McpServer): void {
   registerAccountTool(server, listMyCompanies);
+  registerOverviewTools(server);
+  registerJobTools(server);
+  registerQuoteTools(server);
+  registerCustomerTools(server);
+  registerVendorTools(server);
+  registerPartTools(server);
+  registerWorkCenterTools(server);
+  registerInventoryTools(server);
+  registerShippingTools(server);
+  registerInvoiceTools(server);
 }

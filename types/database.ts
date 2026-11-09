@@ -5075,6 +5075,7 @@ export type Database = {
         Args: { p_company_id: string; p_seen_through: string }
         Returns: undefined
       }
+      mcp_token_binding: { Args: never; Returns: undefined }
       mint_lot_code: {
         Args: { p_part_id: string; p_prefix?: string }
         Returns: string
@@ -5176,6 +5177,10 @@ export type Database = {
       reclaim_part_name: {
         Args: { p_company_id: string; p_name: string }
         Returns: boolean
+      }
+      register_mcp_gateway_key: {
+        Args: { p_label: string; p_sha256: string }
+        Returns: undefined
       }
       reset_demo_company: {
         Args: { p_source_company_id: string; p_user_id: string }

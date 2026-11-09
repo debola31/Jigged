@@ -185,7 +185,7 @@ function ShopHeader({ cat, toShop }: { cat: Catalog; toShop(): void }) {
                   aria-pressed={shown}
                   onClick={() => {
                     openItem(m.item);
-                    posthog.capture('showcase item opened', { category: 'machines', source: 'area' });
+                    posthog.capture('showcase item opened', { item: m.item, category: 'machines', source: 'area' });
                   }}
                   // Quieter than the areas: no outline, a tint, and the one open in the secondary colour.
                   sx={{

@@ -83,7 +83,7 @@ in PostHog, which is why they are written down here.
 |---|---|---|
 | `session_recording_opt_in` | `true` | The change itself |
 | `session_recording_masking_config` | `{ maskAllInputs: true }` | Never record keystrokes — passwords, prices, quantities. Rendered text stays visible, because a replay with every label masked cannot teach you anything |
-| `recording_domains` | `https://jigged.app` | Belt-and-braces production-only. The token already gates this, but a domain allowlist survives someone re-adding it to `.env.local` |
+| `recording_domains` | `https://jigged.app`, `https://www.jigged.app` | Belt-and-braces production-only. The token already gates this, but a domain allowlist survives someone re-adding it to `.env.local`. **Both hosts, and that is the lesson of 2026-11-09**: the setting actually held only `www` while this row said the apex, so when #695 made the apex primary (2026-09-07), replay recorded nothing for two months and nothing said so. Whichever host is primary, the other only redirects, so listing both costs nothing and survives the next flip |
 | `capture_console_log_opt_in` | `false` | Console output routinely holds API responses and user objects. It was `true` and inert while replay was off — enabling replay is what would have armed it |
 | `capture_performance_opt_in` | `false` | **See below** |
 | `session_recording_retention_period` | `30d` | Shortest available |
@@ -100,6 +100,32 @@ worth a load-bearing invariant.
 is the same exposure as autocapture ([#702](https://github.com/debola31/Jigged/issues/702)), traded
 deliberately — a replay is watched by us and expires in 30 days, where an event property is
 queried, exported and retained for a year. Revisit when the pilot ends.
+
+**Not recorded: the showcase's 3D shop.** It is a WebGL canvas, which a replay shows as a blank
+box. Canvas capture is off on purpose (2026-11-09): it is heavy for the visitor, phones above all,
+and the `showcase item opened` / `showcase area opened` events already say what was looked at.
+
+## Internal traffic: what the "filter out internal users" toggle removes
+
+`test_account_filters`, on by default for new insights (`test_account_filters_default_checked`),
+and like the replay settings above it lives only in PostHog:
+
+| Rule | Catches |
+|---|---|
+| not in cohort *Internal / Test users* (443534) | a person marked `$internal_or_test_user`, or with an `@jigged.app` email |
+| `$host` not containing `localhost`, `127.0.0.1`, `vercel.app` | dev servers and preview deployments |
+| person `email` not containing `@jigged.app`, nor the founder's personal address | signed-in team members |
+| event `$ip` is not the founder's home address | that network, anonymous visits included (added 2026-11-09; **update it in PostHog if the address changes** — the value is deliberately not written here, in a public repo) |
+| event `internal_user` is not `true` | any browser marked with `?internal=1` (below) |
+
+**Email rules cannot see anonymous visitors.** posthog-js creates person profiles for identified
+users only, so a visit to a marketing page before signing in has no person to read an email
+from — the showcase's traffic in November 2026 was mostly the founder, uncounted as such. That
+is what the last two rules are for. **To mark a device, open any jigged.app page once with
+`?internal=1`** (`?internal=0` undoes it): [`instrumentation-client.ts`](../instrumentation-client.ts)
+registers `internal_user: true` as a super property, so every later event from that browser
+carries it, on any network. It is not in the event registry because it is not a captured
+property: it rides on every event, and the registry describes what each capture sends.
 
 ---
 
@@ -213,9 +239,11 @@ fails, and so does a listed property nothing passes.
 | `waitlist submitted` | The request-access form is submitted and the row is written. `source` says which band converted (`landing_page`, `landing_footer_cta`, `coming_soon`, `invite_link`), or `showcase_pilot` from the showcase's "your own part" form (`shop_size` is null there), and paired with `marketing cta clicked` it gives the open-to-submit rate — the only way to tell a page that does not persuade from a form that does not work. `shop_size` is the picker's own enum and is **the one property that says whether the page is reaching shops the product is built for**: the hero now qualifies for 3–30 people, so a stream of `50+ people` means the qualifier is not being read or not being believed. **Never the name, email or company** — the row in Supabase holds those, and the whole point of this table is that PostHog does not | `source`, `shop_size` | [EmailCapture.tsx](../components/marketing/EmailCapture.tsx), InterestForm.tsx (`app/(marketing)/showcase/_components/`) |
 | `showcase step opened` | A visitor to `/showcase` moves to a step: picks it from the plan or presses Previous / Next. Not on page load or from a `?step=` link, where nobody chose it. `part` is the showcase part's id (one of our own 20 public parts, never anything of the visitor's), `step_number` its 1-based position, `kind` is `human` or `cycle`. **Says whether the videos are watched or the page is skimmed**: how far `step_number` gets, and whether `cycle` steps are skipped, is what decides how much render time later parts deserve | `part`, `step_number`, `kind` | `app/(marketing)/showcase/_components/content.tsx` (a route group's parentheses can't sit in a link here) |
 | `showcase part picked` | A visitor picks a part on `/showcase`, which starts its instructions being made. `part` is the showcase part's id. `source` is where it was picked: `intro` (the carousel), `menu` (Change part in the shop) or `finished` (Try another part, after a part's last step). **The top of the showcase's funnel**: read `showcase step opened` and `pilot request submitted` against it. `menu` and `finished` say whether a visitor who has watched one part goes on to another | `part`, `source` | `app/(marketing)/showcase/_components/ShowcaseApp.tsx` |
-| `showcase item opened` | A visitor opens one of the shop's things (a machine, vise, cutter, gauge): from an area's list of machines over the shop (`source` `area`), by clicking it in 3D (`scene`), from a label over the shop (`label`), or from a step's or the plan's "uses" (`step`). `category` is the thing's shop.json list (`machines`, `workholding`, `tools`, …). **Says whether the 3D shop is explored or only watched**: a `scene` and `label` share near zero means the shop is decoration and its realism budget belongs to the step videos instead | `category`, `source` | `app/(marketing)/showcase/_components/ShopCanvas.tsx`, `Layouts.tsx` and `content.tsx` |
+| `showcase item opened` | A visitor opens one of the shop's things (a machine, vise, cutter, gauge): from an area's list of machines over the shop (`source` `area`), by clicking it in 3D (`scene`), from a label over the shop (`label`), or from a step's or the plan's "uses" (`step`). `item` is the thing's shop.json id (`vf2-1`, `ratchet-wrench-1`, …), one of the fictional example shop's own, and says **which** machines and tools draw people in — the question the category alone could not answer (added 2026-11-09). `category` is the thing's shop.json list (`machines`, `workholding`, `tools`, …). **Says whether the 3D shop is explored or only watched**: a `scene` and `label` share near zero means the shop is decoration and its realism budget belongs to the step videos instead | `item`, `category`, `source` | `app/(marketing)/showcase/_components/ShopCanvas.tsx`, `Layouts.tsx` and `content.tsx` |
 | `showcase area opened` | A visitor presses one of the example shop's areas (Milling, Turning, …) over `/showcase`'s 3D shop: the camera flies there, and the area's machines are listed. `zone` is the area's shop.json id (`milling`, `turning`, …), one of the fictional example shop's own. **Says whether visitors look round the shop itself before or instead of a part**: read it against `showcase part picked`, and with `showcase item opened`'s `scene` share | `zone` | `app/(marketing)/showcase/_components/Layouts.tsx` |
 | `showcase walk started` | A visitor presses Walk the shop on `/showcase`. `part` is the showcase part whose stations the walk visits. **Says whether the guided walk earns its place**: if it's rarely pressed, the walk is cut rather than polished | `part` | `app/(marketing)/showcase/_components/ShowcaseApp.tsx` |
+| `pilot form opened` | A visitor opens the showcase's "your own part" form: "Upload a part" in the parts carousel (`source` `intro`), or "Your own part" in the Change part menu (`menu`) or the closing card's (`finished`) — `source` is the same enum as `showcase part picked`'s. **The top of the upload funnel**: read `pilot file chosen` and `waitlist submitted` (`source` `showcase_pilot`) against it, so a form that is opened and abandoned shows apart from one nobody finds | `source` | `app/(marketing)/showcase/_components/Intro.tsx` and `PartChoice.tsx` (same parentheses limit) |
+| `pilot file chosen` | A visitor picks a file in that form. The file never leaves their computer, and neither does its name: `file_type` is the form's own enum (`step`, `iges`, `parasolid`, `solidworks`, `pdf`) or `unsupported`, and `extension` is the lowercase extension alone (`dxf`, `stl`, …), `none`, or `other` when it is not 1–8 letters and digits. **Says what shops reach for**: a stream of `unsupported` with one `extension` is the next format to read, and a pick with no `waitlist submitted` after it is a visitor lost after committing a file | `file_type`, `extension` | `app/(marketing)/showcase/_components/InterestForm.tsx` (same parentheses limit) |
 | `pilot request submitted` | A visitor's part file has uploaded AND the server has confirmed it is in the bucket — the moment the team is emailed, not the click. A failed or abandoned attempt sends nothing; Sentry has those. **This is the showcase's conversion: whether seeing parts made makes a shop hand over one of its own.** Read it against `showcase step opened` for the visitors who got that far. `file_type` (`step`, `iges`, `parasolid`, `solidworks`, `pdf`) says what shops actually send, which decides which formats the planning pipeline must read first — a stream of `pdf` means they send drawings, not models. The `has_*` booleans say how much people volunteer when only the email is required. **Never the email, name, company, note or file name** — the `pilot_requests` row holds those and PostHog must not | `file_type`, `has_name`, `has_company`, `has_note` | `app/(marketing)/showcase/_components/PilotRequest.tsx` (same parentheses limit) |
 <!-- registry:end -->
 

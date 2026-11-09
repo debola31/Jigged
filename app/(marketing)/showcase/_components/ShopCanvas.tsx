@@ -106,7 +106,7 @@ function Thing({ cat, spot, index, slots }: { cat: Catalog; spot: ShopItem; inde
           e.stopPropagation();
           if (e.delta > 4) return; // the end of an orbit drag, not a click
           openItem(spot.item);
-          posthog.capture('showcase item opened', { category: spot.category, source: 'scene' });
+          posthog.capture('showcase item opened', { item: spot.item, category: spot.category, source: 'scene' });
         }}
       >
         <boxGeometry args={size} />
@@ -239,7 +239,7 @@ function Labels({ cat, part }: { cat: Catalog; part: LivePart }) {
   };
   const open = (id: string) => {
     openItem(id);
-    posthog.capture('showcase item opened', { category: cat.spots.get(id)?.[0].category ?? 'unknown', source: 'label' });
+    posthog.capture('showcase item opened', { item: id, category: cat.spots.get(id)?.[0].category ?? 'unknown', source: 'label' });
   };
   const stations = [...new Map(part.steps.map((s) => [s.where.name, s.where])).values()];
   const step = sheet === 'step' && index !== null ? part.steps[index] : null;

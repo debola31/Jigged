@@ -9,6 +9,7 @@ import {
   registerCompanyTool,
 } from '@/lib/mcp/defineTool';
 import type { CompanyInScope } from '@/lib/mcp/company';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
 /**
  * The wrapper every Jigged MCP tool runs through. Each test is one guard: who may call, in which
@@ -35,6 +36,9 @@ vi.mock('@/lib/mcp/requestClient', () => ({
 
 const mockCapture = vi.fn();
 vi.mock('@sentry/nextjs', () => ({ captureException: (...a: unknown[]) => mockCapture(...a) }));
+
+const mockReport = vi.fn();
+vi.mock('@/lib/mcp/telemetry', () => ({ reportToolCall: (...a: unknown[]) => mockReport(...a) }));
 
 const COMPANY_ID = '3f1c2b4a-5d6e-4f70-8a91-b2c3d4e5f607';
 
@@ -157,6 +161,15 @@ describe('registerCompanyTool', () => {
         outcome: 'ok',
       }),
     );
+    // The PostHog event carries the call's shape only: never its arguments or company.
+    expect(mockReport).toHaveBeenCalledWith({
+      userId: 'user-1',
+      tool: 'count_widgets',
+      clientName: 'Claude',
+      isWrite: false,
+      outcome: 'ok',
+    });
+    expect(run.mock.calls[0][1].origin).toBe('https://jigged.test');
   });
 
   it('refuses a company the caller cannot use, and logs the refusal without a company', async () => {
@@ -208,6 +221,31 @@ describe('registerCompanyTool', () => {
     expect(res).toEqual({ content: [{ type: 'text', text: UNEXPECTED_ERROR_MESSAGE }], isError: true });
     expect(mockCapture).toHaveBeenCalledTimes(1);
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
+  });
+
+  it("passes the access layer's own sentence through, and reports it", async () => {
+    run.mockRejectedValue(new Error('Quantity must be greater than zero'));
+    const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
+    expect(res).toEqual({ content: [{ type: 'text', text: 'Quantity must be greater than zero' }], isError: true });
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
+  });
+
+  it('refuses, without reporting, when the database names something the person can fix', async () => {
+    run.mockRejectedValue(toFriendlyError({ code: '23505', message: 'duplicate key value' }, { entity: 'customer' }));
+    const res = await register(writeTool).cb({ widget_id: 'w-1', company_id: COMPANY_ID }, ctx());
+    expect(res).toEqual({
+      content: [{ type: 'text', text: 'That customer already exists — use a different value.' }],
+      isError: true,
+    });
+    expect(mockCapture).not.toHaveBeenCalled();
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'refused' }));
+  });
+
+  it('never shows the text of a programming error', async () => {
+    run.mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'id')"));
+    const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
+    expect(res).toEqual({ content: [{ type: 'text', text: UNEXPECTED_ERROR_MESSAGE }], isError: true });
   });
 
   it('never runs without a caller', async () => {

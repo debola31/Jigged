@@ -11,7 +11,8 @@ import { callerOf, type McpCaller } from '@/lib/mcp/auth';
 import { recordCall, rateLimitRefusal, type CallOutcome } from '@/lib/mcp/audit';
 import { resolveCompany, type CompanyInScope } from '@/lib/mcp/company';
 import { runAsCaller } from '@/lib/mcp/requestClient';
-import { isBillingWriteBlocked, toError } from '@/lib/supabaseErrors';
+import { reportToolCall } from '@/lib/mcp/telemetry';
+import { isBillingWriteBlocked, isFriendlyError, toError } from '@/lib/supabaseErrors';
 
 /**
  * Every Jigged MCP tool is declared through this file, and every call runs through one wrapper.
@@ -23,13 +24,17 @@ import { isBillingWriteBlocked, toError } from '@/lib/supabaseErrors';
  *   3. how fast            the per-minute limits in lib/mcp/audit.ts
  *   4. the call itself     inside `runAsCaller`, so the access layer runs as this person under
  *                          RLS and the billing gate, exactly as in their browser
- *   5. what happened       one `mcp_tool_calls` row per call, refusals included
+ *   5. what happened       one `mcp_tool_calls` row per call, refusals included, and one
+ *                          `mcp tool called` PostHog event (lib/mcp/telemetry.ts)
  *
  * There is no per-company switch: every office user may connect, and an assistant may do what
  * that person may do in their browser (the user's call, 2026-11-09).
  *
  * Errors come back as a sentence with `isError: true`, never a protocol failure, so the assistant
- * can tell the person what went wrong. Unexpected ones also go to Sentry.
+ * can tell the person what went wrong. The access layer's own sentences ("That part already
+ * exists", "Quantity must be greater than zero") pass through as written; a constraint the person
+ * can fix is a refusal, anything else also goes to Sentry. Programming errors (TypeError and
+ * kin) never show their text: the person gets UNEXPECTED_ERROR_MESSAGE.
  *
  * Annotations are explicit on every tool, `false` included: the ChatGPT directory requires
  * `readOnlyHint`, `destructiveHint` and `openWorldHint` to be set, and Claude prompts before a
@@ -43,6 +48,8 @@ export type ToolResult<T> = { ok: true; data: T; text?: string } | { ok: false; 
 
 export interface ToolEnv {
   caller: McpCaller;
+  /** The origin the assistant called (`https://jigged.app`), or null. lib/mcp/backend.ts uses it. */
+  origin: string | null;
   /** An absolute link into the app for `path` (`/dashboard/...`), or null when unknown. */
   link: (path: string) => string | null;
 }
@@ -180,6 +187,14 @@ interface CallFrame {
 }
 
 async function finish(frame: CallFrame, outcome: CallOutcome, result: CallToolResult): Promise<CallToolResult> {
+  // Side by side: neither throws, and the PostHog flush must finish before the function freezes.
+  const reported = reportToolCall({
+    userId: frame.caller.userId,
+    tool: frame.tool,
+    clientName: frame.clientName,
+    isWrite: frame.isWrite,
+    outcome,
+  });
   await recordCall({
     companyId: frame.companyId,
     userId: frame.caller.userId,
@@ -190,7 +205,40 @@ async function finish(frame: CallFrame, outcome: CallOutcome, result: CallToolRe
     outcome,
     durationMs: Date.now() - frame.started,
   });
+  await reported;
   return result;
+}
+
+/**
+ * Throw when the message is meant for the person as written and is something they can act on:
+ * the call is logged as `refused` and not reported. lib/mcp/backend.ts throws it for the
+ * backend's 4xx answers. A tool's own refusal is simpler as `{ ok: false, message }`.
+ */
+export class RefusalError extends Error {}
+
+/** Postgres codes a person can act on: a name taken, a row still referenced, a bad value, a trigger's own message. */
+const CORRECTABLE_CODES = new Set(['23505', '23503', '23514', '23502', 'P0001', '22023', '22P02']);
+
+/** Errors that mean a bug in our code. Their text is for developers, never for a shop. */
+const PROGRAMMING_ERRORS = [TypeError, ReferenceError, SyntaxError, RangeError];
+
+/**
+ * The sentence an error already carries for a person, and whether it is one they can fix.
+ * The access layer throws user-facing copy: `toFriendlyError` brands translated database errors,
+ * and its own checks throw a plain `Error('Quantity must be greater than zero')`.
+ */
+function messageFor(err: unknown): { text: string; correctable: boolean } | null {
+  if (!(err instanceof Error)) return null;
+  if (PROGRAMMING_ERRORS.some((kind) => err instanceof kind)) return null;
+  const text = err.message.trim();
+  if (err instanceof RefusalError) return text ? { text, correctable: true } : null;
+  if (isFriendlyError(err)) {
+    const code = (err as Error & { code?: unknown }).code;
+    return text ? { text, correctable: typeof code === 'string' && CORRECTABLE_CODES.has(code) } : null;
+  }
+  // A plain Error is copy only when it reads as a sentence: the access layer's own checks do
+  // ("Quantity must be greater than zero"); a transport's do not ("connection reset").
+  return /^[A-Z]/.test(text) && text.includes(' ') ? { text, correctable: false } : null;
 }
 
 async function failure(frame: CallFrame, err: unknown): Promise<CallToolResult> {
@@ -199,8 +247,10 @@ async function failure(frame: CallFrame, err: unknown): Promise<CallToolResult> 
     Sentry.captureException(toError(err), { tags: { mcp_tool: frame.tool, mcp: 'gateway_key' } });
     return finish(frame, 'error', errorResult(GATEWAY_REFUSED_MESSAGE));
   }
+  const message = messageFor(err);
+  if (message?.correctable) return finish(frame, 'refused', errorResult(message.text));
   Sentry.captureException(toError(err), { tags: { mcp_tool: frame.tool } });
-  return finish(frame, 'error', errorResult(UNEXPECTED_ERROR_MESSAGE));
+  return finish(frame, 'error', errorResult(message?.text ?? UNEXPECTED_ERROR_MESSAGE));
 }
 
 async function settle<T extends Record<string, unknown>>(
@@ -265,6 +315,7 @@ export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawS
           const result = await tool.run(input, {
             caller,
             company,
+            origin,
             link: (path) => (origin ? `${origin}${path}` : null),
           });
           return settle(frame, result);
@@ -302,7 +353,7 @@ export function registerAccountTool<O extends z.ZodRawShape>(server: McpServer, 
         try {
           const limited = await rateLimitRefusal({ companyId: null, userId: caller.userId, isWrite: frame.isWrite });
           if (limited) return finish(frame, 'rate_limited', errorResult(limited));
-          const result = await tool.run({ caller, link: (path) => (origin ? `${origin}${path}` : null) });
+          const result = await tool.run({ caller, origin, link: (path) => (origin ? `${origin}${path}` : null) });
           return settle(frame, result);
         } catch (err) {
           return failure(frame, err);

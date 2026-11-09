@@ -16,8 +16,8 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import type { ChargeBasis } from '@/types/bom';
 import {
   getCompany,
-  readCompanyPricingDefaults,
-  setCompanyPricingDefaults,
+  readCompanyMaterialChargeBasis,
+  setCompanyMaterialChargeBasis,
   setCompanyDefaultPaymentTerms,
   updateCompanyDefaults,
 } from '@/utils/companyAccess';
@@ -78,23 +78,20 @@ function fieldError(key: CompanyDefaultKey, raw: string): string | null {
  *
  * Values persist to `companies.settings.defaults` and `companies.settings.default_payment_terms`;
  * both writers read-modify-write the whole settings object, which is why Save runs them in
- * sequence — see `handleSave`.
+ * sequence — see `handleSave`. The Materials choice is a real column
+ * (`companies.default_material_charge_basis`), written separately.
+ *
+ * **There are no starting-markup fields here, on purpose.** The "Part pricing markups" pair
+ * (parts you make / parts you buy) was removed on 2026-11-09: every shop had left both at 0%, so a
+ * new part starts at cost and its markup is set on the part's own Pricing card.
  */
 export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => emptyForm());
   const [terms, setTerms] = useState('');
-  // Strings so a half-typed "22." survives a render. Both are numeric(10,6) and
-  // NOT NULL — 0 is a real value, not "unset".
-  const [madeMarkup, setMadeMarkup] = useState('0');
-  const [boughtMarkup, setBoughtMarkup] = useState('0');
   const [materialBasis, setMaterialBasis] = useState<ChargeBasis>('cost');
-  const [pricingBaseline, setPricingBaseline] = useState({
-    made: '0',
-    bought: '0',
-    basis: 'cost' as ChargeBasis,
-  });
+  const [materialBasisBaseline, setMaterialBasisBaseline] = useState<ChargeBasis>('cost');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
@@ -108,15 +105,9 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
         if (cancelled) return;
         setForm(toFormState(readCompanyDefaults(company)));
         setTerms(readCompanyDefaultPaymentTerms(company) ?? '');
-        const defaults = readCompanyPricingDefaults(company);
-        setMadeMarkup(String(defaults.made));
-        setBoughtMarkup(String(defaults.bought));
-        setMaterialBasis(defaults.materialChargeBasis);
-        setPricingBaseline({
-          made: String(defaults.made),
-          bought: String(defaults.bought),
-          basis: defaults.materialChargeBasis,
-        });
+        const basis = readCompanyMaterialChargeBasis(company);
+        setMaterialBasis(basis);
+        setMaterialBasisBaseline(basis);
       } catch {
         if (!cancelled) setError('Failed to load settings.');
       } finally {
@@ -143,10 +134,7 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
     },
     {},
   );
-  const madeMarkupError = markupFieldError(madeMarkup);
-  const boughtMarkupError = markupFieldError(boughtMarkup);
-  const hasErrors =
-    Object.keys(errors).length > 0 || madeMarkupError !== null || boughtMarkupError !== null;
+  const hasErrors = Object.keys(errors).length > 0;
 
   const handleSave = async () => {
     if (hasErrors) {
@@ -166,29 +154,12 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       // second read happens before the first write lands and one silently clobbers the other.
       await updateCompanyDefaults(companyId, patch);
       setTerms((await setCompanyDefaultPaymentTerms(companyId, terms)) ?? '');
-      // Real columns, so this is an independent write — no settings
+      // A real column, so this is an independent write — no settings
       // read-modify-write to serialize against.
-      const nextMade = madeMarkup.trim();
-      const nextBought = boughtMarkup.trim();
-      if (
-        nextMade !== pricingBaseline.made ||
-        nextBought !== pricingBaseline.bought ||
-        materialBasis !== pricingBaseline.basis
-      ) {
-        await setCompanyPricingDefaults(companyId, {
-          made: Number(nextMade),
-          bought: Number(nextBought),
-          materialChargeBasis: materialBasis,
-        });
-        posthog.capture('pricing defaults set', {
-          made_changed: nextMade !== pricingBaseline.made,
-          bought_changed: nextBought !== pricingBaseline.bought,
-          material_basis_changed: materialBasis !== pricingBaseline.basis,
-          made_is_zero: Number(nextMade) === 0,
-          bought_is_zero: Number(nextBought) === 0,
-          material_basis: materialBasis,
-        });
-        setPricingBaseline({ made: nextMade, bought: nextBought, basis: materialBasis });
+      if (materialBasis !== materialBasisBaseline) {
+        await setCompanyMaterialChargeBasis(companyId, materialBasis);
+        posthog.capture('pricing defaults set', { material_basis: materialBasis });
+        setMaterialBasisBaseline(materialBasis);
       }
       setSuccess(true);
     } catch (err) {
@@ -294,77 +265,11 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
             </Box>
           </Box>
 
+          {/* A CHOICE, not a number, so it gets the same two-option control the
+              Materials panel uses — and the same two words. A setting that
+              renames the thing it defaults is a setting nobody connects to the
+              screen it governs. */}
           <Divider sx={{ my: 2 }} />
-          <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
-            Part pricing markups
-          </Typography>
-          <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-            What a new part starts at. Changing these never reprices a part you have
-            already set up.
-          </Typography>
-
-          {(
-            [
-              {
-                key: 'made' as const,
-                label: 'Parts you make',
-                value: madeMarkup,
-                setValue: setMadeMarkup,
-                error: madeMarkupError,
-              },
-              {
-                key: 'bought' as const,
-                label: 'Parts you buy',
-                value: boughtMarkup,
-                setValue: setBoughtMarkup,
-                error: boughtMarkupError,
-              },
-            ]
-          ).map((f) => (
-            <Box
-              key={f.key}
-              sx={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 2,
-                flexWrap: 'wrap',
-                mb: 1.5,
-              }}
-            >
-              <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
-                <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                  {f.label}
-                </Typography>
-              </Box>
-              <TextField
-                value={f.value}
-                onChange={(e) => {
-                  f.setValue(e.target.value);
-                  setSuccess(false);
-                }}
-                size="small"
-                type="number"
-                inputProps={{
-                  min: 0,
-                  step: 'any',
-                  inputMode: 'decimal',
-                  'aria-label': `Starting markup — ${f.label}`,
-                }}
-                error={Boolean(f.error)}
-                helperText={f.error}
-                sx={{ width: 160 }}
-                InputProps={{
-                  endAdornment: <InputAdornment position="end">%</InputAdornment>,
-                }}
-              />
-            </Box>
-          ))}
-
-          {/* The third default is a CHOICE, not a percentage, so it gets the same
-              two-option control the Materials panel uses — and the same two
-              words. A setting that renames the thing it defaults is a setting
-              nobody connects to the screen it governs. */}
           <Box
             sx={{
               display: 'flex',
@@ -372,11 +277,10 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
               justifyContent: 'space-between',
               gap: 2,
               flexWrap: 'wrap',
-              mb: 1.5,
             }}
           >
             <Box sx={{ flex: '1 1 260px', minWidth: 0 }}>
-              <Typography variant="body2" sx={{ fontWeight: 500 }}>
+              <Typography variant="subtitle2" sx={{ fontWeight: 600 }}>
                 Materials
               </Typography>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
@@ -416,21 +320,6 @@ export default function AppDefaultsCard({ companyId }: AppDefaultsCardProps) {
       )}
     </SettingsSection>
   );
-}
-
-/**
- * A number >= 0. Decimals allowed on purpose — the column is numeric(10,6),
- * deliberately not the whole-number shape KNOWN_DEFAULTS enforces, because
- * 0.01% of markup visibly moves a price. Blank is not valid: 0 is how you say
- * "sell at cost", and there is no third state.
- */
-function markupFieldError(raw: string): string | null {
-  const trimmed = raw.trim();
-  if (trimmed === '') return 'Required — use 0 to sell at cost';
-  const n = Number(trimmed);
-  if (!Number.isFinite(n)) return 'Enter a number';
-  if (n < 0) return 'Cannot be negative';
-  return null;
 }
 
 function emptyForm(): FormState {

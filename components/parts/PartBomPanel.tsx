@@ -41,7 +41,7 @@ import {
 } from '@/utils/partsAccess';
 import { getSuggestedConversionFactor } from '@/lib/unitPresets';
 import { getSupabase } from '@/lib/supabase';
-import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
+import { getCompany, readCompanyMaterialChargeBasis } from '@/utils/companyAccess';
 import { chargeBasisForNewLine } from '@/types/bom';
 import type { BomLineFormData, BomLineWithChildPart, ChargeBasis } from '@/types/bom';
 import MaterialRowEditor, {
@@ -187,7 +187,7 @@ export default function PartBomPanel({
     let cancelled = false;
     getCompany(companyId)
       .then((c) => {
-        if (!cancelled) setShopBasis(readCompanyPricingDefaults(c).materialChargeBasis);
+        if (!cancelled) setShopBasis(readCompanyMaterialChargeBasis(c));
       })
       .catch(() => {
         // Fall back to 'cost', which is what the column defaults to anyway.

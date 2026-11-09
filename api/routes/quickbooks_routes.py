@@ -220,9 +220,9 @@ async def callback(
         # This refuses on the realm alone, with no "but it looks harmless" branch.
         # An earlier cut allowed the switch when no invoice or customer row was
         # bound to the old realm, on the theory that there was nothing to strand.
-        # That was wrong: FOUR realm-specific settings live on the connection row
-        # itself — default_item_id, default_income_account_id, po_custom_field_id
-        # and po_custom_field_name — and persist_connection does not clear any of
+        # That was wrong: realm-specific settings live on the connection row
+        # itself — default_item_id and default_income_account_id (and, until
+        # 2026-11-09, the PO custom field) — and persist_connection does not clear
         # them. A "harmless" swap therefore leaves the new company pointing at an
         # item and income account belonging to the old one, and the next push files
         # a WRONG invoice rather than merely failing to read one.
@@ -610,83 +610,6 @@ async def terms(company_id: str, request: Request):
     return TermsResponse(connected=False)
 
 
-class PoFieldResponse(BaseModel):
-    """State of this company's PO custom field in QuickBooks.
-
-    `configured` false is the normal starting state, not an error — the shop has
-    to create the field themselves in the QuickBooks UI, and Jigged genuinely
-    cannot do it for them (see the endpoint docstring).
-    """
-
-    configured: bool
-    field_id: str | None = None
-    field_name: str | None = None
-    # Every enabled sales custom field, so the settings card can show the shop
-    # which of their three slots are taken and by what.
-    candidates: list[dict] = []
-    slots_used: int = 0
-
-
-@router.post("/{company_id}/po-field/refresh", response_model=PoFieldResponse)
-async def refresh_po_field(company_id: str, request: Request):
-    """Re-read QuickBooks Preferences and remember which custom field holds the PO.
-
-    EXPLICITLY USER-TRIGGERED. This is the "I've set it up, check again" button
-    on the settings card — never called on mount or on a push, because it is a
-    round trip to Intuit for a value that changes only when a human edits their
-    QuickBooks settings.
-
-    Jigged CANNOT create the field. Both paths were tested against a live
-    sandbox rather than assumed:
-      * the legacy REST Preferences write returns HTTP 200 and silently changes
-        nothing — three body shapes tried, all no-ops, confirmed by re-read;
-      * the GraphQL Custom Fields API answers 403 without a paid Silver partner
-        tier, whose sandbox host does not resolve at all.
-    Intuit's own capability matrix agrees: "Create custom field names | UI: Yes |
-    API: No". So the shop creates it, and this endpoint finds it.
-    """
-    await _verify_company_access(request, company_id, require_admin=True)
-    db = _service_client()
-    conn = qb.get_connection(db, company_id)
-    if not _is_connected(conn):
-        raise HTTPException(status_code=400, detail="QuickBooks is not connected.")
-    if conn.get("reconnect_required"):
-        raise HTTPException(
-            status_code=400,
-            detail="Reconnect QuickBooks first — we can't read your settings until then.",
-        )
-
-    # A failed read must NOT be written down. Persisting it would turn "we
-    # couldn't ask" into "you have no PO field", wiping an id that was correct
-    # a minute ago and silently dropping the PO from every later invoice. So the
-    # write happens only on a definitive answer, and a failure surfaces as a
-    # retryable error with the stored value untouched.
-    try:
-        found = qb.discover_po_custom_field(db, company_id)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("Could not read QuickBooks settings for %s", company_id, exc_info=True)
-        raise HTTPException(
-            status_code=502,
-            detail="Couldn't reach QuickBooks to check your settings. Try again in a moment.",
-        ) from exc
-
-    db.table("quickbooks_connections").update(
-        {
-            "po_custom_field_id": found["id"],
-            "po_custom_field_name": found["name"],
-            "qb_settings_checked_at": datetime.now(timezone.utc).isoformat(),
-        }
-    ).eq("company_id", company_id).execute()
-
-    return PoFieldResponse(
-        configured=found["id"] is not None,
-        field_id=found["id"],
-        field_name=found["name"],
-        candidates=found["candidates"],
-        slots_used=len(found["candidates"]),
-    )
-
-
 # ───────────────────────── Invoice payment mirror (read-back) ─────────────────────────
 class InvoiceStatusRow(BaseModel):
     """What QuickBooks Online last said about ONE invoice, exactly as stored.
@@ -830,8 +753,7 @@ async def invoice_status(company_id: str, job_id: str, request: Request):
             skipped_other_realm=skipped_other_realm,
         )
 
-    # A failed read must NOT be written down — the same rule as refresh_po_field
-    # above, and it bites harder here. Persisting "we couldn't ask" as a status would
+    # A failed read must NOT be written down. Persisting "we couldn't ask" as a status would
     # tell a shop owner an invoice is unpaid when it may have been settled that
     # morning. refresh_invoice_statuses writes only on a definitive answer, so every
     # branch below leaves the stored mirror exactly as it was.
@@ -1430,8 +1352,6 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
             sales_tax_code_id=sales_tax_code_id,
             transaction_date=transaction_date,
             request_id=str(request_id),
-            po_custom_field_id=conn.get("po_custom_field_id"),
-            po_custom_field_name=conn.get("po_custom_field_name"),
         )
         created = provider.create_invoice(payload, request_id=str(request_id))
         result = {

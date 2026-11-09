@@ -10,7 +10,6 @@ import type {
 } from '@/types/partPricing';
 import { getComputedPartChargeBase, addPartPricingNote } from '@/utils/partsAccess';
 import { calculateRoutingCost } from '@/utils/routingCostCalculation';
-import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 
@@ -164,8 +163,16 @@ export async function getPriceablePartIds(companyId: string): Promise<Set<string
 }
 
 /**
- * Give a part its first pricing tier, at the shop's starting markup, the moment
- * it first has a cost — so "costed" and "quotable" happen together (#727).
+ * The markup a part's first pricing tier is written with: 0%, so a new part
+ * sells at cost until someone sets a markup on its Pricing card. This was a
+ * per-shop setting (made vs bought) until 2026-11-09, when it was removed from
+ * Settings — every shop had left both at 0.
+ */
+export const STARTER_MARKUP_PERCENT = 0;
+
+/**
+ * Give a part its first pricing tier, at 0% markup, the moment it first has a
+ * cost — so "costed" and "quotable" happen together (#727).
  *
  * **Why this is not in the Pricing card.** It used to be, as an effect that
  * noticed a cost had appeared and wrote a tier. Two problems, both real:
@@ -215,12 +222,7 @@ export async function ensureStarterPricingTier(
     if (!hasPricedWork) return false;
   }
 
-  const company = await getCompany(companyId);
-  // No company row, no starting markup to apply — writing 0 would be inventing a
-  // number the shop never chose.
-  if (!company) return false;
-  const starters = readCompanyPricingDefaults(company);
-  const markup = source === 'bought' ? starters.bought : starters.made;
+  const markup = STARTER_MARKUP_PERCENT;
 
   // Bought: fill the default into the costed rows that lack a markup, leaving
   // every id, quantity and row count alone — a quote line's drift check compares
@@ -250,9 +252,7 @@ export async function ensureStarterPricingTier(
         partId,
         companyId,
         operator.id,
-        `Pricing started automatically at ${markup}% markup — your shop default for ${
-          source === 'bought' ? 'parts you buy' : 'parts you make'
-        } — so this part can be quoted. Adjust it any time.`,
+        `Pricing started automatically at ${markup}% markup so this part can be quoted. Adjust it any time.`,
       );
     }
   } catch (noteErr) {

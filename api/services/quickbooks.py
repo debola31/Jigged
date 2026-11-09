@@ -1037,62 +1037,6 @@ def _parse_net_days(term_name: str) -> int:
     return 0
 
 
-# A shop's own label for the PO field — "PO Number", "Customer PO #", "PO #".
-_PO_FIELD_PATTERN = re.compile(r"\bp\.?\s?o\.?\b|purchase\s*order", re.IGNORECASE)
-
-
-def discover_po_custom_field(db: Client, company_id: str) -> dict:
-    """Find the sales custom field this shop uses for the customer PO number.
-
-    Returns {"id": "1"|"2"|"3"|None, "name": str|None, "candidates": [...]}.
-
-    Matches on the field's LABEL, never on its position: Intuit states custom
-    field definitions "may not appear in numeric order in the Preferences
-    response body", so index-based access is a latent bug.
-
-    Returning id=None is the normal case, not an error — an unconfigured company
-    reports only three booleans (UseSalesCustom1/2/3), all false, with no name
-    entries at all. Jigged then sends no CustomField, because writing to a
-    guessed DefinitionId silently overwrites whatever the shop actually keeps in
-    that slot and the mapping cannot be reassigned afterwards.
-
-    Jigged CANNOT create the field. Verified live: the legacy Preferences write
-    returns HTTP 200 and changes nothing, and the GraphQL Custom Fields API
-    answers 403 without a paid partner tier.
-
-    RAISES rather than returning id=None when the Preferences read itself fails.
-    "Couldn't check" is not "there is no field": swallowing the error here would
-    hand the caller a definitive negative for a question that was never answered,
-    and the caller persists this result — so a momentary Intuit outage would wipe
-    a correctly discovered field id and silently stop the PO reaching invoices."""
-    out: dict = {"id": None, "name": None, "candidates": []}
-    prefs = qb_query(db, company_id, "select * from Preferences").get("Preferences", [])
-    if not prefs:
-        return out
-
-    blocks = (prefs[0].get("SalesFormsPrefs") or {}).get("CustomField") or []
-    enabled: dict[str, bool] = {}
-    names: dict[str, str] = {}
-    for block in blocks:
-        for f in block.get("CustomField", []) or []:
-            name = f.get("Name") or ""
-            slot = name[-1]
-            if slot not in "123":
-                continue
-            if name.startswith("SalesFormsPrefs.UseSalesCustom"):
-                enabled[slot] = bool(f.get("BooleanValue"))
-            elif name.startswith("SalesFormsPrefs.SalesCustomName"):
-                names[slot] = f.get("StringValue") or ""
-
-    for slot, label in sorted(names.items()):
-        if not enabled.get(slot):
-            continue
-        out["candidates"].append({"id": slot, "name": label})
-        if out["id"] is None and _PO_FIELD_PATTERN.search(label):
-            out["id"], out["name"] = slot, label
-    return out
-
-
 def _customer_summary(c: dict) -> dict:
     return {"qb_id": c["Id"], "display_name": c.get("DisplayName")}
 
@@ -1422,8 +1366,6 @@ def quote_to_invoice_payload(
     bill_addr: dict | None,
     lines: list[dict],
     sales_term_id: str | None = None,
-    po_custom_field_id: str | None = None,
-    po_custom_field_name: str | None = None,
 ) -> dict:
     """Pure transform: firm lines -> QBO Invoice JSON. Every line references the one
     shared item; the part identity lives in the Description. TaxCodeRef=NON because an
@@ -1443,18 +1385,15 @@ def quote_to_invoice_payload(
     a due date of exactly TxnDate + 30 from a QBO company default that nobody in Jigged
     chose or could see.
 
-    PO NUMBER lands in up to three places, because no single one is both universal and
-    prominent:
-      * every line's Description  — prints, needs no setup, works on every QBO plan, and
-        is what the pilot shop's AP department is already paying from. Never removed.
+    PO NUMBER prints in two places, both needing no setup on any QBO plan:
+      * every line's Description  — what the pilot shop's AP department is already paying
+        from. Never removed.
       * CustomerMemo              — the QBO UI's "Message on invoice". VERIFIED printing:
-        a probe invoice's PDF rendered it under "Note to customer". Free, no setup.
-      * a sales CustomField       — only when the shop has created one and Jigged has
-        DISCOVERED its DefinitionId. Never guessed: writing to an unmatched slot silently
-        overwrites whatever the shop keeps there and the mapping cannot be reassigned.
-        Jigged cannot create the field itself — verified that the legacy Preferences write
-        returns HTTP 200 and does nothing, and that the GraphQL Custom Fields API answers
-        403 without a paid partner tier.
+        a probe invoice's PDF rendered it under "Note to customer".
+    No sales CustomField is sent. Jigged used to discover a shop-made "PO Number" custom
+    field and fill it; that lookup was removed on 2026-11-09 (no connected shop had one).
+    Never guess a DefinitionId: writing to an unmatched slot silently overwrites whatever
+    the shop keeps there and the mapping cannot be reassigned.
     PrivateNote keeps the PO too, but only for internal traceability and QBO-side search:
     Intuit documents it as "does not appear on the invoice to the customer"."""
     po_suffix = f" (PO Number: {customer_po_number})" if customer_po_number else ""
@@ -1495,17 +1434,6 @@ def quote_to_invoice_payload(
         # Prints as "Note to customer" — the one prominent placement that needs
         # no configuration on any QBO plan.
         payload["CustomerMemo"] = {"value": f"PO Number: {customer_po_number}"}
-        # Only when discovery found a real field. A missing id means the shop has
-        # not made one, and the correct behaviour is to send nothing at all.
-        if po_custom_field_id:
-            field: dict = {
-                "DefinitionId": po_custom_field_id,
-                "Type": "StringType",
-                "StringValue": customer_po_number,
-            }
-            if po_custom_field_name:
-                field["Name"] = po_custom_field_name
-            payload["CustomField"] = [field]
 
     note_parts: list[str] = []
     if job_number:

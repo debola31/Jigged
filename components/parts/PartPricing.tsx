@@ -24,7 +24,11 @@ import {
   calculateRoutingCost,
   type RoutingCostBreakdown,
 } from '@/utils/routingCostCalculation';
-import { getTiersForPart, replaceTiersForPart } from '@/utils/partPricingTiersAccess';
+import {
+  getTiersForPart,
+  replaceTiersForPart,
+  STARTER_MARKUP_PERCENT,
+} from '@/utils/partPricingTiersAccess';
 import { unitPriceFromBase } from '@/utils/quotePricingResolver';
 import {
   addPartPricingNote,
@@ -32,7 +36,6 @@ import {
   updatePartCostingBatchQuantity,
 } from '@/utils/partsAccess';
 import { getCurrentMember } from '@/utils/operatorAccess';
-import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
 import { calculateMarkupFromUnitPrice } from '@/types/quote';
 import type { Part } from '@/types/part';
 import { buildPartHref, pushPartToChain } from '@/lib/partNavStack';
@@ -181,11 +184,6 @@ function recomputeRow(
  * no persisted tiers yet — the user fills the markup and saves. Until then the
  * part reads as "no markup / not priceable".
  */
-/** A markup for prose: trims the trailing zeros a numeric(10,6) round-trips. */
-function formatPercentValue(n: number): string {
-  return `${n.toLocaleString(undefined, { maximumFractionDigits: 6 })}%`;
-}
-
 function blankRow(): EditRow {
   return {
     sequence: 10,
@@ -271,10 +269,6 @@ export default function PartPricing({
   // even if the previous part left staged edits behind; a sibling-panel refresh
   // on the SAME part must not.
   const loadedPartIdRef = useRef<string | null>(null);
-  // The shop's starting markup for this part's source. Read once per company;
-  // used to SEED the first tier and to caption where that number came from.
-  // null while it loads — the starter write waits rather than guessing 0.
-  const [starterMarkup, setStarterMarkup] = useState<number | null>(null);
   const saving = saveState === 'saving';
 
   const dirtyRowFlags = rows.map((r, i) => rowDiffersFromBaseline(r, baseline[i]));
@@ -317,24 +311,6 @@ export default function PartPricing({
   const [costingSaveState, setCostingSaveState] = useState<SaveState>('idle');
   const costingDirty = costingQtyStr.trim() !== costingBaseline.trim();
   const [breakdownLoading, setBreakdownLoading] = useState<boolean>(!isBought);
-
-  useEffect(() => {
-    let cancelled = false;
-    getCompany(companyId)
-      .then((c) => {
-        if (cancelled) return;
-        const starters = readCompanyPricingDefaults(c);
-        setStarterMarkup(isBought ? starters.bought : starters.made);
-      })
-      .catch(() => {
-        // Leave it null: the starter tier simply doesn't fire, and the card
-        // behaves as it did before the setting existed. Guessing 0 here would
-        // write a markup the shop may not have chosen.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, isBought]);
   const costingSaving = costingSaveState === 'saving';
   const costingQty = (() => {
     const n = parseFloat(costingQtyStr);
@@ -742,17 +718,15 @@ export default function PartPricing({
   };
 
 
-  // The single tier the part was set up with, still sitting at the shop's
-  // starting markup. Not "any tier that matches" — a shop with two breaks
-  // has been in here and made choices, and one that typed the same number by
-  // hand doesn't need telling where it came from either (it stops matching the
-  // moment they change it, which is the only time the hint has anything to say).
+  // The single tier the part was set up with, still sitting at the starting
+  // 0% markup. Not "any tier that matches" — a shop with two breaks has been in
+  // here and made choices (it stops matching the moment the markup changes,
+  // which is the only time the hint has anything to say).
   const isUntouchedStarterTier =
     !dirty &&
-    starterMarkup !== null &&
     rows.length === 1 &&
     rows[0]?.id !== undefined &&
-    parseNumber(rows[0]?.markupPercent) === starterMarkup;
+    parseNumber(rows[0]?.markupPercent) === STARTER_MARKUP_PERCENT;
 
   // Removing a row leaves no dirty row to count; UnsavedChangesBar falls back
   // to generic phrasing rather than claiming zero.
@@ -1131,25 +1105,20 @@ export default function PartPricing({
             </Table>
           </TableContainer>
 
-          {/* A number the card wrote, not one the user typed — so it says where
-              it came from. At 0% it also says what that means, because "sells at
-              cost" is the part a shop must not discover on an accepted quote.
-              Disappears the moment the markup is changed. */}
+          {/* A number the card wrote, not one the user typed — so it says so,
+              and says what 0% means, because "sells at cost" is the part a shop
+              must not discover on an accepted quote. It no longer points at
+              Settings: the starting markups were removed on 2026-11-09, and this
+              table is the only place a markup is set. Disappears the moment the
+              markup is changed. */}
           {isUntouchedStarterTier && (
             <Typography
               variant="caption"
               color="text.secondary"
               sx={{ display: 'block', mt: 1 }}
             >
-              {starterMarkup === 0
-                ? 'Ready to quote at 0% markup — this part sells for what it costs. '
-                : `Ready to quote at ${formatPercentValue(starterMarkup)} markup. `}
-              That is your shop&apos;s starting markup for parts you{' '}
-              {isBought ? 'buy' : 'make'}, from{' '}
-              <Link href={`/dashboard/${companyId}/settings`} style={{ color: 'inherit' }}>
-                Settings
-              </Link>
-              . Change it here for this part alone.
+              Ready to quote at 0% markup — this part sells for what it costs. Change the
+              markup above to price it differently.
             </Typography>
           )}
 

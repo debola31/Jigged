@@ -278,22 +278,17 @@ customers.default_payment_terms → quotes.payment_terms → jobs.payment_terms 
 
 `resolve_term_id` matches **case-insensitively** because QBO ships `Due on receipt` against our `Due on Receipt`, and creating a Term whose name already exists is rejected with HTTP 400 — a case-sensitive compare would fail the push on the most common term of all. Intuit documents a 31-character cap on `Term.Name`, so a longer term is created truncated and the lookup accepts **both** spellings; otherwise the truncated row we created would never match, we'd re-POST it, take the duplicate 400, and the first invoice on a job would carry a term while every later one silently carried none. It returns `None` rather than raising in every failure mode — a mis-typed term must not block an invoice.
 
-**The customer PO reaches the invoice in four places** (it is `jobs.customer_po_number`, not a customer field):
+**The customer PO reaches the invoice in three places** (it is `jobs.customer_po_number`, not a customer field):
 
 | Placement | Prints? | Setup |
 |---|---|---|
 | Line `Description` suffix `(PO Number: X)` | yes | none — what the pilot shop's AP already pays from |
 | `CustomerMemo` → "Note to customer" | yes *(verified on a real PDF)* | none |
-| Sales `CustomField` | yes | **the shop must create the field by hand** |
 | `PrivateNote` | **no** — Intuit documents it as not appearing to the customer | none; internal search only |
 
-**Jigged cannot create the custom field**, verified on both paths: the legacy REST Preferences write returns HTTP 200 and silently changes nothing, and the GraphQL Custom Fields API answers 403 without a paid partner tier. Intuit's own matrix agrees — *"Create custom field names | UI: Yes | API: No."*
+**There is no sales `CustomField` placement any more (removed 2026-11-09).** Jigged used to look for a "PO Number" custom field the shop had made in QuickBooks (a Settings button, `POST /{company}/po-field/refresh`) and fill it on each push. Jigged cannot create that field — the REST Preferences write silently no-ops and the GraphQL Custom Fields API answers 403 without a paid partner tier — so it depended on the shop doing setup by hand, and neither connected shop ever had. The button, the endpoint and the discovery code were removed; nothing reads or writes `quickbooks_connections.po_custom_field_id` / `po_custom_field_name` / `qb_settings_checked_at` any more, and a follow-up migration drops them. If it ever comes back: match the field on its **label**, never its slot position, and never write to a guessed `DefinitionId` — it overwrites whatever the shop keeps in that slot and cannot be reassigned.
 
-So `discover_po_custom_field` **finds** the shop's field, matching on its **label** (`\bp\.?\s?o\.?\b|purchase\s*order`), never its slot position — Intuit states definitions "may not appear in numeric order". Writing to a guessed `DefinitionId` overwrites whatever the shop keeps there and cannot be reassigned, so with no match we send no `CustomField` at all.
-
-**Success-with-no-match and a failed read are different outcomes, deliberately.** No match returns `id: None` — the normal starting state. A failed Preferences read **raises**, and the route turns it into a 502 and writes nothing. "Couldn't check" is not "there is no field": the result is persisted, so swallowing the error would let one Intuit blip wipe a correctly discovered id and silently stop the PO reaching invoices.
-
-**Nothing about terms is cached.** A stored term map would be a second list drifting from QuickBooks' own — the exact problem this removes — to save a four-row query. The PO field *is* cached on `quickbooks_connections`, because it changes only when a human edits QuickBooks settings; refreshing it is an explicit admin button, never a mount or a push.
+**Nothing about terms is cached.** A stored term map would be a second list drifting from QuickBooks' own — the exact problem this removes — to save a four-row query.
 
 **Something now comes back the other way.** Since 2026-09-03 the integration is no longer purely outbound: each QuickBooks **Online** invoice Jigged pushed carries what QBO last said about it — balance, total, due date, invoice date and a status word — refreshed when the job's Invoices menu opens and marked stale by an Intuit webhook in between. Nothing of it reaches a customer record. It is stored on the invoice row, read by the invoice chip, and rolls up nowhere: no customer balance, no aging, no input to `credit_status`. Spec: [invoicing.md](invoicing.md#payment-status-quickbooks-online-mirror).
 
@@ -409,7 +404,7 @@ Each bullet cites a real test. Gaps are named as gaps rather than implied to be 
 **QuickBooks**
 - Sends `SalesTermRef`, never a `DueDate`; omits the key entirely with no term — `api/tests/unit/test_quickbooks_service.py::test_payload_sends_sales_term_and_never_a_due_date`, `::test_payload_without_a_term_sends_no_sales_term_ref`.
 - Term matching is case-insensitive and survives the 31-char cap — `::test_resolve_term_id_is_case_insensitive`, `::test_resolve_term_id_matches_the_truncated_name_it_created`, `::test_resolve_term_id_creates_within_the_name_cap`.
-- Discovery matches on label, raises rather than reporting a false negative — `::test_po_field_pattern_matches_real_shop_labels`, `::test_discover_po_custom_field_raises_when_it_cannot_ask`.
+- The PO prints on every line and in the customer note, and never goes into a custom field — `::test_po_prints_on_lines_and_memo_but_never_in_a_custom_field`.
 
 ### Coverage gaps — stated, not implied
 

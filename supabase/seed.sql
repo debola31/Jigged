@@ -1786,3 +1786,14 @@ where not exists (
     and t.document_type = d.document_type
     and t.version = d.version
 );
+
+-- ---------------------------------------------------------------------------
+-- MCP gateway key (local/preview only). The /mcp route sends MCP_GATEWAY_KEY as x-jigged-mcp,
+-- and public.mcp_token_binding() refuses an AI-assistant token without a registered one
+-- (migration 20261109163801). This is the SHA-256 of the dev key in .env.local.example,
+-- `local-dev-mcp-gateway-key`. Production registers its own fingerprint by hand.
+-- ---------------------------------------------------------------------------
+select public.register_mcp_gateway_key(
+  'dd78ca1fea1a4ba929300f341fe1ea3d996114f89f530f221b44de3a4ec3d586',
+  'local dev key (seed.sql)'
+);

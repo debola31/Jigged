@@ -3,6 +3,7 @@ import { z } from 'zod';
 
 import {
   BILLING_BLOCKED_MESSAGE,
+  GATEWAY_REFUSED_MESSAGE,
   UNEXPECTED_ERROR_MESSAGE,
   defineCompanyTool,
   registerCompanyTool,
@@ -217,6 +218,15 @@ describe('registerCompanyTool', () => {
     expect(res.content[0].text).toBe(BILLING_BLOCKED_MESSAGE);
     expect(mockCapture).not.toHaveBeenCalled();
     expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'refused' }));
+  });
+
+  it('says the server is misconfigured when the database refuses its gateway key', async () => {
+    // The access layer wraps Supabase errors, so the code is found on `cause`.
+    run.mockRejectedValue(new Error('Failed to load', { cause: { code: 'jigged_mcp_only', message: 'refused' } }));
+    const res = await register(readTool).cb({ colour: 'red', company_id: COMPANY_ID }, ctx());
+    expect(res.content[0].text).toBe(GATEWAY_REFUSED_MESSAGE);
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    expect(mockRecord).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }));
   });
 
   it('reports an unexpected failure to Sentry and tells the person in a sentence', async () => {

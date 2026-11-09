@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 import sentry_sdk
 import stripe
 from fastapi import APIRouter, HTTPException, Request
+import routes.company_auth as company_auth
 from supabase import Client, create_client
 
 from models.stripe_models import (
@@ -129,6 +130,8 @@ async def _verify_company_admin(request: Request, company_id: str) -> str:
     except Exception as exc:  # noqa: BLE001
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # No AI assistant token: billing is never done from an assistant.
+    company_auth.refuse_assistant(request)
 
     access = (
         client.table("user_company_access")

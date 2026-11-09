@@ -30,6 +30,7 @@ import unicodedata
 
 import anthropic
 from fastapi import APIRouter, HTTPException, Request
+import routes.company_auth as company_auth
 from pydantic import BaseModel, Field
 from supabase import Client, create_client
 
@@ -167,6 +168,8 @@ async def _verify_company_access(request: Request, company_id: str, client: Clie
     except Exception as exc:  # noqa: BLE001
         logger.warning("Token verification failed: %s", exc)
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # No AI assistant token: drawing extraction calls Jigged's own model; the MCP server never does.
+    company_auth.refuse_assistant(request)
 
     access = (
         client.table("user_company_access")

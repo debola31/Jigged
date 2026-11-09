@@ -340,6 +340,8 @@ async def chat(company_id: str, request: ChatRequest, http_request: Request):
     # after this runs with the service-role key, so without it anyone could read any
     # shop's data and spend its hourly cap.
     await company_auth.verify_office_access(http_request, company_id)
+    # Jigged's own model is never invoked for an AI assistant (the customer's assistant is the AI).
+    company_auth.refuse_assistant(http_request)
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
     if not ai_enabled:
         raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
@@ -413,6 +415,8 @@ async def report(company_id: str, request: ReportRequest, http_request: Request)
     PDF itself (utils/reportPdf.ts). No storage object, no backend rendering.
     """
     await company_auth.verify_office_access(http_request, company_id)
+    # Jigged's own model is never invoked for an AI assistant (the customer's assistant is the AI).
+    company_auth.refuse_assistant(http_request)
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
     if not ai_enabled:
         raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")

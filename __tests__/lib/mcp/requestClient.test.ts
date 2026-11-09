@@ -62,6 +62,25 @@ describe('runAsCaller', () => {
     expect(seen).toEqual(['user-a', 'user-b']);
   });
 
+  it('proves each database request comes from /mcp with the gateway key', async () => {
+    // An assistant's token alone is refused by the database (public.mcp_token_binding); this
+    // header is what lets the same token work here and nowhere else.
+    vi.stubEnv('MCP_GATEWAY_KEY', 'gateway-key-1');
+    const fetchMock = vi.fn(
+      async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const { getSupabase } = await import('@/lib/supabase');
+    const { runAsCaller } = await import('@/lib/mcp/requestClient');
+
+    await runAsCaller(caller('user-a', 'token-a'), async () => {
+      await getSupabase().from('companies').select('id');
+    });
+
+    const rest = fetchMock.mock.calls.find(([input]) => String(input).includes('/rest/v1/companies'));
+    expect(new Headers((rest?.[1] as RequestInit | undefined)?.headers).get('x-jigged-mcp')).toBe('gateway-key-1');
+  });
+
   it("sends the caller's token on database requests", async () => {
     const fetchMock = vi.fn(
       async () => new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }),

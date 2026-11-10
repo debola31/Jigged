@@ -9,7 +9,10 @@
  * The lists are the `save_vendor_purchase_order` patch keys that change the vendor's copy of a
  * SENT PO — the keys the PO form edits, so it can predict "Save as Rev N+1" by diffing them.
  * The database decides by hashing `vendor_purchase_order_document()` (snapshots and all); these
- * keys are what feed that document.
+ * keys are what feed that document. `job_part_id` is one because it carries the job: a line moved
+ * to another job's part prints that job's number. `line_kind` and `job_operation_id` print too but
+ * are on no list: an existing line's kind and routing step are fixed (the save refuses a change,
+ * draft or sent), so only adding or removing a line moves them.
  *
  * ONE LIST, THREE COPIES, PINNED TOGETHER by `__tests__/lib/purchasing/vendorPoVisibleFields.test.ts`:
  *   - this file (the UI's copy);
@@ -45,6 +48,8 @@ export const VENDOR_PO_LINE_VISIBLE_FIELDS = [
   'need_by_on',
   'cert_required',
   'job_id',
+  'job_part_id',
+  'work_center_id',
 ] as const;
 
 /** Header keys that never bump the revision. */

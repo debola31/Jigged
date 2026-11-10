@@ -12,7 +12,10 @@
     "    named like the four lists below; that file may load this one instead of copying it.",
     "",
     "line_set_changes: adding or removing a line also changes the vendor's copy.",
-    "fixed_once_sent_fields: on the vendor's copy, but a sent PO refuses to change them (P4)."
+    "fixed_once_sent_fields: on the vendor's copy, but a sent PO refuses to change them (P4).",
+    "job_part_id carries the job (a line moved to another job's part prints that job number).",
+    "line_kind and job_operation_id print too, but no list holds them: an existing line's kind",
+    "and routing step are fixed, draft or sent, so only adding or removing a line moves them."
   ],
   "vendor_visible_header_fields": [
     "vendor_contact_id",
@@ -36,7 +39,9 @@
     "unit_price",
     "need_by_on",
     "cert_required",
-    "job_id"
+    "job_id",
+    "job_part_id",
+    "work_center_id"
   ],
   "internal_header_fields": ["internal_notes"],
   "internal_line_fields": ["promised_on"],

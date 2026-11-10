@@ -109,6 +109,26 @@ def test_one_line_link_per_line_per_link(db, shop, qb):
         ps.insert_line_link(db, shop, qb.link, qb.po.lines[0])
 
 
+def test_a_removed_line_keeps_its_quickbooks_line_link_naming_no_line(db, shop, qb):
+    """[QB8, QB11] Removing an unreceived line deletes it, but QuickBooks still holds the line
+    the push put there. Its link row stays with the line cleared (ON DELETE SET NULL on that
+    column alone, so the row keeps its company), so the next push knows that QuickBooks line is
+    its own to drop, not one the bookkeeper added (qb_foreign_lines). Two removed lines keep two
+    rows: NULLs are distinct under UNIQUE (link, line)."""
+    ps.save_po(shop.admin, qb.po.id, lines=[ps.other_line("Freight"), ps.other_line("Expedite fee")],
+               expected=ps.updated_at_text(db, qb.po.id))
+    added = [line["id"] for line in ps.lines_of(db, qb.po.id)[1:]]
+    for line in added:
+        ps.insert_line_link(db, shop, qb.link, line)
+
+    ps.save_po(shop.admin, qb.po.id, removed=added, expected=ps.updated_at_text(db, qb.po.id))
+    held = ps.rows(db, """
+        SELECT company_id, vendor_purchase_order_line_id FROM quickbooks_purchase_order_line_links
+         WHERE link_id = %s ORDER BY vendor_purchase_order_line_id NULLS LAST""", (qb.link,))
+    assert [r["vendor_purchase_order_line_id"] for r in held] == [qb.po.lines[0], None, None]
+    assert {r["company_id"] for r in held} == {shop.company}
+
+
 def test_one_vendor_map_row_per_vendor_per_company_file(db, shop, qb):
     """[QB11] A clone of quickbooks_customer_map: UNIQUE(company, vendor, realm)."""
     with pytest.raises(errors.UniqueViolation):

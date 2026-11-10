@@ -834,13 +834,20 @@ async def test_an_update_reads_once_sends_the_line_ids_and_stores_the_new_ones(
 
 async def test_a_removed_line_is_dropped_from_quickbooks_too(db, shop, people, qbo, monkeypatch):  # noqa: F811
     """Its QuickBooks line id must still be known after the Jigged line is gone, or the
-    update would mistake it for a line the bookkeeper added. Needs
-    quickbooks_purchase_order_line_links.vendor_purchase_order_line_id ON DELETE SET NULL."""
+    update would mistake it for a line the bookkeeper added (qb_foreign_lines). Removing an
+    unreceived line deletes it, so this needs
+    quickbooks_purchase_order_line_links.vendor_purchase_order_line_id ON DELETE SET NULL: the
+    row stays, naming no line. QuickBooks still holds both lines, as the first push left them --
+    read from before the removal, so a vanished row cannot make the guard pass by accident."""
     boundary = Boundary(monkeypatch, "qbo")
     po = await pushed_once(db, shop, people, boundary, "qbo")
+    in_quickbooks = state_from_links(db, po.id)
+    assert sorted(line.id for line in in_quickbooks.lines) == ["QB-PO-1-L1", "QB-PO-1-L2"]
     ps.save_po(shop.admin, po.id, removed=[po.lines[1]], expected=ps.updated_at_text(db, po.id))
     ps.mark_sent(shop.admin, po.id)
-    boundary.on("read_purchase_order", lambda *a, **k: state_from_links(db, po.id)) \
+    held = {r["qb_line_id"]: r["vendor_purchase_order_line_id"] for r in _line_links(db, _link(db, po.id)["id"])}
+    assert held == {"QB-PO-1-L1": po.lines[0], "QB-PO-1-L2": None}, "the removed line's QuickBooks line was forgotten"
+    boundary.on("read_purchase_order", lambda *a, **k: in_quickbooks) \
         .on("update_purchase_order", updates("qbo"))
     res = await push(people.admin["token"], shop.company, po.id)
     assert res.status_code == 200, res.text

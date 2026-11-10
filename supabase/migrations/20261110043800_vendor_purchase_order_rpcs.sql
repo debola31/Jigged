@@ -351,8 +351,12 @@ GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_insert(uuid, uuid, date,
 --                    unlinked slips already sent for that step to that vendor.
 --   other            free text, optionally on a work centre and/or a job; may expect no
 --                    receipt (freight, a fee).
--- After a receipt: quantity cannot drop below it, and kind, part, unit, factor and step are
--- fixed. A closed line takes only its promised date.
+-- An existing line's kind and routing step never change, draft or sent: the kind decides
+-- what the line prints and how it is received, the step which slips follow it. A different
+-- kind or step is a different line, so the caller removes this one (or closes it) and adds
+-- one; that is why neither is a key on the shared vendor-visible field list.
+-- After a receipt: quantity cannot drop below it, and part, unit and factor are fixed. A
+-- closed line takes only its promised date.
 CREATE OR REPLACE FUNCTION public.vendor_purchase_order_upsert_line(
     p_vendor_purchase_order_id uuid,
     p_line jsonb)
@@ -401,8 +405,6 @@ DECLARE
     v_received_stock numeric := 0;
     v_received_qty   numeric := 0;
     v_slip_good      numeric := 0;
-    v_slip_count     integer := 0;
-    v_kind_changed   boolean := false;
     v_part_changed   boolean := false;
     v_op_changed     boolean := false;
     v_unit_changed   boolean := false;
@@ -444,7 +446,13 @@ BEGIN
         IF v_kind NOT IN ('part', 'outside_service', 'other') THEN
             RAISE EXCEPTION 'Unknown line_kind %', v_kind USING ERRCODE = 'XX000';
         END IF;
-        v_kind_changed := v_kind <> v_old.line_kind;
+        -- Kind and step are what the line IS (see the header). Repeating them is no change.
+        IF v_kind <> v_old.line_kind
+           OR (p_line ? 'job_operation_id'
+               AND NULLIF(p_line->>'job_operation_id', '')::uuid IS DISTINCT FROM v_old.job_operation_id) THEN
+            RAISE EXCEPTION '% can''t change its kind or its routing step. Add a new line instead, and remove or close this one.',
+                v_label USING ERRCODE = 'P0001';
+        END IF;
         v_part_id      := v_old.part_id;
         v_op_id        := v_old.job_operation_id;
         v_job_id       := v_old.job_id;
@@ -477,7 +485,7 @@ BEGIN
 
         -- What has already happened on it.
         IF v_old.line_kind = 'outside_service' THEN
-            SELECT count(*), COALESCE(sum(COALESCE(back.good, 0)), 0) INTO v_slip_count, v_slip_good
+            SELECT COALESCE(sum(COALESCE(back.good, 0)), 0) INTO v_slip_good
               FROM public.outside_shipments s
               LEFT JOIN LATERAL (
                   SELECT sum(x.quantity_good) AS good FROM public.outside_shipment_receipts x
@@ -528,18 +536,8 @@ BEGIN
         v_source := 'manual';
     END IF;
 
-    IF NOT v_new AND v_kind_changed THEN
-        IF v_live_receipts THEN
-            RAISE EXCEPTION '% has receipts, so its kind can''t change.', v_label USING ERRCODE = 'P0001';
-        END IF;
-        IF v_slip_count > 0 THEN
-            RAISE EXCEPTION '% has vendor packing slips linked to it, so its kind can''t change.', v_label
-                USING ERRCODE = 'P0001';
-        END IF;
-    END IF;
-
-    v_part_changed := v_new OR v_kind_changed OR v_part_id IS DISTINCT FROM v_old.part_id;
-    v_op_changed   := v_new OR v_kind_changed OR v_op_id IS DISTINCT FROM v_old.job_operation_id;
+    v_part_changed := v_new OR v_part_id IS DISTINCT FROM v_old.part_id;
+    v_op_changed   := v_new;   -- an existing line's step is fixed (refused above)
 
     -- ---- by kind --------------------------------------------------------------
     IF v_kind = 'part' THEN
@@ -640,10 +638,6 @@ BEGIN
         END IF;
 
         IF v_op_changed THEN
-            IF NOT v_new AND v_slip_count > 0 THEN
-                RAISE EXCEPTION '% has vendor packing slips linked to it, so its step can''t change.', v_label
-                    USING ERRCODE = 'P0001';
-            END IF;
             IF v_op.vendor_service_id IS NULL THEN
                 RAISE EXCEPTION 'Op % on % is done in-house, so it can''t be outside work on a purchase order.',
                     v_op.sequence, v_op.job_number USING ERRCODE = 'P0001';
@@ -734,7 +728,7 @@ BEGIN
 
         IF v_wc_id IS NULL THEN
             v_wc_name := NULL;
-        ELSIF v_new OR v_kind_changed OR p_line ? 'work_center_id' THEN
+        ELSIF v_new OR p_line ? 'work_center_id' THEN
             SELECT w.company_id, w.name, w.deleted_at INTO v_wc
               FROM public.work_centers w WHERE w.id = v_wc_id;
             IF NOT FOUND OR v_wc.company_id <> v_po.company_id THEN
@@ -866,8 +860,8 @@ BEGIN
          WHERE id = v_line_id;
     END IF;
 
-    -- A new outside line (or one newly pointed at a step) picks up the live, unlinked slips
-    -- already sent for that step to this vendor.
+    -- A new outside line picks up the live, unlinked slips already sent for its step to this
+    -- vendor. (An existing line's step never changes, so it never needs to.)
     IF v_kind = 'outside_service' AND v_op_changed THEN
         WITH linked AS (
             UPDATE public.outside_shipments s
@@ -890,7 +884,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.vendor_purchase_order_upsert_line(uuid, jsonb) IS
-  'Inserts (no "id") or patches (an "id" of this PO) one vendor PO line, enforcing every per-kind rule: part (live part, not Do not use, unit with exactly one factor, frozen), outside_service (an outside step this vendor performs on a live job, one open line per step and vendor, the part''s own unit, no promised date; links existing unlinked slips) and other (description, optional work centre/job, may expect no receipt). After a receipt the quantity cannot drop below it and kind, part, unit, factor and step are fixed; a closed line takes only promised_on. Snapshots freeze at insert or on an explicit id. Internal.';
+  'Inserts (no "id") or patches (an "id" of this PO) one vendor PO line, enforcing every per-kind rule: part (live part, not Do not use, unit with exactly one factor, frozen), outside_service (an outside step this vendor performs on a live job, one open line per step and vendor, the part''s own unit, no promised date; links existing unlinked slips) and other (description, optional work centre/job, may expect no receipt). An existing line''s line_kind and job_operation_id never change (P0001: add a new line instead); after a receipt the quantity cannot drop below it and part, unit and factor are fixed; a closed line takes only promised_on. Snapshots freeze at insert or on an explicit id. Internal.';
 
 REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_upsert_line(uuid, jsonb) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_upsert_line(uuid, jsonb) TO service_role;
@@ -1728,7 +1722,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) IS
-  'Patch-saves a vendor PO. p_changes keys (absent = unchanged): vendor_id (drafts only, no outside lines), vendor_contact_id, vendor_address_id, ship_to, ordered_on (drafts only), need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes (terms_and_conditions stay the copy taken at create). p_lines: new lines without "id" (line_kind part|outside_service|other plus part_id, job_operation_id, job_id, job_part_id, work_center_id, description, vendor_part_number, quantity, unit, unit_price, price_source, need_by_on, promised_on, cert_required, expects_receipt) and existing lines with their "id" and only the changed keys. p_removed_line_ids must be lines of this PO with no receipts. p_expected_updated_at (the updated_at string as read, passed through unchanged) is checked only when vendor-visible fields change. After a send, the first vendor-visible change bumps the revision once per send cycle; content_version moves when a QuickBooks-pushed field moves. A closed or archived PO takes only internal_notes and promised_on. Returns {id, po_number, status, revision, sent_revision, revision_bumped, content_version, content_changed, updated_at, line_ids, linked_outside_shipment_ids, unlinked_outside_shipment_ids}.';
+  'Patch-saves a vendor PO. p_changes keys (absent = unchanged): vendor_id (drafts only, no outside lines), vendor_contact_id, vendor_address_id, ship_to, ordered_on (drafts only), need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes (terms_and_conditions stay the copy taken at create). p_lines: new lines without "id" (line_kind part|outside_service|other plus part_id, job_operation_id, job_id, job_part_id, work_center_id, description, vendor_part_number, quantity, unit, unit_price, price_source, need_by_on, promised_on, cert_required, expects_receipt) and existing lines with their "id" and only the changed keys (an existing line''s line_kind and job_operation_id are fixed: a change is refused, a repeat of the same value is not). p_removed_line_ids must be lines of this PO with no receipts. p_expected_updated_at (the updated_at string as read, passed through unchanged) is checked only when vendor-visible fields change. After a send, the first vendor-visible change bumps the revision once per send cycle; content_version moves when a QuickBooks-pushed field moves. A closed or archived PO takes only internal_notes and promised_on. Returns {id, po_number, status, revision, sent_revision, revision_bumped, content_version, content_changed, updated_at, line_ids, linked_outside_shipment_ids, unlinked_outside_shipment_ids}.';
 
 REVOKE EXECUTE ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) TO authenticated, service_role;

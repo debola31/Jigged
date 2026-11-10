@@ -87,6 +87,14 @@ describe('the shared list (P3)', () => {
     expect(isVendorVisibleField('line', 'promised_on')).toBe(false);
     expect(isVendorVisibleField('line', 'price_source')).toBe(false);
   });
+
+  it('counts the machine and the job part, which print their names, and never kind or step', () => {
+    expect(isVendorVisibleField('line', 'work_center_id')).toBe(true);
+    expect(isVendorVisibleField('line', 'job_part_id')).toBe(true);
+    // Fixed for an existing line — the save refuses a change — so never a key that bumps.
+    expect(isVendorVisibleField('line', 'line_kind')).toBe(false);
+    expect(isVendorVisibleField('line', 'job_operation_id')).toBe(false);
+  });
 });
 
 const doc = (): VendorPoDocumentSnapshot => ({
@@ -159,6 +167,15 @@ describe('diffVendorVisible — what the vendor would see change (P3)', () => {
     const after = doc();
     after.lines[0] = { ...after.lines[0], cert_required: true };
     expect(changes(doc(), after)).toEqual(['line.cert_required@l1']);
+  });
+
+  it('sees a line moved to another machine or onto a job part', () => {
+    const before = doc();
+    before.lines[1] = { ...before.lines[1], work_center_id: 'wc-1' };
+    const after = doc();
+    after.lines[1] = { ...after.lines[1], work_center_id: 'wc-2' };
+    after.lines[0] = { ...after.lines[0], job_part_id: 'jp-1' };
+    expect(changes(before, after)).toEqual(['line.job_part_id@l1', 'line.work_center_id@l2']);
   });
 });
 

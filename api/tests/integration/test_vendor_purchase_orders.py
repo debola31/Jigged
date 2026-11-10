@@ -14,9 +14,9 @@ line, and a status nobody stores. Each rule below is one a careless writer break
     bump; internal notes, promised dates and closing never bump (P3). `content_version` is the
     separate counter of what QuickBooks holds, and it moves exactly when one of those fields
     does, including close and reopen (QB9).
-  * **Edit guards** keep a PO consistent with what already happened: received quantities, the
-    vendor once sent, closed and archived POs, and stale saves (P4). Archive is never blocked
-    and lets go of its outside slips (P5).
+  * **Edit guards** keep a PO consistent with what already happened: an existing line's kind
+    and routing step, received quantities, the vendor once sent, closed and archived POs, and
+    stale saves (P4). Archive is never blocked and lets go of its outside slips (P5).
   * **Status is computed once, in the views** (P6), and "late" and "amount" are one SQL
     definition each, pinned to the TypeScript mirrors by shared golden fixtures (P7).
 
@@ -63,8 +63,9 @@ def _refuse_save(db, user: str, po_id: str, *, stale: str | None = None, **kw):
 class SentPo:
     shop: ps.Shop
     po: ps.Po
-    bar_line: str     # 10 ft of BAR at $24.00/ft
-    screw_line: str   # 2.5 hundred SCREWs at $12.00/hundred
+    bar_line: str      # 10 ft of BAR at $24.00/ft
+    screw_line: str    # 2.5 hundred SCREWs at $12.00/hundred
+    machine_line: str  # a spindle rebuild on the Haas, done on site: an Other line expecting no receipt
 
 
 SENT_HEADER = {
@@ -83,8 +84,11 @@ def sent(db, shop) -> SentPo:
                      description="4140 bar, 1in round", vendor_part_number="AT-4140-1",
                      need_by_on="2026-12-01"),
         ps.part_line(shop.screw, 2.5, "hundred", unit_price=12, description="M5x16 SHCS"),
+        # No receipt, so closing the two part lines still leaves nothing outstanding (P6).
+        ps.other_line("Spindle rebuild, on site", unit_price=1800, work_center_id=shop.work_center,
+                      expects_receipt=False),
     ], header=dict(SENT_HEADER), sent=True)
-    return SentPo(shop=shop, po=po, bar_line=po.lines[0], screw_line=po.lines[1])
+    return SentPo(shop=shop, po=po, bar_line=po.lines[0], screw_line=po.lines[1], machine_line=po.lines[2])
 
 
 def _save(db, ctx: SentPo, patch: dict, user: str | None = None):
@@ -402,6 +406,11 @@ VISIBLE_RECIPES = {
     "line_part": Recipe("line", ("part_id", "unit", "quantity"),
                         lambda c: {"lines": [{"id": c.screw_line, "part_id": c.shop.widget, "unit": "each", "quantity": 250}]}),
     "line_job": Recipe("line", ("job_id",), lambda c: {"lines": [{"id": c.bar_line, "job_id": c.shop.job}]}),
+    # The job part carries its job: the screws are now bought for the second job, whose number prints.
+    "line_job_part": Recipe("line", ("job_part_id",),
+                            lambda c: {"lines": [{"id": c.screw_line, "job_part_id": c.shop.screw_job_part}]}),
+    "line_work_center": Recipe("line", ("work_center_id",),
+                               lambda c: {"lines": [{"id": c.machine_line, "work_center_id": c.shop.work_center_2}]}),
     "line_added": Recipe("line", (), lambda c: {"lines": [ps.other_line("Freight", unit_price=45)]}),
     "line_removed": Recipe("line", (), lambda c: {"removed": [c.screw_line]}),
 }
@@ -564,7 +573,7 @@ def test_a_line_with_receipts_cannot_be_removed_and_numbers_are_never_reused(db,
     _save(db, sent, {"removed": [sent.screw_line]})
     assert ps.line_row(db, sent.screw_line) is None
     _save(db, sent, {"lines": [ps.other_line("Freight")]})
-    assert [line["line_number"] for line in ps.lines_of(db, sent.po.id)] == [1, 3]
+    assert [line["line_number"] for line in ps.lines_of(db, sent.po.id)] == [1, 3, 4]
 
 
 @pytest.mark.parametrize(
@@ -581,6 +590,52 @@ def test_kind_part_and_unit_are_fixed_once_anything_is_received(db, sent, patch)
     before = ps.line_row(db, sent.bar_line)
     ps.assert_state_refusal(_refuse_save(db, sent.shop.user, sent.po.id, lines=[patch(sent)]))
     assert ps.line_row(db, sent.bar_line) == before
+
+
+def _one_of_each_kind(db, shop: ps.Shop, *, sent: bool) -> ps.Po:
+    """Lines 1-3: 10 ft of BAR, the job's anodize step, a spindle rebuild on the Haas."""
+    return ps.make_po(db, shop, [ps.part_line(shop.bar, 10, "feet"),
+                                 ps.outside_line(shop.outside_op, 100),
+                                 ps.other_line("Spindle rebuild", unit_price=1800, work_center_id=shop.work_center)],
+                      sent=sent)
+
+
+# (shop, po, another V1 anodize step) → the patch of one existing line.
+FIXED_KIND_AND_STEP = [
+    pytest.param(lambda s, po, step: {"id": po.lines[0], "line_kind": "other", "part_id": None}, id="part-to-other"),
+    pytest.param(lambda s, po, step: {"id": po.lines[2], "line_kind": "part", "part_id": s.screw, "unit": "each",
+                                      "work_center_id": None}, id="other-to-part"),
+    pytest.param(lambda s, po, step: {"id": po.lines[1], "line_kind": "other"}, id="outside-to-other"),
+    pytest.param(lambda s, po, step: {"id": po.lines[1], "job_operation_id": step}, id="outside-to-another-step"),
+    pytest.param(lambda s, po, step: {"id": po.lines[1], "job_operation_id": None}, id="outside-drops-its-step"),
+    pytest.param(lambda s, po, step: {"id": po.lines[0], "job_operation_id": step}, id="part-takes-a-step"),
+]
+
+
+@pytest.mark.parametrize("sent", [False, True], ids=["draft", "sent"])
+@pytest.mark.parametrize("patch", FIXED_KIND_AND_STEP)
+def test_an_existing_lines_kind_and_routing_step_never_change(db, shop, patch, sent):
+    """[P2, P4] A line's kind decides what it prints and how it is received, and an outside
+    line's step decides which slips follow it — so neither changes on an existing line, draft
+    or sent, receipts or none. That is also why neither is on the shared vendor-visible list:
+    only adding or removing a line moves them. Refused with a sentence; nothing written."""
+    _, another_step = ps.add_outside_job_part(db, shop, shop.anodize)
+    po = _one_of_each_kind(db, shop, sent=sent)
+    before = ps.lines_of(db, po.id)
+    err = _refuse_save(db, shop.user, po.id, lines=[patch(shop, po, another_step)])
+    ps.assert_state_refusal(err, "kind", "routing step")
+    assert ps.lines_of(db, po.id) == before
+
+
+def test_repeating_a_lines_own_kind_and_step_is_not_a_change(db, shop):
+    """[P4] The refusal is about a change: a client that sends a line's kind and step back with
+    an edit (the whole line, say) is accepted."""
+    po = _one_of_each_kind(db, shop, sent=True)
+    ps.save_po(shop.user, po.id, expected=ps.updated_at_text(db, po.id), lines=[
+        {"id": po.lines[0], "line_kind": "part", "job_operation_id": None, "quantity": 11},
+        {"id": po.lines[1], "line_kind": "outside_service", "job_operation_id": shop.outside_op, "quantity": 90},
+    ])
+    assert [ps.line_row(db, line)["quantity"] for line in po.lines[:2]] == [11, 90]
 
 
 def test_the_vendor_is_fixed_once_sent_but_a_draft_can_change_it(db, shop, sent):
@@ -924,6 +979,41 @@ def _receive_three(db, c: SentPo, **kw):
     ps.receive(c.shop.user, c.po.id, [ps.entry(c.bar_line, 3, location=c.shop.shelf, **kw)])
 
 
+def _open_rev_1(db, c: SentPo):
+    """A vendor-visible change has already opened Rev 1, so the revision -- which the pushed
+    projection carries too -- cannot move again this cycle: only the field itself can move
+    content_version. Without it, every vendor-visible save after a send bumps through the
+    revision and would hide a field the projection lacks."""
+    _save(db, c, {"changes": {"ship_via": "Will call"}})
+
+
+def _rename_bar_in_open_rev_1(db, c: SentPo):
+    ps.execute(db, "UPDATE parts SET part_name = 'BAR-4140-1RD-B' WHERE id = %s", (c.shop.bar,))
+    _open_rev_1(db, c)
+
+
+def _add_anodize_line(db, c: SentPo):
+    _save(db, c, {"lines": [ps.outside_line(c.shop.outside_op, 100)]})
+
+
+def _anodize_line(db, c: SentPo) -> str:
+    return next(r["id"] for r in ps.lines_of(db, c.po.id) if r["line_kind"] == "outside_service")
+
+
+def _as_any_writer(column: str, value, line: Callable[[object, SentPo], str]):
+    """ONE line column changed the way every PO writer brackets its change: the md5 of the pushed
+    projection first, then the change, then the settle step every writer ends with
+    (vendor_purchase_order_settle_versions). For the snapshots no RPC moves on their own: an
+    existing line's step is fixed, so its service name never moves by itself, and its stock unit
+    and factor move only with its unit or its part."""
+    def act(db, c: SentPo):
+        target = line(db, c)
+        before = ps.scalar(db, "SELECT md5(public.vendor_purchase_order_pushed_projection(%s)::text)", (c.po.id,))
+        ps.execute(db, f"UPDATE public.vendor_purchase_order_lines SET {column} = %s WHERE id = %s", (value, target))
+        ps.scalar(db, "SELECT public.vendor_purchase_order_settle_versions(%s, %s, false)", (c.po.id, before))
+    return act
+
+
 CONTENT_CASES = [
     ("save_notes_to_vendor", True, None, lambda db, c: _save(db, c, {"changes": {"notes_to_vendor": "Dock B"}})),
     ("save_payment_terms", True, None, lambda db, c: _save(db, c, {"changes": {"payment_terms": "Net 45"}})),
@@ -935,6 +1025,21 @@ CONTENT_CASES = [
      lambda db, c: _save(db, c, {"lines": [{"id": c.bar_line, "vendor_part_number": "AT-NEW"}]})),
     ("save_line_added", True, None, lambda db, c: _save(db, c, {"lines": [ps.other_line("Freight")]})),
     ("save_line_removed", True, None, lambda db, c: _save(db, c, {"removed": [c.screw_line]})),
+    # The QuickBooks line description prints these (api/services/accounting/purchase_order.py
+    # describe_line): the part number, the machine, the job, the unit label and the service.
+    ("save_line_part_number_refreshed_in_open_rev", True, _rename_bar_in_open_rev_1,
+     lambda db, c: _save(db, c, {"lines": [{"id": c.bar_line, "part_id": c.shop.bar}]})),
+    ("save_line_work_center_in_open_rev", True, _open_rev_1,
+     lambda db, c: _save(db, c, {"lines": [{"id": c.machine_line, "work_center_id": c.shop.work_center_2}]})),
+    ("save_line_job_part_in_open_rev", True, _open_rev_1,
+     lambda db, c: _save(db, c, {"lines": [{"id": c.screw_line, "job_part_id": c.shop.screw_job_part}]})),
+    ("any_writer_line_stock_unit", True, None,
+     _as_any_writer("stock_unit", "millimeters", lambda db, c: c.bar_line)),
+    ("any_writer_line_stock_factor", True, None, _as_any_writer("stock_factor", 10, lambda db, c: c.bar_line)),
+    ("any_writer_line_service_name", True, _add_anodize_line,
+     _as_any_writer("service_name", "Hard anodize", _anodize_line)),
+    ("any_writer_line_promised_on", False, None,
+     _as_any_writer("promised_on", date(2026, 11, 30), lambda db, c: c.bar_line)),
     ("save_internal_notes", False, None,
      lambda db, c: ps.save_po(c.shop.user, c.po.id, changes={"internal_notes": "Called"})),
     ("save_promised_on", False, None,
@@ -963,3 +1068,20 @@ def test_content_version_moves_exactly_when_a_field_quickbooks_holds_changes(db,
     act(db, sent)
     after = ps.po_row(db, sent.po.id)["content_version"]
     assert (after > before) is bumps, f"{name}: content_version {before} → {after}"
+
+
+def test_the_pushed_projection_carries_every_line_field_the_quickbooks_push_reads(db, sent):
+    """[QB9] api/services/accounting/purchase_order.py builds each QuickBooks line (description,
+    unit label, rate) from these line fields and hashes them. "Out of date" is exact only if
+    vendor_purchase_order_pushed_projection, which every writer compares before and after,
+    carries each one: a field it lacks can change while the PO still reads "In QuickBooks"."""
+    from dataclasses import fields
+
+    from services.accounting.purchase_order import PurchaseOrderLineProjection
+
+    column = {"line_id": "id", "part_number": "part_name"}  # where the push reads these two from
+    read = {column.get(f.name, f.name) for f in fields(PurchaseOrderLineProjection)}
+    lines = ps.scalar(db, "SELECT public.vendor_purchase_order_pushed_projection(%s)", (sent.po.id,))["lines"]
+    assert lines, "the projection has no lines to compare"
+    missing = read - set(lines[0])
+    assert not missing, f"the pushed projection lacks {sorted(missing)}"

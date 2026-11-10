@@ -8,8 +8,9 @@ because all three live here:
     (Atlas Metals) and V2 (Brightline Plating), each with addresses and contacts; a customer
     with an address; a rack with one leaf shelf under it; parts BAR (stocked in `inches`,
     bought in `feet` = 12, with three pricing tiers), SCREW (`each`, bought by the
-    `hundred` = 100) and WIDGET (made); a work centre; and a job for 100 WIDGETs routed
-    through the work centre and then V1's anodize service.
+    `hundred` = 100) and WIDGET (made); two work centres; a job for 100 WIDGETs routed
+    through the first work centre and then V1's anodize service; and a second job that
+    ships 250 SCREWs bought whole (a bought job part).
   * **One way to call the database.** `rpc()` calls a function the way PostgREST does: by
     argument NAME, sending only the keys it is given, so a missing DEFAULT or a second
     overload fails here exactly as it would in the browser. `call()` and `refuse()` are each
@@ -142,7 +143,11 @@ STALE_PREVIEW_HINT = "changed since you previewed"
 # must cover every name below and pins these tuples to __tests__/fixtures/vendorPoVisibleFields.json;
 # the Vitest `vendorPoVisibleFields` test reads these four literal tuples (keep them literal) and
 # pins lib/purchasing/vendorPoVisibleFields.ts to them, so no side can grow alone.
-# (`ordered_on` and `vendor_id` are vendor-visible too, but a sent PO refuses both — P4.)
+# (`ordered_on` and `vendor_id` are vendor-visible too, but a sent PO refuses both — P4.
+# `line_kind` and `job_operation_id` print too, but they are fixed for an existing line, draft
+# or sent: the save refuses a change, so only adding or removing a line moves them.)
+# `job_part_id` is here because it carries the job: a part or other line moved to another
+# job's part prints the other job number.
 VENDOR_VISIBLE_HEADER_FIELDS = (
     "vendor_contact_id",
     "vendor_address_id",
@@ -166,6 +171,8 @@ VENDOR_VISIBLE_LINE_FIELDS = (
     "need_by_on",
     "cert_required",
     "job_id",
+    "job_part_id",
+    "work_center_id",
 )
 INTERNAL_HEADER_FIELDS = ("internal_notes",)
 INTERNAL_LINE_FIELDS = ("promised_on",)
@@ -465,12 +472,17 @@ class Shop:
     widget_name: str
     work_center: str
     work_center_name: str
+    work_center_2: str
+    work_center_2_name: str
     routing: str
     job: str
     job_number: str
     job_part: str
     station_op: str
     outside_op: str
+    second_job: str       # a second job, shipping SCREWs bought whole...
+    second_job_number: str
+    screw_job_part: str   # ...as its one bought job part (250 each)
 
     @property
     def users(self) -> tuple[str, str, str]:
@@ -591,6 +603,10 @@ def _build_shop(db, label: str, company: str, admin: str, user: str, operator: s
 
         work_center = _one(cur, """
             INSERT INTO work_centers (company_id, name, labor_rate) VALUES (%s, 'Haas VF-2', 75) RETURNING id""", (company,))
+        # A second machine, so an Other line can be moved from one to the other (P3).
+        work_center_2 = _one(cur, """
+            INSERT INTO work_centers (company_id, name, labor_rate) VALUES (%s, 'Okuma LB3000', 65) RETURNING id""",
+            (company,))
         routing = _one(cur, """
             INSERT INTO routings (company_id, part_id, name) VALUES (%s, %s, 'Standard') RETURNING id""", (company, widget))
         cur.execute("""
@@ -617,6 +633,16 @@ def _build_shop(db, label: str, company: str, admin: str, user: str, operator: s
         station_op = next(o[0] for o in ops if o[1] is None)
         outside_op = next(o[0] for o in ops if o[1] is not None)
 
+        # A second job, so a line can carry another job through its job part (P3). Its one
+        # job part is bought whole: no operations, `completed` at creation as the app writes it.
+        second_job_number = f"J-{tag[:4].upper()}-K"
+        second_job = _one(cur, """
+            INSERT INTO jobs (company_id, customer_id, job_number, production_status, fulfillment_status)
+            VALUES (%s, %s, %s, 'not_started', 'unshipped') RETURNING id""", (company, customer, second_job_number))
+        screw_job_part = _one(cur, """
+            INSERT INTO job_parts (job_id, company_id, part_id, sequence, quantity, production_status, fulfillment_status)
+            VALUES (%s, %s, %s, 1, 250, 'completed', 'unshipped') RETURNING id""", (second_job, company, screw))
+
     return Shop(
         company=company, name=name, tag=tag, admin=admin, user=user, operator=operator,
         v1=v1, v1_name="Atlas Metals", v1_address=v1_address, v1_remit=v1_remit,
@@ -627,8 +653,10 @@ def _build_shop(db, label: str, company: str, admin: str, user: str, operator: s
         rack=rack, shelf=shelf,
         bar=bar, bar_name="BAR-4140-1RD", bar_tiers=bar_tiers,
         screw=screw, screw_name="SHCS-M5X16", widget=widget, widget_name="WIDGET-1042",
-        work_center=work_center, work_center_name="Haas VF-2", routing=routing,
+        work_center=work_center, work_center_name="Haas VF-2",
+        work_center_2=work_center_2, work_center_2_name="Okuma LB3000", routing=routing,
         job=job, job_number=job_number, job_part=job_part, station_op=station_op, outside_op=outside_op,
+        second_job=second_job, second_job_number=second_job_number, screw_job_part=screw_job_part,
     )
 
 

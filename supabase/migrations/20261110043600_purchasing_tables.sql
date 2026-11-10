@@ -1059,7 +1059,11 @@ CREATE TABLE public.quickbooks_purchase_order_line_links (
     id                              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id                      uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
     link_id                         uuid NOT NULL,
-    vendor_purchase_order_line_id   uuid NOT NULL,
+    -- NULL once the Jigged line is removed: save_vendor_purchase_order hard-deletes an
+    -- unreceived line, but QuickBooks still holds the line the push put there. The row keeps
+    -- that QuickBooks line id, so the next push drops the line instead of refusing it as one
+    -- the bookkeeper added (qb_foreign_lines); that push then deletes the row.
+    vendor_purchase_order_line_id   uuid,
     qb_line_id                      text NOT NULL,
     -- The item the line was first pushed with; an update keeps it.
     qb_item_id                      text,
@@ -1069,14 +1073,17 @@ CREATE TABLE public.quickbooks_purchase_order_line_links (
     CONSTRAINT quickbooks_purchase_order_line_links_link_fk
         FOREIGN KEY (link_id, company_id)
         REFERENCES public.quickbooks_purchase_order_links (id, company_id) ON DELETE CASCADE,
+    -- The column list (Postgres 15+) clears the line alone: company_id stays, NOT NULL.
     CONSTRAINT quickbooks_purchase_order_line_links_line_fk
         FOREIGN KEY (vendor_purchase_order_line_id, company_id)
-        REFERENCES public.vendor_purchase_order_lines (id, company_id) ON DELETE CASCADE,
+        REFERENCES public.vendor_purchase_order_lines (id, company_id)
+        ON DELETE SET NULL (vendor_purchase_order_line_id),
+    -- One row per Jigged line per link. NULLs are distinct, so every removed line keeps a row.
     CONSTRAINT quickbooks_purchase_order_line_links_unique UNIQUE (link_id, vendor_purchase_order_line_id)
 );
 
 COMMENT ON TABLE public.quickbooks_purchase_order_line_links IS
-  'The QuickBooks line id (and the item it was first pushed with) of each Jigged PO line on a pushed QuickBooks PO, so an update sends the right line ids. Service-role writes only; members read; not AI-readable.';
+  'The QuickBooks line id (and the item it was first pushed with) of each Jigged PO line on a pushed QuickBooks PO, so an update sends the right line ids. vendor_purchase_order_line_id is NULL for a line removed from the PO since the push (ON DELETE SET NULL): QuickBooks still holds that line, and the row is what tells the next push it is Jigged''s to drop rather than one the bookkeeper added; the push deletes the row once the line is gone from QuickBooks. Service-role writes only; members read; not AI-readable.';
 
 CREATE INDEX idx_quickbooks_purchase_order_line_links_line
     ON public.quickbooks_purchase_order_line_links (vendor_purchase_order_line_id);

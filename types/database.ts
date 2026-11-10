@@ -3817,7 +3817,7 @@ export type Database = {
           qb_item_id: string | null
           qb_line_id: string
           updated_at: string
-          vendor_purchase_order_line_id: string
+          vendor_purchase_order_line_id: string | null
         }
         Insert: {
           company_id: string
@@ -3827,7 +3827,7 @@ export type Database = {
           qb_item_id?: string | null
           qb_line_id: string
           updated_at?: string
-          vendor_purchase_order_line_id: string
+          vendor_purchase_order_line_id?: string | null
         }
         Update: {
           company_id?: string
@@ -3837,7 +3837,7 @@ export type Database = {
           qb_item_id?: string | null
           qb_line_id?: string
           updated_at?: string
-          vendor_purchase_order_line_id?: string
+          vendor_purchase_order_line_id?: string | null
         }
         Relationships: [
           {

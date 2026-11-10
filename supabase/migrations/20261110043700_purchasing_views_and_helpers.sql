@@ -331,8 +331,11 @@ GRANT  EXECUTE ON FUNCTION public.next_purchasing_document_number(uuid, text) TO
 --           create and no save key changes it.
 --   lines   adding or removing a line, part_id (-> part_name), description,
 --           vendor_part_number, quantity, unit, unit_price, need_by_on, cert_required,
---           job_id (-> job_number), job_operation_id (-> operation_label),
---           work_center_id (-> work_center_name)
+--           job_id and job_part_id (-> job_number: a job part carries its job),
+--           work_center_id (-> work_center_name).
+--           line_kind and job_operation_id (-> operation_label) print too, but an existing
+--           line's kind and routing step are fixed (vendor_purchase_order_upsert_line refuses
+--           a change), so only adding or removing a line moves them; they are on no list.
 -- trim_scale keeps the hash about values: 5 and 5.0 are the same quantity.
 CREATE OR REPLACE FUNCTION public.vendor_purchase_order_document(p_vendor_purchase_order_id uuid)
 RETURNS jsonb
@@ -404,9 +407,16 @@ GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_document_hash(uuid) TO s
 -- QuickBooks" is exact without a trigger and without asking QuickBooks. In: the number, the
 -- revision (PrivateNote "Jigged PO-1042 Rev 2"), vendor, TxnDate, the header need-by
 -- (QBD expectedDate), terms, ship via, notes to vendor (Memo / vendorMessage), the ship-to
--- block, closed, and per line its kind (-> setup item), the description fields, quantity,
--- unit, rate and line close. Out: receipts, internal notes, promised dates, T&Cs
--- (they reach QuickBooks only through the revision they bump).
+-- block, closed, and per line its kind (-> setup item), quantity, unit, rate, line close and
+-- EVERY field the QuickBooks line description is built from (describe_line in
+-- api/services/accounting/purchase_order.py, which hashes the same fields): part_name (the
+-- shop's part number; the line has no other part-number snapshot), description, vendor P/N,
+-- service_name, work_center_name (the machine), job_number, operation_label, and the unit
+-- label's stock_unit and stock_factor ("bar (= 144 inches)"). A field missing here could
+-- change what a push sends while the PO still read "In QuickBooks";
+-- test_the_pushed_projection_carries_every_line_field_the_quickbooks_push_reads pins it.
+-- Out: receipts, internal notes, promised dates, T&Cs (they reach QuickBooks only through
+-- the revision they bump).
 CREATE OR REPLACE FUNCTION public.vendor_purchase_order_pushed_projection(p_vendor_purchase_order_id uuid)
 RETURNS jsonb
 LANGUAGE sql
@@ -433,8 +443,12 @@ AS $fn$
                       'part_name',          l.part_name,
                       'description',        l.description,
                       'vendor_part_number', l.vendor_part_number,
+                      'service_name',       l.service_name,
+                      'work_center_name',   l.work_center_name,
                       'quantity',           trim_scale(l.quantity),
                       'unit',               l.unit,
+                      'stock_unit',         l.stock_unit,
+                      'stock_factor',       trim_scale(l.stock_factor),
                       'unit_price',         trim_scale(l.unit_price),
                       'job_number',         l.job_number,
                       'operation_label',    l.operation_label,
@@ -447,7 +461,7 @@ AS $fn$
 $fn$;
 
 COMMENT ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) IS
-  'The Jigged fields a QuickBooks PO push sends: number, revision, vendor, ordered_on, need_by_on, terms, ship via, notes to vendor, ship-to, closed; per line id, number, kind, part name, description, vendor P/N, quantity, unit, price, job number, operation label, closed. Every purchasing writer compares its md5 before and after and bumps vendor_purchase_orders.content_version when it moved. Receipts, internal notes, promised dates and T&Cs are not in it. Internal.';
+  'The Jigged fields a QuickBooks PO push sends: number, revision, vendor, ordered_on, need_by_on, terms, ship via, notes to vendor, ship-to, closed; per line id, number, kind, quantity, unit, price, closed, and every field the QuickBooks line description is built from: part name (the shop''s part number), description, vendor P/N, service name, work centre name, job number, operation label, stock unit and stock factor (the unit label). Every purchasing writer compares its md5 before and after and bumps vendor_purchase_orders.content_version when it moved. Receipts, internal notes, promised dates and T&Cs are not in it. Internal.';
 
 REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) TO service_role;

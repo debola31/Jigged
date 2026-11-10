@@ -1,10 +1,10 @@
 'use client';
 
-import Link from 'next/link';
 import Box from '@mui/material/Box';
-import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
+
+import ConnectAssistantMenu from '@/components/aiAssistants/ConnectAssistantMenu';
 
 /**
  * The dashboard's way to the person's OWN assistant: Claude or ChatGPT, connected through Jigged's
@@ -15,10 +15,10 @@ import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
  * page, rendered whether or not Insights is: Jigged's own chat may be retired in favour of
  * customers' assistants, and this must survive that without a change.
  *
- * Every office user sees it; there is no per-company switch. The page it opens holds the connect
- * buttons and the person's connected assistants.
+ * Every office user sees it; there is no per-company switch. Its button opens the connect menu
+ * in place; the person's connected assistants are under AI assistants in the account menu.
  */
-export default function ConnectAssistantStrip({ companyId }: { companyId: string }) {
+export default function ConnectAssistantStrip() {
   return (
     <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
       <Box
@@ -44,17 +44,10 @@ export default function ConnectAssistantStrip({ companyId }: { companyId: string
             Use your own AI assistant
           </Typography>
           <Typography variant="body2" color="text.secondary">
-            Work in Jigged from Claude or ChatGPT: ask about jobs, quotes, parts and stock.
+            Ask Claude or ChatGPT about your jobs, quotes, parts and stock.
           </Typography>
         </Box>
-        <Button
-          component={Link}
-          href={`/dashboard/${companyId}/ai-assistants`}
-          variant="outlined"
-          sx={{ minHeight: 48, flexShrink: 0 }}
-        >
-          Connect your assistant
-        </Button>
+        <ConnectAssistantMenu opens="up" />
       </Box>
     </Box>
   );

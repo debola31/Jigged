@@ -17,7 +17,7 @@ from enum import Enum
 from typing import Optional
 from pydantic import BaseModel
 
-from models.import_models import ColumnMapping  # noqa: F401
+from models.import_models import ColumnMapping, SkippedRow  # noqa: F401
 
 
 class CustomerMatchMode(str, Enum):
@@ -154,6 +154,9 @@ class PartExecuteRequest(BaseModel):
     customer_match_mode: Optional[CustomerMatchMode] = None
     selected_customer_id: Optional[str] = None
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
     # Map of 1-based row_number to pre-resolved canonical UOM (from validate).
     # Empty dict means execute will run alias resolution itself.
     uom_resolutions: dict[int, str] = {}
@@ -163,10 +166,12 @@ class PartExecuteResponse(BaseModel):
     """Response with import results for parts."""
 
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_count: int
     updated_count: int = 0  # Rows upserted via (company_id, part_name) ON CONFLICT path
     skipped_count: int
     errors: list[PartImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
     # Parts whose mapped quantity was deliberately NOT written because the part already holds
     # stock at a real place, where "240 on hand" cannot say which shelf to correct. Reported so
     # the UI can say which balances didn't land — a mapped column silently not applying is the

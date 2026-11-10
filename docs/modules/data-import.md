@@ -378,6 +378,18 @@ deferred.
 Also surfaced there: a unit-less part used to **500 the whole 500-row batch** (the
 `parts_requires_unit` DB constraint the importer didn't mirror); it now skips its own row.
 
+### Dry run, for AI assistants (2026-11-09)
+
+**Every execute route takes `dry_run: true`**: the same validation and planning, the counts a real
+run would report, and nothing written. It returns just before the first write (the
+`reclaim_part_name` RPC for parts, the `routings` insert for routings). A dry run needs office
+access but not the billing gate, since it writes nothing. Every response, real or dry, also lists
+`skipped_rows` (row, type, field, reason) where it used to give only a count. The MCP tools
+`preview_import` and `import_records` ([`lib/mcp/tools/imports.ts`](../../lib/mcp/tools/imports.ts))
+are the callers: the customer's own assistant maps the columns, and Jigged's non-AI logic does the
+rest. They resolve units before sending, so the parts route never falls back to Jigged's AI to
+infer one. Tests: `api/tests/unit/test_import_dry_run.py`.
+
 ## Importing into a non-empty company — upsert, not load
 
 A client-side reconciliation ([lib/dataImportReconcile.ts](../../lib/dataImportReconcile.ts))

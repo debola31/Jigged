@@ -193,6 +193,7 @@ describe('get_customer', () => {
     });
     expect(res.data.contacts).toEqual([
       {
+        contact_id: 'ct-1',
         name: 'Pat Buyer',
         role: 'other',
         role_label: 'Program manager',
@@ -202,6 +203,8 @@ describe('get_customer', () => {
         is_billing_default: false,
       },
     ]);
+    // The ids are what save_customer_contact / save_customer_address take to change a row.
+    expect(res.data.addresses.map((a) => a.address_id)).toEqual(['bill', 'ship']);
     expect(res.data.addresses.map((a) => [a.city, a.default_billing, a.default_shipping])).toEqual([
       ['Chicago', true, false],
       ['Seattle', false, true],

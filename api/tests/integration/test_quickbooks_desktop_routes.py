@@ -48,6 +48,13 @@ def _route_env(monkeypatch):
     monkeypatch.setenv("CONDUCTOR_API_KEY", "sk_conductor_test")
     monkeypatch.setenv("CONDUCTOR_PUBLISHABLE_KEY", "pk_conductor_test")
     monkeypatch.delenv("QUICKBOOKS_FAKE", raising=False)
+    # The invoice push asks company_can_write (it writes with the service role, past the billing
+    # RLS), and the test company has no subscription row. These tests are about Desktop
+    # invoicing; the gate's own test is test_a_lapsed_company_cannot_push_an_invoice in
+    # test_quickbooks_routes.py.
+    import routes.company_auth as company_auth
+
+    monkeypatch.setattr(company_auth, "assert_company_can_write", lambda company_id: None)
     # Reference-data reads that would otherwise hit Conductor. The tax code is the
     # one QBD sends on every line; None keeps these payloads simple.
     monkeypatch.setattr(qbdservice, "customer_tax_code_id", lambda *a, **k: None)

@@ -1,6 +1,6 @@
 """Pydantic models for CSV import API."""
 
-from typing import Optional
+from typing import Any, Iterable, Optional
 from pydantic import BaseModel
 
 
@@ -46,6 +46,7 @@ class ValidationError(BaseModel):
     row_number: int
     error_type: str  # "missing_name"
     field: str
+    message: str = ""
 
 
 class ValidateResponse(BaseModel):
@@ -68,6 +69,48 @@ class ImportError(BaseModel):
     data: dict[str, str]
 
 
+class SkippedRow(BaseModel):
+    """A row an import leaves out, and why. Every execute route reports these, real run or dry.
+
+    `skipped_count` has always said how many; this says which and why, so a caller that cannot
+    see the validate step (an assistant, through `dry_run`) can fix the rows rather than guess.
+    """
+
+    row_number: int  # 1-based position in the request's `rows`
+    type: str  # the validation error_type or conflict_type, e.g. "missing_name", "unknown_vendor"
+    field: Optional[str] = None  # the offending field, for a validation error
+    reason: str  # the sentence the route already wrote for it
+
+
+def describe_skipped_rows(
+    validation_errors: Iterable[Any],
+    conflicts: Iterable[Any],
+    skip_row_numbers: set[int],
+) -> list[SkippedRow]:
+    """The rows in `skip_row_numbers`, each with the validation error or conflict that skips it.
+
+    Duck-typed over the seven importers' own error and conflict models: every validation error
+    carries row_number / error_type / field / message, and every conflict carries row_number /
+    conflict_type / existing_value. Conflicts an importer does NOT skip (an existing name it
+    updates in place) are not in `skip_row_numbers` and so are not reported.
+    """
+    rows = [
+        SkippedRow(
+            row_number=e.row_number,
+            type=e.error_type,
+            field=e.field,
+            reason=e.message or f"{e.field} is missing or invalid",
+        )
+        for e in validation_errors
+        if e.row_number in skip_row_numbers
+    ] + [
+        SkippedRow(row_number=c.row_number, type=c.conflict_type, reason=c.existing_value)
+        for c in conflicts
+        if c.row_number in skip_row_numbers
+    ]
+    return sorted(rows, key=lambda r: r.row_number)
+
+
 class ExecuteRequest(BaseModel):
     """Request to execute the import."""
 
@@ -75,16 +118,21 @@ class ExecuteRequest(BaseModel):
     mappings: dict[str, str]  # csv_column -> db_field
     rows: list[dict[str, str]]  # CSV rows to import
     skip_conflicts: bool = False  # If True, skip rows with conflicts
+    # Validate and count exactly as a real run would, then return before the first write.
+    # Needs office access but not the billing write-gate: a preview saves nothing.
+    dry_run: bool = False
 
 
 class ExecuteResponse(BaseModel):
     """Response with import results."""
 
     success: bool
+    dry_run: bool = False  # True: the counts are what a real run would do; nothing was written
     imported_count: int
     updated_count: int = 0  # existing customers updated in place on re-import (upsert)
     skipped_count: int
     errors: list[ImportError]
+    skipped_rows: list[SkippedRow] = []  # which rows skipped_count counts, and why
 
 
 # Target schema for customers table

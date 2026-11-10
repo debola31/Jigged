@@ -14,7 +14,9 @@ export type ActivityType =
   | 'note'
   | 'photo'
   | 'operation'
-  | 'inventory';
+  | 'inventory'
+  // Vendor purchase orders: a revision sent to the vendor, a delivery received against one.
+  | 'purchasing';
 
 export type ActivityAction =
   | 'created'
@@ -57,6 +59,10 @@ export interface ActivityItem {
    *  and their bookkeeper both call the invoice. Absent until QuickBooks has
    *  given us one. */
   invoiceNumber?: string;
+  /** Purchasing 'sent' events: the revision the vendor received (Rev 0 is the first send). */
+  revision?: number;
+  /** Purchasing 'received' events: how many PO lines the delivery covered. */
+  lineCount?: number;
 }
 
 // ============== Dashboard metrics ==============
@@ -1048,6 +1054,88 @@ async function fetchOperationActivity(
   return items;
 }
 
+/**
+ * Purchasing: a vendor PO SENT (one row per revision the vendor received — the revision snapshot
+ * Mark as sent writes, so a re-send of the same revision is not a second event) and a delivery
+ * RECEIVED (one row per receipt group, however many lines it covered; voided receipts drop out,
+ * the way an undone operation does). The entity is the PO number and the vendor is the frozen
+ * name on the PO.
+ *
+ * Archived POs are excluded through the join: neither a revision nor a receipt carries a
+ * deleted_at of its own. A receipt reaches its PO through its line (the only foreign key it has).
+ */
+async function fetchPurchasingActivity(
+  companyId: string,
+  before: string | undefined,
+  perSource: number,
+): Promise<ActivityItem[]> {
+  const supabase = getSupabase();
+
+  let sentQ = supabase
+    .from('vendor_purchase_order_revisions')
+    .select('id, revision, sent_at, vendor_purchase_order_id, vendor_purchase_orders!inner(po_number, vendor_name, deleted_at)')
+    .eq('company_id', companyId)
+    .is('vendor_purchase_orders.deleted_at', null)
+    .order('sent_at', { ascending: false })
+    .limit(perSource);
+  if (before) sentQ = sentQ.lt('sent_at', before);
+
+  let receivedQ = supabase
+    .from('vendor_purchase_order_receipts')
+    .select(
+      'id, receipt_group_id, received_at, vendor_purchase_order_id, vendor_purchase_order_lines!inner(vendor_purchase_orders!inner(po_number, vendor_name, deleted_at))',
+    )
+    .eq('company_id', companyId)
+    .is('voided_at', null)
+    .is('vendor_purchase_order_lines.vendor_purchase_orders.deleted_at', null)
+    .order('received_at', { ascending: false })
+    .limit(perSource);
+  if (before) receivedQ = receivedQ.lt('received_at', before);
+
+  const [sent, received] = await Promise.all([sentQ, receivedQ]);
+  const items: ActivityItem[] = [];
+  const poHref = (poId: string) => `/dashboard/${companyId}/purchasing/orders/${poId}`;
+
+  // No `as unknown as` here: the generated types describe both selects exactly.
+  for (const r of sent.data ?? []) {
+    const po = firstRel(r.vendor_purchase_orders);
+    if (!po || !r.sent_at) continue;
+    items.push({
+      id: `po-sent-${r.id}`,
+      type: 'purchasing',
+      action: 'sent',
+      entityNumber: po.po_number,
+      vendorName: po.vendor_name,
+      revision: r.revision,
+      timestamp: r.sent_at,
+      href: poHref(r.vendor_purchase_order_id),
+    });
+  }
+
+  const deliveries = new Map<string, ActivityItem>();
+  for (const r of received.data ?? []) {
+    const po = firstRel(firstRel(r.vendor_purchase_order_lines)?.vendor_purchase_orders);
+    if (!po) continue;
+    const prior = deliveries.get(r.receipt_group_id);
+    if (prior) {
+      prior.lineCount = (prior.lineCount ?? 1) + 1;
+      continue;
+    }
+    deliveries.set(r.receipt_group_id, {
+      id: `po-received-${r.receipt_group_id}`,
+      type: 'purchasing',
+      action: 'received',
+      entityNumber: po.po_number,
+      vendorName: po.vendor_name,
+      lineCount: 1,
+      timestamp: r.received_at,
+      href: poHref(r.vendor_purchase_order_id),
+    });
+  }
+  items.push(...deliveries.values());
+  return items;
+}
+
 async function collectActivity(
   companyId: string,
   { before, types, perSource = ACTIVITY_PER_SOURCE }: CollectOptions,
@@ -1063,6 +1151,7 @@ async function collectActivity(
   if (want('note') || want('photo')) tasks.push(fetchNoteActivity(companyId, before, perSource));
   if (want('operation')) tasks.push(fetchOperationActivity(companyId, before, perSource));
   if (want('inventory')) tasks.push(fetchInventoryActivity(companyId, before, perSource));
+  if (want('purchasing')) tasks.push(fetchPurchasingActivity(companyId, before, perSource));
 
   const results = await Promise.all(tasks.map((t) => t.catch(() => [] as ActivityItem[])));
   let items = results.flat();

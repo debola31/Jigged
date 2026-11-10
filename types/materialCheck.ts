@@ -10,6 +10,7 @@
  * for a pump reads "you need 1 pump core", not the aluminium the core is made from. Both
  * surfaces say so on screen; the recursive explode is the follow-up.
  */
+import type { MaterialRequirementWithOnOrder } from '@/lib/materialRequirements';
 
 /**
  * How a BOM line's unit relates to the stock unit it must be compared against.
@@ -100,3 +101,14 @@ export interface MaterialRequirement {
   status: RequirementStatus;
   basis: UnitBasis;
 }
+
+/**
+ * What is on order for a material (plan §3.10, criterion B4), in its stock unit, from
+ * `part_on_order`: `onOrder` counts sent, open lines; `onDraft` the drafts, kept apart and shown
+ * muted; `onOrderRefs` the POs behind both. Defined beside the pure builder
+ * (lib/materialRequirements.ts) and re-exported here with the other domain types.
+ */
+export type { MaterialOnOrder, MaterialOnOrderRef } from '@/lib/materialRequirements';
+
+/** One row of the job page's Materials card: the requirement plus what is on order for it. */
+export type MaterialCheckRow = MaterialRequirementWithOnOrder;

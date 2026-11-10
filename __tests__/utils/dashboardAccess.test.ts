@@ -12,6 +12,8 @@ const DATA: Record<string, unknown[]> & { error?: unknown } = {
   operations: [],
   inventory: [],
   invoices: [],
+  poRevisions: [],
+  poReceipts: [],
 };
 
 function resolveData(state: { table: string; completedFilter: boolean }) {
@@ -31,6 +33,10 @@ function resolveData(state: { table: string; completedFilter: boolean }) {
       return { data: DATA.invoices, error: null };
     case 'inventory_transactions':
       return { data: DATA.inventory, error: null };
+    case 'vendor_purchase_order_revisions':
+      return { data: DATA.poRevisions, error: null };
+    case 'vendor_purchase_order_receipts':
+      return { data: DATA.poReceipts, error: null };
     default:
       return { data: [], error: null };
   }
@@ -63,6 +69,7 @@ vi.mock('@/lib/supabase', () => ({
 }));
 
 import { getActivityStream } from '@/utils/dashboardAccess';
+import { formatActivityText } from '@/components/dashboard/activityFormat';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -73,6 +80,8 @@ beforeEach(() => {
   DATA.notes = [];
   DATA.operations = [];
   DATA.invoices = [];
+  DATA.poRevisions = [];
+  DATA.poReceipts = [];
   delete DATA.error;
 });
 
@@ -378,5 +387,77 @@ describe('invoice activity', () => {
     DATA.invoices = [link()];
     const items = await getActivityStream('co1', { types: ['job'] });
     expect(items.every((i) => i.type !== 'invoice')).toBe(true);
+  });
+});
+
+describe('purchasing activity', () => {
+  function buildersFor(table: string) {
+    return mockSupabase.from.mock.calls
+      .map((call, i) => ({ table: call[0], builder: mockSupabase.from.mock.results[i]?.value }))
+      .filter((c) => c.table === table)
+      .map((c) => c.builder as Record<string, ReturnType<typeof vi.fn>>);
+  }
+
+  it('reads each revision the vendor received as a vendor-tagged "sent" row on the PO', async () => {
+    DATA.poRevisions = [
+      { id: 'rev-1', revision: 1, sent_at: '2026-11-08T15:00:00Z', vendor_purchase_order_id: 'po-1', vendor_purchase_orders: { po_number: 'PO-1042', vendor_name: 'Acme Steel', deleted_at: null } },
+    ];
+    const [item] = await getActivityStream('co1', { types: ['purchasing'] });
+    expect(item).toMatchObject({
+      id: 'po-sent-rev-1',
+      type: 'purchasing',
+      action: 'sent',
+      entityNumber: 'PO-1042',
+      vendorName: 'Acme Steel',
+      revision: 1,
+      timestamp: '2026-11-08T15:00:00Z',
+      href: '/dashboard/co1/purchasing/orders/po-1',
+    });
+  });
+
+  it('folds a delivery into ONE "received" row, however many lines it covered', async () => {
+    const po = { vendor_purchase_orders: { po_number: 'PO-1042', vendor_name: 'Acme Steel', deleted_at: null } };
+    DATA.poReceipts = [
+      { id: 'r-1', receipt_group_id: 'g-1', received_at: '2026-11-09T10:00:00Z', vendor_purchase_order_id: 'po-1', vendor_purchase_order_lines: po },
+      { id: 'r-2', receipt_group_id: 'g-1', received_at: '2026-11-09T10:00:00Z', vendor_purchase_order_id: 'po-1', vendor_purchase_order_lines: po },
+      { id: 'r-3', receipt_group_id: 'g-2', received_at: '2026-11-07T10:00:00Z', vendor_purchase_order_id: 'po-1', vendor_purchase_order_lines: po },
+    ];
+    const items = await getActivityStream('co1', { types: ['purchasing'] });
+    expect(items.map((i) => [i.id, i.action, i.lineCount])).toEqual([
+      ['po-received-g-1', 'received', 2],
+      ['po-received-g-2', 'received', 1],
+    ]);
+  });
+
+  it('leaves archived POs out through the join, and voided receipts out', async () => {
+    await getActivityStream('co1', { types: ['purchasing'] });
+    const [revisions] = buildersFor('vendor_purchase_order_revisions');
+    const [receipts] = buildersFor('vendor_purchase_order_receipts');
+    expect(revisions.eq).toHaveBeenCalledWith('company_id', 'co1');
+    expect(revisions.is).toHaveBeenCalledWith('vendor_purchase_orders.deleted_at', null);
+    expect(receipts.eq).toHaveBeenCalledWith('company_id', 'co1');
+    expect(receipts.is).toHaveBeenCalledWith('voided_at', null);
+    expect(receipts.is).toHaveBeenCalledWith('vendor_purchase_order_lines.vendor_purchase_orders.deleted_at', null);
+  });
+
+  it('pages with the same cursor as every other source', async () => {
+    await getActivityStream('co1', { types: ['purchasing'], before: '2026-11-01T00:00:00Z' });
+    expect(buildersFor('vendor_purchase_order_revisions')[0].lt).toHaveBeenCalledWith('sent_at', '2026-11-01T00:00:00Z');
+    expect(buildersFor('vendor_purchase_order_receipts')[0].lt).toHaveBeenCalledWith('received_at', '2026-11-01T00:00:00Z');
+  });
+
+  it('is left out of the feed unless asked for (or the feed is unfiltered)', async () => {
+    DATA.poRevisions = [
+      { id: 'rev-1', revision: 0, sent_at: '2026-11-08T15:00:00Z', vendor_purchase_order_id: 'po-1', vendor_purchase_orders: { po_number: 'PO-1042', vendor_name: 'Acme', deleted_at: null } },
+    ];
+    expect((await getActivityStream('co1', { types: ['job'] })).every((i) => i.type !== 'purchasing')).toBe(true);
+    expect((await getActivityStream('co1')).some((i) => i.type === 'purchasing')).toBe(true);
+  });
+
+  it('reads as purchasing in the shared feed formatter, never as a job', () => {
+    const sent = { id: 'x', type: 'purchasing' as const, action: 'sent' as const, entityNumber: 'PO-1042', vendorName: 'Acme', revision: 2, timestamp: 't' };
+    expect(formatActivityText(sent)).toBe('Rev 2 sent to Acme');
+    expect(formatActivityText({ ...sent, revision: 0 })).toBe('Sent to Acme');
+    expect(formatActivityText({ ...sent, action: 'received', lineCount: 3 })).toBe('Received from Acme (3 lines)');
   });
 });

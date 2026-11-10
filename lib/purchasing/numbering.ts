@@ -30,7 +30,9 @@ export const MIN_DIGITS_RANGE = { min: 1, max: 8 } as const;
 /** QuickBooks Desktop's `refNumber` limit. */
 export const VENDOR_PO_NUMBER_MAX_LENGTH = 11;
 
-const QUICKBOOKS_LIMIT = `PO numbers can have at most ${VENDOR_PO_NUMBER_MAX_LENGTH} (QuickBooks Desktop's limit)`;
+// Concatenated, not a template literal: scripts/schemaEmbedCheck.ts reads every UPPER_CASE
+// template-literal const as a PostgREST select, and "at most … (QuickBooks …)" parses as an embed.
+const QUICKBOOKS_LIMIT = 'PO numbers can have at most ' + VENDOR_PO_NUMBER_MAX_LENGTH + " (QuickBooks Desktop's limit)";
 
 /** `prefix + next`, zero-padded to `minDigits`, never truncated: ('PO-', 7, 4) → 'PO-0007'. */
 export function formatPurchasingDocumentNumber(prefix: string, nextNumber: number, minDigits: number): string {

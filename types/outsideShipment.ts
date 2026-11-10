@@ -53,6 +53,14 @@ export interface OutsideShipment {
   voided_by: string | null;
   created_at: string;
   updated_at: string;
+
+  /**
+   * The outside-service line of a vendor purchase order this slip ships against, or null. Linked
+   * by `create_outside_shipment` itself (the single open line for this step and vendor), by the
+   * line's insert, or by the office relink; cleared when the PO is archived. Linking changes no
+   * status — the slip stays the only record of movement.
+   */
+  vendor_purchase_order_line_id: string | null;
 }
 
 /**
@@ -93,6 +101,13 @@ export interface OutsideShipmentWithRelations extends OutsideShipment {
     id: string;
     quantity: number;
     part?: { id: string; part_name: string } | null;
+  } | null;
+  /** The PO line it ships against, with the PO's number — by join, never frozen on the slip. */
+  vendor_purchase_order_line?: {
+    id: string;
+    line_number: number;
+    vendor_purchase_order_id: string;
+    vendor_purchase_order: { id: string; po_number: string } | null;
   } | null;
 }
 

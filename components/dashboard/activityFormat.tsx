@@ -9,6 +9,8 @@ import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import StickyNote2OutlinedIcon from '@mui/icons-material/StickyNote2Outlined';
 import PhotoCameraOutlinedIcon from '@mui/icons-material/PhotoCameraOutlined';
 import PrecisionManufacturingOutlinedIcon from '@mui/icons-material/PrecisionManufacturingOutlined';
+import ShoppingCartOutlinedIcon from '@mui/icons-material/ShoppingCartOutlined';
+import MoveToInboxOutlinedIcon from '@mui/icons-material/MoveToInboxOutlined';
 import type { ActivityItem } from '@/utils/dashboardAccess';
 
 /**
@@ -69,6 +71,11 @@ export function getActivityVisual(item: ActivityItem): { icon: SvgIconComponent;
       if (item.action === 'stock_in') return { icon: Inventory2OutlinedIcon, color: 'success.main' };
       if (item.action === 'stock_out') return { icon: Inventory2OutlinedIcon, color: 'warning.main' };
       return { icon: Inventory2OutlinedIcon, color: 'text.secondary' };
+    case 'purchasing':
+      // A PO going out is ordinary business (info, never amber); stock arriving against one is
+      // the good-news green the inventory feed uses for stock in.
+      if (item.action === 'received') return { icon: MoveToInboxOutlinedIcon, color: 'success.main' };
+      return { icon: ShoppingCartOutlinedIcon, color: 'info.main' };
     case 'operation':
       // Outside-op send/receive get the truck (amber out, green back); internal
       // completion keeps the machining icon.
@@ -117,6 +124,15 @@ export function formatActivityText(item: ActivityItem): string {
       if (item.action === 'stock_in') return `${qty} added${where}${heat}`;
       if (item.action === 'stock_out') return `${qty} taken${where}${heat}`;
       return `Counted — set to ${qty}${where}`;
+    }
+    case 'purchasing': {
+      const vendor = item.vendorName ? ` ${item.vendorName}` : ' the vendor';
+      if (item.action === 'received') {
+        const lines = item.lineCount && item.lineCount > 1 ? ` (${item.lineCount} lines)` : '';
+        return `Received from${vendor}${lines}`;
+      }
+      const rev = item.revision && item.revision > 0 ? `Rev ${item.revision} sent` : 'Sent';
+      return `${rev} to${vendor}`;
     }
     case 'note':
       return `${who} added a note`;

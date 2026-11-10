@@ -73,6 +73,15 @@ export interface PaymentTermsPickerProps {
   required?: boolean;
   size?: 'small' | 'medium';
   disabled?: boolean;
+  /**
+   * Load QuickBooks' terms only when the picker is first OPENED, never on mount.
+   *
+   * For QuickBooks Online the terms route is a live QuickBooks call, and the purchasing surfaces
+   * (the vendor PO form, the vendor's terms card) promise that nothing reaches QuickBooks before a
+   * click (plan §2 "QB read", criterion QB1). Off by default, so every existing caller keeps
+   * loading on mount exactly as before.
+   */
+  lazyQuickBooksTerms?: boolean;
 }
 
 export default function PaymentTermsPicker({
@@ -85,9 +94,12 @@ export default function PaymentTermsPicker({
   required = false,
   size = 'small',
   disabled = false,
+  lazyQuickBooksTerms = false,
 }: PaymentTermsPickerProps) {
   const [savedTerms, setSavedTerms] = useState<string[]>([]);
   const [quickBooksTerms, setQuickBooksTerms] = useState<string[]>([]);
+  // Lazy mode starts with QuickBooks NOT asked; opening the menu is the click that asks.
+  const [quickBooksWanted, setQuickBooksWanted] = useState(!lazyQuickBooksTerms);
   const [addingTerm, setAddingTerm] = useState(false);
   const [newTermDraft, setNewTermDraft] = useState('');
 
@@ -108,6 +120,7 @@ export default function PaymentTermsPicker({
   }, [companyId]);
 
   useEffect(() => {
+    if (!quickBooksWanted) return;
     let cancelled = false;
     // Resolves to an empty list rather than rejecting, so a shop with no
     // QuickBooks and one whose connection is momentarily down take the same path.
@@ -117,7 +130,7 @@ export default function PaymentTermsPicker({
     return () => {
       cancelled = true;
     };
-  }, [companyId]);
+  }, [companyId, quickBooksWanted]);
 
   const options = useMemo<PaymentTermOption[]>(() => {
     const out: PaymentTermOption[] = [];
@@ -188,6 +201,9 @@ export default function PaymentTermsPicker({
         size={size}
         fullWidth
         disabled={disabled}
+        onOpen={() => {
+          if (!quickBooksWanted) setQuickBooksWanted(true);
+        }}
         options={options}
         getOptionLabel={(o) => o.value}
         isOptionEqualToValue={(option, val) => option.value === val.value}

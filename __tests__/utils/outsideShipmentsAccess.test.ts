@@ -56,6 +56,10 @@ import {
   compareOutsideShipmentOrder,
   receiveOutsideShipment,
   createOutsideShipment,
+  getOutsideShipmentById,
+  getOutsideShipmentsForJob,
+  getOutsideShipmentsForOperation,
+  outsideShipmentPoNumber,
   getOutsideSummariesForPart,
   getSentBeforeShipment,
   listOutsideShipmentsForCompany,
@@ -377,5 +381,50 @@ describe('resolveVendorShipTo', () => {
     queueBuilders([buildQueryStub({ data: [] })]);
     const r = await resolveVendorShipTo('v-1');
     expect(r).toEqual({ address: null, choices: [], requiresChoice: false });
+  });
+});
+
+describe('the vendor PO line a slip ships against (purchasing, criterion O4)', () => {
+  it('slip reads carry the link column and the PO number BY JOIN — never a frozen copy', async () => {
+    const byId = buildQueryStub({
+      data: {
+        id: 'ship-1', company_id: 'co-1', created_by: null, vendor_purchase_order_line_id: 'line-2',
+        vendor_purchase_order_line: { id: 'line-2', line_number: 2, vendor_purchase_order_id: 'po-1', vendor_purchase_order: { id: 'po-1', po_number: 'PO-1042' } },
+      },
+    });
+    queueBuilders([byId]);
+    const slip = await getOutsideShipmentById('ship-1');
+
+    const select = String(byId.select.mock.calls[0][0]);
+    expect(select).toContain('vendor_purchase_order_line_id');
+    expect(select).toMatch(/vendor_purchase_order_line:vendor_purchase_order_lines\(id, line_number, vendor_purchase_order_id, vendor_purchase_order:vendor_purchase_orders\(id, po_number\)\)/);
+    expect(outsideShipmentPoNumber(slip)).toBe('PO-1042');
+  });
+
+  it('every slip list carries the same join', async () => {
+    const forOp = buildQueryStub({ data: [] });
+    const forJob = buildQueryStub({ data: [] });
+    const forCompany = buildQueryStub({ data: [] });
+    queueBuilders([forOp, forJob, forCompany]);
+    await getOutsideShipmentsForOperation('op-1');
+    await getOutsideShipmentsForJob('job-1');
+    await listOutsideShipmentsForCompany('co-1');
+    for (const q of [forOp, forJob, forCompany]) {
+      expect(String(q.select.mock.calls[0][0])).toContain('vendor_purchase_order:vendor_purchase_orders(id, po_number)');
+    }
+  });
+
+  it('a slip on no PO reads null', () => {
+    expect(outsideShipmentPoNumber({ vendor_purchase_order_line: null })).toBeNull();
+    expect(outsideShipmentPoNumber({})).toBeNull();
+  });
+
+  it('the send takes NO PO argument: create_outside_shipment links the single open line itself', async () => {
+    mockRpc.mockResolvedValue({ data: [{ shipment_id: 'ship-1', slip_number: 'VPS-0141-2' }], error: null });
+    await createOutsideShipment({ jobOperationId: 'op-1', quantity: 5 });
+    expect(Object.keys(mockRpc.mock.calls[0][1]).sort()).toEqual([
+      'p_carrier', 'p_due_back_on', 'p_job_operation_id', 'p_notes', 'p_quantity',
+      'p_shipped_at', 'p_vendor_address_id', 'p_vendor_contact_id',
+    ]);
   });
 });

@@ -80,6 +80,19 @@ describe('/mcp', () => {
     );
   });
 
+  it('sends a browser opening the server URL to the help page', async () => {
+    const { GET } = await import('@/app/mcp/route');
+    const res = await GET(new Request('https://jigged.test/mcp', { headers: { accept: 'text/html,application/xhtml+xml' } }));
+    expect(res.status).toBe(307);
+    expect(res.headers.get('location')).toBe('https://jigged.test/ai-assistants');
+  });
+
+  it('never redirects an MCP client, which asks for a stream', async () => {
+    const { GET } = await import('@/app/mcp/route');
+    const res = await GET(new Request('https://jigged.test/mcp', { headers: { accept: 'text/event-stream' } }));
+    expect(res.status).toBe(401);
+  });
+
   it('refuses a token the verifier rejects', async () => {
     const res = await call({ method: 'tools/list', params: {} }, 'browser-session-token');
     expect(res.status).toBe(401);

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "jigged",
+  "version": "1.0.0",
+  "description": "Work in Jigged, the machine shop operations system, from ChatGPT.",
+  "author": { "name": "Jigged", "email": "hello@jigged.app", "url": "https://jigged.app" },
+  "homepage": "https://jigged.app/ai-assistants",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Jigged",
+        "shortDescription": "Run your machine shop",
+        "longDescription": "Jigged is the operations system for small precision machine shops: quotes, jobs, parts and routings, stock, shipping, outside processing and QuickBooks invoicing.\n\nConnect Jigged and ask about your shop in plain words: which jobs are late and what material they are short, what a part costs to make, what is on a shelf, or what shipped last week. ChatGPT can also do the work: create and update customers, parts, quotes and jobs, convert a quote into jobs, move and adjust stock, ship a job, send work out to a vendor, import a spreadsheet, or push an invoice to QuickBooks. It asks before anything hard to undo.\n\nIt acts as you: it sees and changes only what your Jigged login can, under the same rules as the Jigged app. Only office logins can connect; shop-floor operator logins can't. Nothing it returns says who did a piece of work on the shop floor. Disconnect any time from Jigged's account menu.\n\nRequires a Jigged account with an admin or user role.",
+        "developerName": "Jigged",
+        "category": "Productivity",
+        "websiteURL": "https://jigged.app",
+        "supportURL": "mailto:hello@jigged.app",
+        "privacyPolicyURL": "https://jigged.app/privacy",
+        "termsOfServiceURL": "https://jigged.app/terms",
+        "logo": "./assets/logo.png"
+      }
+    }
+  }
+}

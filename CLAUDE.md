@@ -44,6 +44,18 @@ an authenticated handler acting on a user action creates an `ai_jobs` row, after
 rate limit; the worker's claim poll calls no model on an empty queue. **A new poller that can
 enqueue is the thing to refuse.**
 
+### The MCP server: a customer's own assistant acts as the user
+
+`/mcp` lets a shop's Claude or ChatGPT read and change Jigged as the signed-in office user, through
+the same `utils/*Access.ts` functions, under RLS and the billing gate
+([ai-assistants.md](docs/modules/ai-assistants.md)). Three rules:
+- **A new user-facing write gets an MCP tool, or the PR says why not.** The tool calls the same
+  access function as the screen, with the same permissions.
+- **No MCP tool calls Jigged's AI** (Insights, drawing extraction, the AI import). The assistant is
+  the AI.
+- **No tool returns who did shop-floor work.** `__tests__/lib/mcp/catalogue.test.ts` fails on a
+  person field in any output schema; a refusal belongs in the tool, not in its description.
+
 ### No silent runtime fallbacks for data-at-rest issues
 
 If a schema change leaves existing rows inconsistent, **fix the data at rest** with a backfill

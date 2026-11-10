@@ -488,7 +488,7 @@ async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
     """Work a backend-executed job inside the enqueueing request.
 
     EXACTLY ONE JOB PER REQUEST, ENFORCED BY A CHECK ON THE TABLE. N inline calls
-    inside one 60s Vercel wall is not slow, it is fatal, which is why fan-out is
+    inside one function's wall is not slow, it is fatal, which is why fan-out is
     worker-only.
 
     The lease set by mark_running is what makes a platform kill recoverable: a

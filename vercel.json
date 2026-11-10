@@ -8,7 +8,7 @@
   "functions": {
     "api/**": {
       "excludeFiles": "{.next/**,.git/**,.vercel/**,node_modules/**,.claude/**,.agents/**,.github/**,docs/**,e2e/**,__tests__/**,supabase/**,api/tests/**,coverage/**,outputs/**,test-results/**,playwright-report/**,api/evals/**,worker/**,moonshot/**,**/__pycache__/**,**/*.pyc}",
-      "maxDuration": 60
+      "maxDuration": 300
     }
   },
   "rewrites": [

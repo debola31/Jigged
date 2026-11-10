@@ -49,7 +49,7 @@ from services.insights_presentation import (
     numbers_in,
     unsupported_figures,
 )
-from services.llm.base import Message, ToolCall
+from services.llm.base import LLMResult, Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
 from services.llm.ollama_provider import OLLAMA_NUM_CTX
 from tools.chat_tools import description_argument, sql_argument
@@ -107,6 +107,17 @@ SUMMARY_INSTRUCTION = (
     "and do not add anything that was not said."
 )
 
+# Appended to every correction below. They arrive as user turns, and a hosted
+# model answers a user turn conversationally: on the 2026-11-09 Opus 5.5 run, a
+# grounding correction came back as "You're right: I worked out the $88,636.42
+# total myself..." -- our internal note, read back to the shop owner as if they
+# had complained. The person never sees the correction, so the answer must not
+# acknowledge it.
+_ANSWER_AFRESH = (
+    " Write your reply as the answer to the original question, for the person who "
+    "asked it: do not mention this note, apologise, or say anything was corrected."
+)
+
 # What the model is told when it tries to answer holding nothing but a failed
 # query. Written as an instruction with a fallback in it, because "try again" on
 # its own is what produced the echo the second time round.
@@ -115,7 +126,7 @@ CORRECTION = (
     "that answer. Fix the SQL using the error in the tool result and call "
     "execute_sql once more. If it fails again, say plainly that the figure is "
     "unavailable -- never repeat a database error, a column name or SQL back to "
-    "the user."
+    "the user." + _ANSWER_AFRESH
 )
 
 # How much of a rejected answer goes into the failure. ai_jobs.error is capped at
@@ -304,47 +315,54 @@ async def _compact(
     return text, tokens
 
 
-def _correction_turns(text: str) -> list[Message]:
+def _said(result: LLMResult) -> list[Message]:
+    """The model's own last turn, to replay before a correction -- or nothing.
+
+    Message.assistant, so a thinking model's blocks go back with it (see
+    services/llm/base.NativeTurn).
+
+    CONDITIONAL, and that is not tidiness. Anthropic rejects a message with empty
+    content, and "the model produced nothing at all" is one of the exact shapes
+    that reaches the corrections below; appending it verbatim would turn a
+    recoverable turn into a 400 from the vendor.
+    """
+    return [Message.assistant(result)] if result.text.strip() else []
+
+
+def _correction_turns(result: LLMResult) -> list[Message]:
     """The corrective exchange: what the model said, then what to do about it.
 
     Ordinary multi-turn, matching call.py's _repair_turns -- never an assistant
     prefill, which 4.6+ models reject outright.
-
-    THE ASSISTANT TURN IS CONDITIONAL, and that is not tidiness. Anthropic
-    rejects a message with empty content, and "the model produced nothing at all"
-    is one of the exact shapes that reaches this function; appending it verbatim
-    would turn a recoverable turn into a 400 from the vendor.
     """
-    turns = [Message(role="assistant", content=text)] if text.strip() else []
-    return turns + [Message(role="user", content=CORRECTION)]
+    return _said(result) + [Message(role="user", content=CORRECTION)]
 
 
 GROUNDING_CORRECTION = (
     "Your answer states figures that come from no query run in this turn: {figures}. "
     "Earlier turns of this conversation only tell you what the user means; they are not a "
     "source of numbers, even when they held the same figure. Run the query that produces "
-    "each figure now and answer again, or say the figure is unavailable."
+    "each figure now and answer again, or say the figure is unavailable." + _ANSWER_AFRESH
 )
 
 
-def _grounding_turns(text: str, figures: list[float]) -> list[Message]:
+def _grounding_turns(result: LLMResult, figures: list[float]) -> list[Message]:
     """The corrective exchange for an answer that invented its numbers -- the 25-turn
     live conversation did so on six turns of twenty-four once it had history. Same
     shape as _correction_turns, same conditional assistant turn."""
-    turns = [Message(role="assistant", content=text)] if text.strip() else []
     listed = ", ".join(f"{x:g}" for x in figures[:8])
-    return turns + [Message(role="user", content=GROUNDING_CORRECTION.format(figures=listed))]
+    return _said(result) + [Message(role="user", content=GROUNDING_CORRECTION.format(figures=listed))]
 
 
 EMPTY_ANSWER_CORRECTION = (
     "You returned a chart but no sentence, so the person asking sees an empty answer. "
     "Write the one-sentence answer now, in plain words, using only figures from the "
     "query results in this conversation. Do not repeat the chart JSON and do not put "
-    "the sentence inside a code fence."
+    "the sentence inside a code fence." + _ANSWER_AFRESH
 )
 
 
-def _empty_answer_turns(text: str) -> list[Message]:
+def _empty_answer_turns(result: LLMResult) -> list[Message]:
     """The corrective exchange for a turn that charted but never spoke.
 
     A local 32B follows "write the one-sentence answer first, then exactly one
@@ -359,12 +377,11 @@ def _empty_answer_turns(text: str) -> list[Message]:
     whole job including the SQL. One more turn is the cheaper of the two by far.
 
     Same shape as the two corrections beside it, including the conditional
-    assistant turn: `text` here is the fenced JSON the model did emit, so it is
+    assistant turn: the text here is the fenced JSON the model did emit, so it is
     normally present, and the guard is what stops an empty assistant message
     reaching a vendor that rejects one outright.
     """
-    turns = [Message(role="assistant", content=text)] if text.strip() else []
-    return turns + [Message(role="user", content=EMPTY_ANSWER_CORRECTION)]
+    return _said(result) + [Message(role="user", content=EMPTY_ANSWER_CORRECTION)]
 
 
 async def run(ctx: JobContext) -> dict[str, Any]:
@@ -472,7 +489,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             # that is not converging.
             if sql_failed and not sql_ok and not corrected:
                 corrected = True
-                messages = messages + _correction_turns(result.text)
+                messages = messages + _correction_turns(result)
                 logger.info(
                     "insights %s: correcting a failed-query answer", ctx.request_id
                 )
@@ -486,7 +503,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             invented = [] if refusable else unsupported_figures(prose, known_figures)
             if invented and not grounding_corrected:
                 grounding_corrected = True
-                messages = messages + _grounding_turns(result.text, invented)
+                messages = messages + _grounding_turns(result, invented)
                 logger.info(
                     "insights %s: correcting an ungrounded answer (%d figure(s))",
                     ctx.request_id, len(invented),
@@ -503,7 +520,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             # nothing) and is left to the gate.
             if not prose.strip() and result.text.strip() and not empty_corrected:
                 empty_corrected = True
-                messages = messages + _empty_answer_turns(result.text)
+                messages = messages + _empty_answer_turns(result)
                 logger.info(
                     "insights %s: correcting an answer that charted but said nothing",
                     ctx.request_id,
@@ -564,9 +581,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # Rebind rather than append: the gateway's retry works on a copy, and this
         # loop owning one mutable list would make the two aliasing bugs possible
         # again from the other direction.
-        messages = messages + [
-            Message(role="assistant", content=result.text, tool_calls=result.tool_calls)
-        ] + [
+        messages = messages + [Message.assistant(result)] + [
             # dumps_tool_result, never a bare json.dumps: a UUID in a result row
             # killed this exact line twice, because the type mapping lived in a
             # helper that shaped rows elsewhere and nothing shaped them here.

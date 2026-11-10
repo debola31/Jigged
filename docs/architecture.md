@@ -47,7 +47,7 @@ Environment variables are §9; dev/test commands and pre-PR validation live in
 | Frontend | Next.js App Router | `16.2.11`, React `19.2.3`, TypeScript 5 |
 | UI | Material-UI `^7.3.6` | Custom dark theme, [`lib/theme.ts`](../lib/theme.ts) |
 | Data grid | AG Grid Community `^35.0.0` | + [`lib/agGridTheme.ts`](../lib/agGridTheme.ts); 10 call sites |
-| Backend | FastAPI (Python) | Serverless on Vercel, `maxDuration: 60s`; one rewrite fans `/api/:path*` → `/api/index` ([`vercel.json`](../vercel.json)) |
+| Backend | FastAPI (Python) | Serverless on Vercel, `maxDuration: 300s` (an inline insights job is several model calls); one rewrite fans `/api/:path*` → `/api/index` ([`vercel.json`](../vercel.json)) |
 | Database | PostgreSQL (Supabase) | RLS-enforced |
 | Auth | Supabase Auth | JWT |
 | Storage | Supabase Storage | File attachments |

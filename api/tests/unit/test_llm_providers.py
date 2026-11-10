@@ -29,7 +29,15 @@ import pytest
 from pydantic import BaseModel
 
 from services.llm.anthropic_provider import AnthropicProvider
-from services.llm.base import ImagePart, LLMProvider, LLMResult, Message, TextPart, ToolCall
+from services.llm.base import (
+    ImagePart,
+    LLMProvider,
+    LLMResult,
+    Message,
+    NativeTurn,
+    TextPart,
+    ToolCall,
+)
 from services.llm.errors import (
     LLMAuthError,
     LLMProtocolError,
@@ -94,19 +102,29 @@ def _compat(handler=None, **over):
 
 
 class _FakeAnthropic:
-    """Stands in for AsyncAnthropic. Records kwargs, returns or raises."""
+    """Stands in for AsyncAnthropic. Records kwargs, returns or raises.
+
+    Both namespaces record into one list, tagged by `namespaces`, so a test can
+    assert WHICH endpoint a model's profile sent it through.
+    """
 
     def __init__(self, response=None, error=None):
         self._response = response
         self._error = error
         self.calls: list[dict] = []
-        self.messages = SimpleNamespace(create=self._create)
+        self.namespaces: list[str] = []
+        self.messages = SimpleNamespace(create=self._recorder("messages"))
+        self.beta = SimpleNamespace(messages=SimpleNamespace(create=self._recorder("beta")))
 
-    async def _create(self, **kwargs):
-        self.calls.append(kwargs)
-        if self._error is not None:
-            raise self._error
-        return self._response
+    def _recorder(self, namespace):
+        async def create(**kwargs):
+            self.calls.append(kwargs)
+            self.namespaces.append(namespace)
+            if self._error is not None:
+                raise self._error
+            return self._response
+
+        return create
 
 
 def _anthropic_msg(text="Answer", *, tool_use=None, stop="end_turn", model="claude-sonnet-4-6"):
@@ -191,7 +209,7 @@ async def test_every_result_field_is_populated(kind):
     assert isinstance(result, LLMResult)
     assert set(result.model_dump()) == {
         "text", "tool_calls", "model", "provider", "tokens_in", "tokens_out",
-        "latency_ms", "est_cost_usd",
+        "latency_ms", "est_cost_usd", "native",
     }
     assert result.provider == kind
     assert result.model and result.text
@@ -214,9 +232,9 @@ def test_the_anthropic_provider_never_pins_a_base_url(monkeypatch):
 
 
 def test_the_anthropic_client_does_not_retry_on_its_own():
-    """The SDK default is 2, and timeouts ARE retried -- so 30s x 3 = 90s against a
-    60s platform wall. Retry belongs to the chain, which can pick a different
-    provider instead of hammering the one that just failed."""
+    """The SDK default is 2, and timeouts ARE retried -- so one hung call would
+    spend three timeouts of the function's wall. Retry belongs to the chain, which
+    can pick a different provider instead of hammering the one that just failed."""
     provider = AnthropicProvider(api_key="k")
     assert provider._client.max_retries == 0
 
@@ -548,6 +566,188 @@ def test_an_anthropic_model_with_no_price_refuses_to_construct():
     with pytest.raises(KeyError) as exc:
         AnthropicProvider(client=_FakeAnthropic(), model="claude-not-real-9")
     assert "No price on file" in str(exc.value)
+
+
+# --------------------------------------------- anthropic: per-model profiles
+
+
+def _opus_msg(content, *, usage=None, model="claude-opus-5-5", stop="end_turn"):
+    return SimpleNamespace(
+        content=content, stop_reason=stop, model=model,
+        usage=usage or SimpleNamespace(input_tokens=1000, output_tokens=500),
+    )
+
+
+def _thinking(signature="sig-1"):
+    # display "omitted" is the default on Opus 5.5: the text is empty, the
+    # signature is what the API checks on replay.
+    return SimpleNamespace(type="thinking", thinking="", signature=signature)
+
+
+def _text(text):
+    return SimpleNamespace(type="text", text=text)
+
+
+def _tool_use(id_, name, input_):
+    return SimpleNamespace(type="tool_use", id=id_, name=name, input=input_)
+
+
+async def test_the_pinned_model_keeps_its_request_shape_plus_caching():
+    """claude-sonnet-4-6 requests are what they were, plus the cache breakpoint:
+    the plain endpoint, the caller's max_tokens, no effort, no fallback."""
+    provider, fake = _anthropic()
+    await provider.complete([Message(role="user", content="hi")], max_tokens=4000)
+    call = fake.calls[0]
+    assert fake.namespaces == ["messages"]
+    assert call["max_tokens"] == 4000
+    assert call["cache_control"] == {"type": "ephemeral"}
+    assert not {"output_config", "betas", "fallbacks"} & set(call)
+
+
+async def test_opus_5_5_gets_effort_thinking_headroom_and_server_side_fallback():
+    provider, fake = _anthropic(_opus_msg([_text("ok")]), model="claude-opus-5-5")
+    await provider.complete([Message(role="user", content="hi")], max_tokens=4000)
+    call = fake.calls[0]
+    assert fake.namespaces == ["beta"]
+    assert call["betas"] == ["server-side-fallback-2026-07-01"]
+    assert call["fallbacks"] == "default"
+    assert call["output_config"] == {"effort": "medium"}
+    # Thinking counts against max_tokens; the caller sized 4,000 for the answer.
+    assert call["max_tokens"] == 4000 + 12_000
+    # Omitted, never "disabled" -- that is a 400 on this model.
+    assert "thinking" not in call
+    assert call["cache_control"] == {"type": "ephemeral"}
+
+
+async def test_a_list_cap_never_reaches_the_wire_schema():
+    """The API 400s on `maxItems` ("For 'array' type, property 'maxItems' is not
+    supported"), which is what kept ReportSpec from ever running on a hosted model.
+    The cap moves into the description and is still enforced by call.py's
+    validation against the real model."""
+    from pydantic import Field
+
+    class Capped(BaseModel):
+        points: list[str] = Field(max_length=3)
+
+    provider, fake = _anthropic(_anthropic_msg(text='{"points": ["a"]}'))
+    await provider.complete([Message(role="user", content="hi")], json_schema=Capped)
+    points = fake.calls[0]["output_config"]["format"]["schema"]["properties"]["points"]
+    assert "maxItems" not in points
+    assert "maxItems: 3" in points.get("description", "")
+
+
+async def test_the_real_report_spec_schema_carries_no_unsupported_keyword():
+    from models.report_spec import ReportSpec
+
+    provider, fake = _anthropic()
+    try:
+        await provider.complete([Message(role="user", content="hi")], json_schema=ReportSpec)
+    except Exception:  # noqa: BLE001 - the fake's text is not a ReportSpec; the request is what is under test
+        pass
+    wire = json.dumps(fake.calls[0]["output_config"]["format"]["schema"])
+    for keyword in ('"maxItems"', '"maxLength"', '"minLength"', '"maximum"', '"minimum"'):
+        assert keyword not in wire, keyword
+
+
+async def test_effort_and_a_schema_share_one_output_config():
+    provider, fake = _anthropic(
+        _opus_msg([_text('{"headline": "a", "confidence": 1}')]), model="claude-opus-5-5")
+    await provider.complete([Message(role="user", content="hi")], json_schema=Insight)
+    output_config = fake.calls[0]["output_config"]
+    assert output_config["effort"] == "medium"
+    assert output_config["format"]["type"] == "json_schema"
+
+
+async def test_a_cached_call_counts_the_whole_prompt_and_prices_each_part():
+    """The three input counts are disjoint. Summing them is the prompt size;
+    pricing them all at the input rate would overstate a cached Opus 5.5 read
+    twenty-fold."""
+    usage = SimpleNamespace(input_tokens=200, output_tokens=500,
+                            cache_creation_input_tokens=1_000, cache_read_input_tokens=10_000)
+    provider, _ = _anthropic(_opus_msg([_text("ok")], usage=usage), model="claude-opus-5-5")
+    r = await provider.complete([Message(role="user", content="hi")])
+    assert r.tokens_in == 11_200
+    # 200 @ $4 + 1,000 @ $5 (5-minute write) + 10,000 @ $0.20 (read) + 500 @ $20
+    assert r.est_cost_usd == Decimal("0.0178")
+
+
+async def test_a_turn_without_reasoning_carries_no_native_blocks():
+    """So a model that never thinks is rebuilt from the canonical fields exactly as
+    before, and nothing about its requests changes."""
+    provider, _ = _anthropic()
+    r = await provider.complete([Message(role="user", content="hi")])
+    assert r.native is None
+
+
+async def test_a_thinking_turn_goes_back_verbatim_in_the_tool_loop():
+    """The signature is checked against the conversation that produced it, so the
+    blocks are replayed as they came -- never rebuilt from text and tool_calls."""
+    provider, fake = _anthropic(
+        _opus_msg([_thinking("sig-a"), _tool_use("t1", "execute_sql", {"sql": "select 1"})],
+                  stop="tool_use"),
+        model="claude-opus-5-5")
+    first = await provider.complete([Message(role="user", content="q")])
+    assert first.native is not None
+    await provider.complete([
+        Message(role="user", content="q"),
+        Message.assistant(first),
+        Message(role="tool", tool_call_id="t1", content="[]"),
+    ])
+    assert fake.calls[1]["messages"][1] == {"role": "assistant", "content": [
+        {"type": "thinking", "thinking": "", "signature": "sig-a"},
+        {"type": "tool_use", "id": "t1", "name": "execute_sql", "input": {"sql": "select 1"}},
+    ]}
+
+
+async def test_a_call_the_loop_handled_itself_is_not_replayed():
+    """report.py keeps compose_report out of the turn it records and sends no
+    tool_result for it. Replaying its tool_use would be a 400."""
+    provider, fake = _anthropic(
+        _opus_msg([_thinking(), _tool_use("t1", "execute_sql", {"sql": "a"}),
+                   _tool_use("t2", "compose_report", {"brief": "b"})], stop="tool_use"),
+        model="claude-opus-5-5")
+    first = await provider.complete([Message(role="user", content="q")])
+    kept = [c for c in first.tool_calls if c.name != "compose_report"]
+    await provider.complete([
+        Message(role="user", content="q"),
+        Message.assistant(first, tool_calls=kept),
+        Message(role="tool", tool_call_id="t1", content="[]"),
+    ])
+    blocks = fake.calls[1]["messages"][1]["content"]
+    assert [b["type"] for b in blocks] == ["thinking", "tool_use"]
+    assert blocks[1]["id"] == "t1"
+
+
+async def test_another_providers_native_turn_is_rebuilt_not_replayed():
+    provider, fake = _anthropic()
+    await provider.complete([
+        Message(role="user", content="q"),
+        Message(role="assistant", content="hello",
+                native=NativeTurn(provider="ollama", blocks=[{"type": "thinking", "thinking": "x"}])),
+        Message(role="user", content="and?"),
+    ])
+    assert fake.calls[0]["messages"][1] == {"role": "assistant", "content": "hello"}
+
+
+async def test_after_a_server_side_fallback_only_text_before_the_boundary_is_kept():
+    """The declining model's thinking must not be echoed; its text may be, and the
+    fallback marker is an audit note."""
+    marker = SimpleNamespace(type="fallback", **{"from": {"model": "claude-opus-5-5"},
+                                                 "to": {"model": "claude-opus-5"}})
+    provider, _ = _anthropic(
+        _opus_msg([_thinking("declined"), _text("Partial. "), marker,
+                   _thinking("served"), _text("Answer.")], model="claude-opus-5"),
+        model="claude-opus-5-5")
+    r = await provider.complete([Message(role="user", content="q")])
+    assert r.native.blocks == [
+        {"type": "text", "text": "Partial. "},
+        {"type": "thinking", "thinking": "", "signature": "served"},
+        {"type": "text", "text": "Answer."},
+    ]
+    # Served by a model with no price on file: priced at the requested model's
+    # rates rather than logged as free.
+    assert r.model == "claude-opus-5"
+    assert r.est_cost_usd == Decimal("0.0140")
 
 
 # ------------------------------------------------------------- multimodal

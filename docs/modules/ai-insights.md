@@ -493,9 +493,46 @@ entire point: there is no longer a way to ship a tenant table nobody thought abo
 
 ---
 
+## Running on a hosted model
+
+Insights runs on **`claude-opus-5-5`**, worked **inline** by the request that enqueued it
+(`_run_inline`), so the whole job — every model call and every query — shares one function's
+`maxDuration`. What that model needs that the pinned `claude-sonnet-4-6` does not lives in one
+place, `_PROFILES` in `services/llm/anthropic_provider.py`, so no other surface's requests change:
+
+| Concern | What happens | Why |
+|---|---|---|
+| Thinking | Never sent; effort `medium` in `output_config` | It cannot be disabled on this model (`{"type": "disabled"}` is a 400), so effort is the only control |
+| `max_tokens` | Caller's value + 12,000 | Thinking counts against it; `MAX_TOKENS` (4,000) is sized for the answer and is also the worker path's window arithmetic |
+| The tool loop | Each assistant turn goes back as the blocks it came in (`NativeTurn`, built by `Message.assistant`) | Thinking blocks carry signatures the API checks against the conversation; text plus `tool_calls` cannot rebuild them. A `tool_use` the loop handled itself (`compose_report`) is dropped from the replay, because it has no `tool_result` |
+| Refusals | Server-side fallback, `fallbacks: "default"` (beta `server-side-fallback-2026-07-01`) | A classifier decline is re-run on a model the API picks, inside the same call, instead of failing the question |
+| Cost | Automatic prompt caching on every call; the ledger prices uncached input, cache writes and cache reads separately | The tools and system prompt (~20K tokens on this tokenizer) are byte-identical across jobs and companies. Opus 5.5 reads cache at $0.20/M (0.05×), so `pricing.ANTHROPIC_CACHE_PRICES` is per model, not a multiplier |
+| Structured output | The schema passes through the SDK's `anthropic.transform_schema` | The API 400s on `maxItems` — ReportSpec's list caps — so reports had never run on a hosted model. The caps move into the description; `call.py` still validates against the real model |
+| Corrections | Each corrective turn ends with `_ANSWER_AFRESH` | They are user turns, and a hosted model answers those conversationally: the first live run opened an answer with "You're right: I worked out the total myself…" |
+
+**Timing.** `vercel.json` gives the API function 300 s; `BACKEND_LEASE_SECONDS` is 330 so a healthy
+job is never swept mid-run — move them together. Each call has 120 s (`_DEFAULT_TIMEOUTS`).
+**Measured 2026-11-09** on the seeded local stack through the real handler and sandbox:
+
+| Request | Model calls | Wall | Est. cost |
+|---|---|---|---|
+| Open and late jobs (cold cache) | 2 | 8.5 s | $0.12 |
+| Revenue by month, chart, one grounding correction | 4 | 25–29 s | $0.07–0.16 |
+| October one-page report (8 queries) | 4 | 48 s | $0.38 |
+
+A cold question pays ~$0.10 to write the prefix to cache; a question within five minutes of any
+other — from any company, since the prefix holds no company data — reads it for ~$0.004.
+
+---
+
 ## Long conversations on a 32K context
 
-The serving model is a local 32B behind Ollama with a **32,768-token window**, and the system prompt
+> **Production serves on `claude-opus-5-5` since 2026-11-09** (1M-token window, inline on Vercel —
+> see [Running on a hosted model](#running-on-a-hosted-model)). The budget below still governs every
+> turn: it is the limit of the worker path that one env var restores, and on a hosted model the
+> history cap bounds cost per question instead of prefill time.
+
+The serving model was a local 32B behind Ollama with a **32,768-token window**, and the system prompt
 alone is ~13K of it. A conversation therefore has a budget, and the budget is arithmetic in
 `services/ai_features/insights.py` — module constants, never env:
 
@@ -850,13 +887,17 @@ old wording attributed to it.
 **Frontend:** `components/insights/` — `InsightsChat` (the chat-first area and its composer),
 `HistoryDrawer` (the rail), `ConversationTurnCard`, `InsightChart`, `ReportPreviewDialog`.
 
-**Env:** `LLM_CHAIN_INSIGHTS` selects the chain. Unset, it is `anthropic` (needs `ANTHROPIC_API_KEY`)
-and the route works the job inline; `ollama:<tag>` routes every question to the desktop worker, whose
+**Env:** `LLM_CHAIN_INSIGHTS` selects the chain. Unset, it is `anthropic:claude-opus-5-5` (needs
+`ANTHROPIC_API_KEY`), named in `services/llm/registry.py`, and the route works the job inline;
+`ollama:<tag>` routes every question to the desktop worker, whose
 `WORKER_MODELS` must hold the **identical** tag — `worker_can_serve`, `sweep_ai_jobs()`,
 `claim_ai_jobs()` and `isAiWorkerAvailable` compare it byte for byte, so `qwen3:32b` against
-`qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production flipped to
-`ollama:qwen3:32b` in September 2026; the revert is unsetting the variable. `AI_READONLY_DATABASE_URL`
-is the sandbox connection for the backend; the worker carries its own
+`qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production ran on `ollama:qwen3:32b`
+from September to 2026-11-09 and is back on a hosted model, so the chat no longer depends on a
+laptop being awake; setting the variable again is the way back. `AI_READONLY_DATABASE_URL`
+is the sandbox connection for the backend, **set for Production only** — a preview deployment has
+its own Supabase branch and no such variable, so previews stay on the worker path (they read as
+offline when the box is off) rather than run a hosted model with no sandbox. The worker carries its own
 (`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)) — one per database, since
 it serves production and every live Supabase preview branch from one process and each job names the
 database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insights works on a PR's

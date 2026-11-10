@@ -137,6 +137,17 @@ class TestDefaults:
         for feature in ("insights", "drawings"):
             assert [p.name for p in chain_for(feature)] == ["anthropic"]
 
+    def test_insights_names_its_model_in_code(self, monkeypatch):
+        """Insights moved off the desktop on 2026-11-09 and onto a named model, so
+        what production runs is read here rather than off a Vercel variable. It
+        must also not inherit DEFAULT_ANTHROPIC_MODEL: drawings shares that pin and
+        its direct SDK calls are not written for a model that always thinks."""
+        from services.ai.model_config import DEFAULT_ANTHROPIC_MODEL
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+        assert chain_for("insights")[0].model == "claude-opus-5-5"
+        assert chain_for("drawings")[0].model == DEFAULT_ANTHROPIC_MODEL
+
     def test_the_local_timeout_is_longer_than_the_hosted_one(self, monkeypatch):
         """Slow local hardware. The 480s (an uncached ~18K-token prompt at ~100 tokens/s
         prefill, measured 2026-09-07) only makes sense off Vercel, which is the
@@ -150,7 +161,7 @@ class TestDefaults:
         monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
         monkeypatch.setenv("LLM_CHAIN_INSIGHTS", "ollama:qwen3:8b,anthropic")
         ollama, anthropic_p = chain_for("insights")
-        assert (ollama.timeout_s, anthropic_p.timeout_s) == (480.0, 30.0)
+        assert (ollama.timeout_s, anthropic_p.timeout_s) == (480.0, 120.0)
         # The worker package is not importable from here (it lives beside api/, not
         # in it), so its default is read off the file -- the same way
         # TestPackageBoundary reads services/ai.

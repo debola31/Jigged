@@ -39,11 +39,14 @@ _INTERACTIVE_FEATURES = frozenset({"insights"})
 # client's number.
 MAX_FAN_OUT = 60
 
-# Comfortably past Vercel's 60s wall, so a healthy inline call never trips it and
-# a killed one is collected within 30 seconds. The CHECK on ai_jobs makes the
-# lease mandatory for any in-flight row; without it the sweep's lease branch and
-# the frontend's lease rule both match nothing for backend rows.
-BACKEND_LEASE_SECONDS = 90
+# Comfortably past the function's maxDuration (vercel.json, 300 s), so a healthy
+# inline job never trips it and a killed one is collected within 30 seconds. MOVE
+# THEM TOGETHER: a lease shorter than the wall lets the sweep and the browser call
+# a job dead while it is still running -- a report on a thinking model makes up to
+# nine calls. The CHECK on ai_jobs makes the lease mandatory for any in-flight
+# row; without it the sweep's lease branch and the frontend's lease rule both
+# match nothing for backend rows.
+BACKEND_LEASE_SECONDS = 330
 BACKEND_QUEUE_TTL_SECONDS = 120
 
 
@@ -138,8 +141,8 @@ def enqueue(
 
     if page_count > 1 and executor != "worker":
         # A CHECK enforces this too. Raising here makes it a clean 501 rather than
-        # a constraint violation, and says why: N inline Anthropic calls inside one
-        # 60s wall is not slow, it is fatal.
+        # a constraint violation, and says why: N pages of inline Anthropic calls
+        # inside one function's wall is not slow, it is fatal.
         raise LLMNotConfigured(
             f"{resolved} resolves to an inline executor, which processes exactly one "
             f"job per request. Fan-out is worker-only.",

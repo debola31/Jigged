@@ -23,7 +23,7 @@ import { partToFormData, type Part, type PartFormData } from '@/types/part';
 import type { PartPricingTierInput } from '@/types/partPricing';
 import type { RoutingOperationWithWorkCenter } from '@/types/routings';
 import { addBomLine, checkBomCycle, deleteBomLine, getBomForPart, updateBomLine } from '@/utils/bomAccess';
-import { getCompany, readCompanyPricingDefaults } from '@/utils/companyAccess';
+import { getCompany, readCompanyMaterialChargeBasis } from '@/utils/companyAccess';
 import {
   ensureStarterPricingTier,
   getTiersForPart,
@@ -61,7 +61,7 @@ import { getWorkCentersForRouting } from '@/utils/workCentersAccess';
  * None of it is admin-only: every office user edits parts in the app.
  *
  * After a change that can give a part its first cost, the workspace gives it its first pricing
- * tier at the shop's starting markup (`ensureStarterPricingTier`, from PartWorkspace's
+ * tier, at 0% markup since 2026-11-09 (`ensureStarterPricingTier`, from PartWorkspace's
  * refreshAfterMutation), so "costed" and "quotable" land together. These tools do the same.
  */
 
@@ -116,7 +116,7 @@ async function startPricingIfNeeded(env: CompanyToolEnv, part: Part, wasPriceabl
 const starterOutput = z
   .boolean()
   .describe(
-    'Jigged gave the part its first pricing tier at the shop\'s starting markup, as it does in the ' +
+    'Jigged gave the part its first pricing tier, at 0% markup, as it does in the ' +
       'app the first time a part has a cost, and noted it on the part.',
   );
 
@@ -766,7 +766,7 @@ export const updatePartBom = defineCompanyTool({
         return { ok: false, message: `Adding ${child.part_name} to ${part.part_name} would make a loop: ${path}.` };
       }
       const company = await getCompany(env.company.id);
-      const basis = chargeBasisForNewLine(materialsStance(lines), readCompanyPricingDefaults(company).materialChargeBasis);
+      const basis = chargeBasisForNewLine(materialsStance(lines), readCompanyMaterialChargeBasis(company));
       write = async () => {
         await ensureConversion(child, unit);
         await addBomLine(part.id, { child_part_id: child.id, quantity: String(args.quantity), unit, charge_basis: basis });

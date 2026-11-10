@@ -104,11 +104,8 @@ vi.mock('@/utils/vendorServicesAccess', () => ({
 const mockGetCompany = vi.fn();
 vi.mock('@/utils/companyAccess', () => ({
   getCompany: (...a: unknown[]) => mockGetCompany(...a),
-  readCompanyPricingDefaults: (c: { default_material_charge_basis?: 'cost' | 'price' } | null) => ({
-    made: 0,
-    bought: 0,
-    materialChargeBasis: c?.default_material_charge_basis ?? 'cost',
-  }),
+  readCompanyMaterialChargeBasis: (c: { default_material_charge_basis?: 'cost' | 'price' } | null) =>
+    c?.default_material_charge_basis ?? 'cost',
 }));
 
 const mockCapture = vi.fn();

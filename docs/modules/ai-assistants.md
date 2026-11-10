@@ -98,7 +98,7 @@ at once, so a shared lookup would credit one person's note or step to another
   query route refuses statements and results that name them, but `row_to_json(row)` gets past
   that. Revoking those columns from the role would close it, for Jigged's own Insights as well.
 - **`query_shop_data` needs `AI_READONLY_DATABASE_URL` on the backend.** Without it the tool
-  answers that queries aren't available.
+  answers that queries aren't available. Set in production, verified through `/mcp` on 2026-11-10.
 - **The privacy policy has no section on connected assistants.** Deferred by the owner on
   2026-11-10. The help page states what is kept, and a policy change means publishing privacy v2
   ([legal-acceptance.md](legal-acceptance.md)).

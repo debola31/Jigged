@@ -119,9 +119,12 @@ numbers can differ, so adjust a prompt that doesn't fit.
 
 ## Reviewer account
 
-**Who:** `reviewer@jigged.app`, an admin of **Jigged Review Shop**. The login is password-only,
-with no MFA or email step. The company is billing-exempt (`company_billing.billing_exempt`), so
-the write tools work, and is seeded from the active demo template with `seed_demo_data`.
+**Who:** `reviewer@jigged.app`, an admin of **Jigged Review Shop**. Both were created in
+production on 2026-11-10. The login is password-only (created through the Auth admin API with the
+email pre-confirmed), with no MFA or email step. The company is billing-exempt
+(`company_billing.billing_exempt`), so the write tools work, and is seeded from the active demo
+template with `seed_demo_data`. The same day, every tool in the test prompts was run as this login
+against `https://jigged.app/mcp`, through the real OAuth flow.
 
 **Keep it working:**
 - Don't delete the account between reviews; both portals reuse it.

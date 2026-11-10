@@ -95,8 +95,9 @@ class QbdOffline(RuntimeError):
 
 
 class QbdUnknownOutcome(RuntimeError):
-    """A CREATE ended without a definitive answer. The invoice may or may not
-    exist. HTTP 409. Never auto-retried."""
+    """A WRITE ended without a definitive answer: the invoice, purchase order or
+    vendor may or may not exist. HTTP 409. Never auto-retried. The message names
+    what was being written (the `noun` passed to _request)."""
 
 
 class QbdApiError(RuntimeError):
@@ -182,12 +183,13 @@ _OFFLINE_CODES = {"INTEGRATION_CONNECTION_NOT_ACTIVE", "QBD_CONNECTION_ERROR"}
 _NOT_SET_UP_CODES = {"INTEGRATION_CONNECTION_NOT_SET_UP"}
 
 
-def _raise_for_error(resp: httpx.Response, *, is_write: bool) -> None:
+def _raise_for_error(resp: httpx.Response, *, is_write: bool, noun: str = "invoice") -> None:
     """Translate a Conductor error into this repo's exception vocabulary.
 
     `is_write` changes the ANSWER, not just the wording: a timeout on a read is a
     retryable failure, while the identical timeout on a create is an UNKNOWN
-    OUTCOME that must never be retried.
+    OUTCOME that must never be retried. `noun` names what was being written in that
+    message ("invoice" by default, so the invoice path's wording is unchanged).
     """
     if resp.status_code < 400:
         return
@@ -222,7 +224,7 @@ def _raise_for_error(resp: httpx.Response, *, is_write: bool) -> None:
     if code == "QBD_REQUEST_TIMEOUT":
         if is_write:
             raise QbdUnknownOutcome(
-                "We couldn't confirm whether QuickBooks recorded that invoice."
+                f"We couldn't confirm whether QuickBooks recorded that {noun}."
             )
         raise QbdApiError(friendly, code=code, request_id=request_id)
 
@@ -242,10 +244,12 @@ def _request(
     params: dict | None = None,
     json_body: dict | None = None,
     is_write: bool = False,
+    noun: str = "invoice",
 ) -> Any:
     """One Conductor call. NO RETRY LAYER, by construction -- see the module
     docstring. A connection error or timeout on a write is an unknown outcome,
-    not a failure, and the caller resolves it by looking for the invoice."""
+    not a failure, and the caller resolves it by looking for what it wrote.
+    `noun` ("invoice", "purchase order", "vendor") names it in that message."""
     headers = {"Authorization": f"Bearer {_secret_key()}", "Accept": "application/json"}
     if end_user_id:
         headers["Conductor-End-User-Id"] = end_user_id
@@ -262,11 +266,11 @@ def _request(
             # The request may well have reached QuickBooks. Verified: a create
             # aborted at 1s still produced an invoice.
             raise QbdUnknownOutcome(
-                "We lost contact with QuickBooks while creating that invoice."
+                f"We lost contact with QuickBooks while creating that {noun}."
             ) from exc
         raise QbdApiError(f"Couldn't reach QuickBooks Desktop: {exc}") from exc
 
-    _raise_for_error(resp, is_write=is_write)
+    _raise_for_error(resp, is_write=is_write, noun=noun)
     return resp.json() if resp.content else {}
 
 

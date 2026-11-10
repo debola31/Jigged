@@ -16,13 +16,22 @@ import services.quickbooks as qb
 # call through it becomes an AttributeError at runtime.
 import services.quickbooks_desktop as qbd_service
 
-from .base import AccountingProvider, CreatedInvoice
+from .base import (
+    AccountingProvider,
+    CreatedInvoice,
+    PushedPurchaseOrder,
+    QbPurchaseOrderLine,
+    QbPurchaseOrderState,
+)
 from .qbd import QbdProvider
 from .qbo import QboProvider
 
 __all__ = [
     "AccountingProvider",
     "CreatedInvoice",
+    "PushedPurchaseOrder",
+    "QbPurchaseOrderLine",
+    "QbPurchaseOrderState",
     "QbdProvider",
     "QboProvider",
     "get_provider",

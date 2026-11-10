@@ -1105,7 +1105,6 @@ async def push_invoice(company_id: str, job_id: str, request: Request, body: Com
     if provider is None or provider.requires_reconnect:
         raise HTTPException(status_code=409, detail="QuickBooks is not connected.")
     realm = provider.scope_id
-    conn = getattr(provider, "_conn", {})
     job = await _load_gated_job(db, company_id, job_id)
 
     if not body.request_id:

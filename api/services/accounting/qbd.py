@@ -1,15 +1,17 @@
 """QuickBooks Desktop (via Conductor) as an AccountingProvider.
 
-A binding shell over api/services/quickbooks_desktop.py, mirroring qbo.py so the
-shared push path never learns which accounting system it is talking to.
+A binding shell over api/services/quickbooks_desktop.py (invoices) and
+api/services/quickbooks_desktop_purchasing.py (vendor purchase orders), mirroring
+qbo.py so the shared push paths never learn which accounting system they talk to.
 """
 from __future__ import annotations
 
 from supabase import Client
 
 import services.quickbooks_desktop as qbd
+import services.quickbooks_desktop_purchasing as qbdp
 
-from .base import CreatedInvoice
+from .base import CreatedInvoice, PushedPurchaseOrder, QbPurchaseOrderState
 
 
 class QbdProvider:
@@ -38,6 +40,17 @@ class QbdProvider:
         realm id is for QBO. Written to quickbooks_invoice_links.realm_id."""
         return self._end_user_id
 
+    @property
+    def connection_id(self) -> str | None:
+        return self._conn.get("id")
+
+    @property
+    def invoice_item_ids(self) -> tuple[str, ...]:
+        """quickbooks_desktop_connections.default_service_item_id: the invoice item,
+        which posts to the income account an admin chose."""
+        item = self._conn.get("default_service_item_id")
+        return (str(item),) if item else ()
+
     # ── customers ────────────────────────────────────────────────────────────
     def find_customer_candidates(self, name: str) -> dict:
         return qbd.find_customer_candidates(self._end_user_id, name)
@@ -63,6 +76,10 @@ class QbdProvider:
         return qbd.list_terms(self._end_user_id)
 
     def resolve_term_id(self, term_name: str) -> str | None:
+        """Best-effort. Under QUICKBOOKS_FAKE it answers None without reaching
+        Conductor, as the QuickBooks Online provider does."""
+        if qbdp.is_fake():
+            return None
         return qbd.resolve_term_id(self._end_user_id, term_name)
 
     # ── the invoice ──────────────────────────────────────────────────────────
@@ -118,4 +135,70 @@ class QbdProvider:
     def invoice_deep_link(self, invoice_id: str) -> str | None:
         """None: QuickBooks Desktop has no web app to link into. The job page
         already renders a non-link row when this is absent."""
+        return None
+
+    # ── vendors (vendor purchase orders) ─────────────────────────────────────
+    def vendor_name_problem(self, name: str) -> str | None:
+        return qbdp.vendor_name_problem(name)
+
+    def find_vendor_candidates(self, name: str) -> dict:
+        return qbdp.find_vendor_candidates(self._end_user_id, name)
+
+    def create_vendor(self, display_name: str, address: dict | None, *, request_id: str) -> str:
+        """`request_id` is unused: Desktop has no request key. A duplicate cannot
+        happen anyway -- QuickBooks refuses a second vendor of the same name, and
+        create_vendor resolves that by name."""
+        return qbdp.create_vendor(self._end_user_id, display_name, address)
+
+    # ── purchasing reference data ────────────────────────────────────────────
+    def list_purchase_accounts(self) -> list[dict]:
+        return qbdp.list_purchase_accounts(self._end_user_id)
+
+    def list_ap_accounts(self) -> list[dict]:
+        return qbdp.list_ap_accounts(self._end_user_id)
+
+    def list_purchase_items(self) -> list[dict]:
+        return qbdp.list_purchase_items(self._end_user_id)
+
+    def create_purchase_item(self, name: str, account_id: str, *, request_id: str) -> dict:
+        return qbdp.create_purchase_item(self._end_user_id, name, account_id)
+
+    def check_purchasing_preferences(self) -> dict:
+        return qbdp.check_purchasing_preferences(self._end_user_id)
+
+    def resolve_ship_method_id(self, name: str) -> str | None:
+        return qbdp.resolve_ship_method_id(self._end_user_id, name)
+
+    # ── the vendor purchase order ────────────────────────────────────────────
+    def build_purchase_order_payload(self, po, **kwargs) -> dict:
+        return qbdp.purchase_order_payload(po, **kwargs)
+
+    def create_purchase_order(self, payload: dict, *, request_id: str) -> PushedPurchaseOrder:
+        return qbdp.create_purchase_order(self._end_user_id, payload, request_id=request_id)
+
+    def read_purchase_order(self, qb_po_id: str) -> QbPurchaseOrderState | None:
+        return qbdp.read_purchase_order(self._end_user_id, qb_po_id, db=self._db,
+                                        company_id=self._company_id)
+
+    def update_purchase_order(self, qb_po_id: str, payload: dict, *,
+                              request_id: str) -> PushedPurchaseOrder:
+        return qbdp.update_purchase_order(self._end_user_id, qb_po_id, payload,
+                                          request_id=request_id)
+
+    def find_created_purchase_order(self, link_row: dict) -> PushedPurchaseOrder | None:
+        """The recovery probe. Narrowed by the vendor and the PO date recorded on the
+        link at claim time; without both it cannot run, and says so with None."""
+        qb_vendor_id = link_row.get("qb_vendor_id")
+        transaction_date = link_row.get("transaction_date")
+        if not qb_vendor_id or not transaction_date:
+            return None
+        return qbdp.find_created_purchase_order(
+            self._end_user_id,
+            qb_vendor_id=str(qb_vendor_id),
+            transaction_date=str(transaction_date),
+            external_id=str(link_row["qb_request_id"]),
+        )
+
+    def purchase_order_deep_link(self, qb_po_id: str) -> str | None:
+        """None: QuickBooks Desktop has no web app to link into."""
         return None

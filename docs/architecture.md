@@ -77,7 +77,7 @@ cross-tenant reads; one user can belong to many companies.
 
 | Table | Shape that matters |
 |---|---|
-| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_material_charge_basis, default_markup_made_percent, default_markup_bought_percent` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts) is the registry; [feature-flags.md](modules/feature-flags.md) is the standard). `default_material_charge_basis` is a seed for new BOM lines — see [parts.md](modules/parts.md#parts_bom). The two `default_markup_*` columns have been unused since 2026-11-09 and are dropped by a follow-up migration. |
+| `companies` | `id, name, slug UNIQUE, settings jsonb, is_demo, demo_company_id, default_material_charge_basis` + the shop's own address/contact block. `settings.features.*` holds per-tenant flags ([`lib/featureFlags.ts`](../lib/featureFlags.ts) is the registry; [feature-flags.md](modules/feature-flags.md) is the standard). `default_material_charge_basis` is a seed for new BOM lines — see [parts.md](modules/parts.md#parts_bom). (The two starting-markup columns were dropped 2026-11-09.) |
 | `user_company_access` | `(user_id, company_id) UNIQUE`; `role` CHECK-constrained to **`admin` \| `user` \| `operator`** (default `operator`); also `name`, `email`, `pin_hash`, `excluded_from_metrics`. *(Previously listed an `owner` role; the constraint has never allowed it.)* |
 | `user_preferences` | `user_id UNIQUE`, `last_company_id`, `preferences jsonb`. |
 

@@ -390,9 +390,10 @@ One card. There are no separate `PartCostBreakdown` / `PartPricingTiers` compone
 
   **Why always 0%.** Until 2026-11-09 the starting markup was a shop setting, split by source
   (`companies.default_markup_made_percent` / `default_markup_bought_percent`, "Part pricing
-  markups" in Settings). Every company had left both at 0, so the fields were removed and nothing
-  reads the columns any more (a follow-up migration drops them); the 0 is now
-  `STARTER_MARKUP_PERCENT` in `utils/partPricingTiersAccess.ts`. The rollup (above)
+  markups" in Settings). Every company had left both at 0, so the fields were removed and the
+  columns dropped
+  ([`20261109222329`](../../supabase/migrations/20261109222329_drop_starter_markups_and_po_field.sql));
+  the 0 is now `STARTER_MARKUP_PERCENT` in `utils/partPricingTiersAccess.ts`. The rollup (above)
   still has no shop-wide fallback: `lib/companyDefaults.ts` records that resolving a shared default
   at read time, with nothing on screen to say where the number came from, is what got
   `markup_rates` deleted.

@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import SmartToyOutlinedIcon from '@mui/icons-material/SmartToyOutlined';
 
-import ConnectAssistantMenu from '@/components/aiAssistants/ConnectAssistantMenu';
+import ConnectAssistantButton from '@/components/aiAssistants/ConnectAssistantDialog';
 
 /**
  * The dashboard's way to the person's OWN assistant: Claude or ChatGPT, connected through Jigged's
@@ -15,8 +15,8 @@ import ConnectAssistantMenu from '@/components/aiAssistants/ConnectAssistantMenu
  * page, rendered whether or not Insights is: Jigged's own chat may be retired in favour of
  * customers' assistants, and this must survive that without a change.
  *
- * Every office user sees it; there is no per-company switch. Its button opens the connect menu
- * in place; the person's connected assistants are under AI assistants in the account menu.
+ * Every office user sees it; there is no per-company switch. Its button opens the connect dialog
+ * in place (a Claude card and a ChatGPT card, each with its steps); the person's connected assistants are under AI assistants in the account menu.
  */
 export default function ConnectAssistantStrip() {
   return (
@@ -47,7 +47,7 @@ export default function ConnectAssistantStrip() {
             Ask Claude or ChatGPT about your jobs, quotes, parts and stock.
           </Typography>
         </Box>
-        <ConnectAssistantMenu opens="up" />
+        <ConnectAssistantButton />
       </Box>
     </Box>
   );

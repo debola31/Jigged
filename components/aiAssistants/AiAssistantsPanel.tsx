@@ -20,7 +20,7 @@ import * as Sentry from '@sentry/nextjs';
 import BusyButton from '@/components/common/BusyButton';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import { useLoad } from '@/hooks/useLoad';
-import ConnectAssistantMenu from '@/components/aiAssistants/ConnectAssistantMenu';
+import ConnectAssistantButton from '@/components/aiAssistants/ConnectAssistantDialog';
 import { clientKindOf } from '@/lib/mcp/clientKind';
 import { friendlyErrorMessage, toError } from '@/lib/supabaseErrors';
 import { disconnectAssistant, listConnectedAssistants } from '@/utils/aiAssistantAccess';
@@ -29,7 +29,7 @@ const dateFormat = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 /**
  * The assistants this person has connected to Jigged, each with Disconnect. Reached from the
- * account menu. Connecting happens from the "Connect your assistant" menu (on the dashboard, and
+ * account menu. Connecting happens from the "Connect your assistant" dialog (on the dashboard, and
  * here in the header), never by sending someone to this page first.
  */
 export default function AiAssistantsPanel() {
@@ -66,7 +66,7 @@ export default function AiAssistantsPanel() {
             <Typography variant="h6" component="h2" sx={{ fontWeight: 600, flex: 1 }}>
               Connected assistants
             </Typography>
-            <ConnectAssistantMenu />
+            <ConnectAssistantButton />
           </Box>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             Every assistant you have allowed, in all your companies. Disconnecting one stops it

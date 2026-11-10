@@ -31,7 +31,7 @@ describe('AiAssistantsPanel', () => {
     mockDisconnect.mockResolvedValue(undefined);
   });
 
-  it('offers the connect menu in its header', () => {
+  it('offers the connect dialog in its header', () => {
     render(<AiAssistantsPanel />);
     expect(screen.getByRole('button', { name: 'Connect your assistant' })).toBeInTheDocument();
   });

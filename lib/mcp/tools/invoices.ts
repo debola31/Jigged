@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { getSupabase } from '@/lib/supabase';
 import { QB_INVOICE_STATUSES } from '@/utils/invoicePaymentStatus';
@@ -154,7 +153,7 @@ export const getJobInvoices = defineCompanyTool({
   },
 });
 
-export function registerInvoiceTools(server: McpServer): void {
+export function registerInvoiceTools(server: ToolTarget): void {
   registerCompanyTool(server, getJobInvoices);
 }
 

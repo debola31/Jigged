@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type ToolTarget } from '@/lib/mcp/defineTool';
 import { BAD_CURSOR_MESSAGE, companyLink, pageInput, pageOutput, paginate, urlOutput } from '@/lib/mcp/tools/shared';
 import { getSupabase } from '@/lib/supabase';
 import { getAllWorkCenters } from '@/utils/workCentersAccess';
@@ -93,7 +92,7 @@ export const listWorkCenters = defineCompanyTool({
   },
 });
 
-export function registerWorkCenterTools(server: McpServer): void {
+export function registerWorkCenterTools(server: ToolTarget): void {
   registerCompanyTool(server, listWorkCenters);
 }
 

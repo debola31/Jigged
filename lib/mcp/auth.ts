@@ -50,6 +50,34 @@ export function callerFromClaims(token: string, claims: Claims, nowSeconds: numb
   };
 }
 
+/** The client id Jigged chat's calls are logged under in mcp_tool_calls. Not an OAuth client. */
+export const CHAT_CLIENT_ID = 'jigged-chat';
+export const CHAT_CLIENT_NAME = 'Jigged chat';
+
+/**
+ * The person behind a Jigged chat tool call, from their own browser session token -- the
+ * mirror image of `callerFromClaims`.
+ *
+ * **A `client_id` claim is refused.** That token belongs to an AI assistant, whose only door is
+ * `/mcp`: accepting it here would let an assistant run tools outside the gateway binding and the
+ * connected-apps list. A browser session carries no client_id.
+ */
+export function chatCallerFromClaims(token: string, claims: Claims, nowSeconds: number): McpCaller | null {
+  const { sub, role, aud, client_id: clientId, exp, email, is_anonymous: isAnonymous } = claims;
+  if (typeof sub !== 'string' || sub.length === 0) return null;
+  if (role !== 'authenticated' || !hasAudience(aud, 'authenticated')) return null;
+  if (isAnonymous === true) return null;
+  if (clientId !== undefined && clientId !== null) return null;
+  if (typeof exp !== 'number' || exp <= nowSeconds) return null;
+  return {
+    token,
+    clientId: CHAT_CLIENT_ID,
+    userId: sub,
+    email: typeof email === 'string' && email.length > 0 ? email : null,
+    expiresAt: exp,
+  };
+}
+
 let verifier: SupabaseClient | null = null;
 
 /** A sessionless client used only to check signatures. It never holds anyone's session. */
@@ -88,6 +116,14 @@ export async function verifyMcpToken(_req: Request, bearerToken?: string): Promi
     expiresAt: caller.expiresAt,
     extra: { userId: caller.userId, email: caller.email },
   };
+}
+
+/** The person behind a Jigged chat tool request, or null to answer 401. */
+export async function verifyChatToken(bearerToken: string | null): Promise<McpCaller | null> {
+  if (!bearerToken) return null;
+  const { data, error } = await verifierClient().auth.getClaims(bearerToken);
+  if (error || !data) return null;
+  return chatCallerFromClaims(bearerToken, data.claims, Math.floor(Date.now() / 1000));
 }
 
 /** The caller behind a verified request, rebuilt from what `verifyMcpToken` attached. */

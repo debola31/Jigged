@@ -525,6 +525,47 @@ other — from any company, since the prefix holds no company data — reads it 
 
 ---
 
+## Actions: the chat makes changes, with approval
+
+Since 2026-11-10 the chat can act, not only answer — create a quote, update a job, add stock,
+archive a record, push an invoice to QuickBooks. **It uses the MCP server's own tools**
+([`lib/mcp/tools`](../../lib/mcp/tools)), every company tool `/mcp` offers except the two the chat
+already has (`query_shop_data`, `get_data_schema`), so a tool added for Claude or ChatGPT reaches
+the chat in the same change. The user's decisions (2026-11-09): every MCP tool; every change
+approved by the person first; an "Always allow" that is **per person, per action, per company**.
+
+```
+browser ──/chat──▶ FastAPI insights loop (Opus 5.5) ──tool search──▶ deferred MCP tool definitions
+                        │ read, or an always-allowed write                │ a write to approve
+                        ▼                                                 ▼
+          /chat-tools (Next.js, as the person) ◀── /chat/decide ◀── approval card (browser)
+                        │
+                        ▼  the /mcp call path: role, rate limit, RLS + billing gate, mcp_tool_calls
+```
+
+| Piece | Where | What it guarantees |
+|---|---|---|
+| The catalogue | `lib/mcp/chatCatalog.ts` — `registerJiggedTools` into a `ToolCatalog` | One list with `/mcp`. A test holds it to the server's registrations |
+| The door | `app/chat-tools/route.ts` | The person's own session token (an assistant's OAuth token is refused — its door is `/mcp`); the shared call path `runCompanyTool`; one `mcp_tool_calls` row as client `jigged-chat` / "Jigged chat" |
+| The bridge | `api/services/chat_actions.py` | The token goes only to `APP_BASE_URL`, from env — never a URL the request supplied. Tools deferred behind BM25 tool search (~30K tokens of definitions stay out of the prefix). Write tools gain a `summary_for_approval` field the model must fill; it is stripped before the call |
+| The pause | `insights._paused` | A write the person has not always-allowed stops the job: `result.pending_actions` (the card) and `result.resume_state` (the conversation exactly as it stopped, thinking and tool-search blocks included — they must go back unchanged). The answer reads on its own: "This needs your approval before it runs: …" |
+| The decision | `POST /api/insights/{company_id}/chat/decide` | Only the person who asked (`ai_jobs.requested_by`), only on the newest turn of the thread (409 otherwise). The body carries the decision alone; what runs is loaded from the job. A new job in the same thread, so the transcript reads "Approved: …" then the result |
+| Always allow | `public.chat_action_grants` | Written by the backend on "Always allow"; listed and turned off by the person (column grant: `deleted_at` only) under **Allowed actions** beside Chat history. A restrictive policy refuses assistant tokens outright |
+
+**Grounding still holds.** Figures in a Jigged tool's result count as known, like a query's, and so
+do the values the person approved on the card; `tools_ok` stands beside `sql_ok` in the non-answer
+gate. **Off switch:** `CHAT_ACTIONS=off` on Vercel turns actions off without a deploy; no
+`APP_BASE_URL` (previews) has the same effect. A fresh question that cannot load the tools is
+answered read-only and reported to Sentry; a decision that cannot load them is a 503 and runs
+nothing.
+
+**Measured 2026-11-09** against the API with the real 67-tool manifest: "Create a quote for Cascade
+Robotics: 10 of ASM-GEARBOX, lead time 3 weeks" found its tools by search, looked up the customer
+and part, stopped on `create_quote` with that sentence, and after approval ran it and reported the
+quote number — four model calls, $0.19.
+
+---
+
 ## Long conversations on a 32K context
 
 > **Production serves on `claude-opus-5-5` since 2026-11-09** (1M-token window, inline on Vercel —

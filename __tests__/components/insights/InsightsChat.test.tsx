@@ -12,6 +12,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import * as Sentry from '@sentry/nextjs';
+import posthog from 'posthog-js';
 
 import { render, screen, resetRouterMocks, within } from '../../test-utils';
 import InsightsChat from '@/components/insights/InsightsChat';
@@ -19,12 +20,26 @@ import { ChatEnqueueError } from '@/utils/insightsAccess';
 
 const mockSubmitChatQuery = vi.fn();
 const mockListReports = vi.fn();
+const mockGetPendingActions = vi.fn();
+const mockDecideChatAction = vi.fn();
 vi.mock('@/utils/insightsAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/insightsAccess')>();
   return {
     ...actual,
     submitChatQuery: (...a: unknown[]) => mockSubmitChatQuery(...a),
     listReports: (...a: unknown[]) => mockListReports(...a),
+    getPendingActions: (...a: unknown[]) => mockGetPendingActions(...a),
+    decideChatAction: (...a: unknown[]) => mockDecideChatAction(...a),
+  };
+});
+
+// Nothing always-allowed unless a test says otherwise.
+const mockListChatActionGrants = vi.fn();
+vi.mock('@/utils/chatActionGrantsAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/chatActionGrantsAccess')>();
+  return {
+    ...actual,
+    listChatActionGrants: (...a: unknown[]) => mockListChatActionGrants(...a),
   };
 });
 
@@ -85,6 +100,8 @@ beforeEach(() => {
   mockListThreadMessages.mockResolvedValue([]);
   mockListThreads.mockResolvedValue([]);
   mockListReports.mockResolvedValue([]);
+  mockGetPendingActions.mockResolvedValue([]);
+  mockListChatActionGrants.mockResolvedValue([]);
   mockListChartTurns.mockResolvedValue([]);
   mockSubmitChatQuery.mockResolvedValue({ job_id: 'job-1', status: 'queued', executor: 'worker' });
   mockUseAiJob.mockReturnValue(IDLE_JOB);
@@ -582,5 +599,96 @@ describe('InsightsChat — the History rail', () => {
 
     expect(mockArchiveThread).toHaveBeenCalledWith('thread-9');
     expect(window.sessionStorage.getItem('jigged.aiThread.co-1')).toBeNull();
+  });
+});
+
+describe('InsightsChat — a change waiting for approval', () => {
+  const CREATE = {
+    id: 'call-1',
+    tool: 'create_quote',
+    title: 'Create quote',
+    summary: 'Create a quote for Cascade Robotics: 10 of ASM-GEARBOX, lead time 3 weeks.',
+    destructive: false,
+  };
+
+  function withPendingTurn(actions = [CREATE]) {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
+    mockListThreadMessages.mockResolvedValue(
+      turn(1, 'Quote Cascade 10 gearboxes', `This needs your approval before it runs: ${actions[0].summary}`),
+    );
+    mockGetPendingActions.mockImplementation((jobId: string) =>
+      Promise.resolve(jobId === 'job-1' ? actions : []),
+    );
+  }
+
+  it('shows exactly what will change, on the newest turn, read from that turn’s job', async () => {
+    withPendingTurn();
+    render(<InsightsChat companyId="co-1" />);
+
+    const card = await screen.findByRole('group', { name: 'Change waiting for your approval' });
+    expect(card).toHaveTextContent('Approve this change?');
+    expect(card).toHaveTextContent(CREATE.summary);
+    expect(mockGetPendingActions).toHaveBeenCalledWith('job-1');
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Always allow' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Decline' })).toBeEnabled();
+  });
+
+  it.each(['approve', 'always', 'decline'] as const)(
+    'sends %s for that job alone, then waits on the decision’s own job',
+    async (decision) => {
+      withPendingTurn();
+      mockDecideChatAction.mockResolvedValue({ job_id: 'job-2', status: 'settled', executor: 'backend' });
+      render(<InsightsChat companyId="co-1" />);
+      const user = userEvent.setup();
+      const label = { approve: 'Approve', always: 'Always allow', decline: 'Decline' }[decision];
+
+      await user.click(await screen.findByRole('button', { name: label }));
+
+      expect(mockDecideChatAction).toHaveBeenCalledWith('co-1', 'job-1', decision);
+      expect(IDLE_JOB.watch).toHaveBeenCalledWith('job-2');
+      expect(posthog.capture).toHaveBeenCalledWith('chat action decided', {
+        decision,
+        action_count: 1,
+        destructive: false,
+        tool_names: ['create_quote'],
+      });
+    },
+  );
+
+  it('marks a destructive change in words, not colour alone', async () => {
+    withPendingTurn([{ ...CREATE, tool: 'archive_record', title: 'Archive record', destructive: true }]);
+    render(<InsightsChat companyId="co-1" />);
+    const card = await screen.findByRole('group', { name: 'Change waiting for your approval' });
+    expect(card).toHaveTextContent('Check carefully');
+  });
+
+  it('shows no card when nothing is waiting', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
+    mockListThreadMessages.mockResolvedValue(turn(1, 'how many open quotes?', 'Six.'));
+    render(<InsightsChat companyId="co-1" />);
+    await screen.findByText('Six.');
+    expect(screen.queryByRole('group', { name: 'Change waiting for your approval' })).toBeNull();
+  });
+
+  it('offers Allowed actions only once something is always-allowed', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 'thread-9');
+    mockListThreadMessages.mockResolvedValue(turn(1, 'how many open quotes?', 'Six.'));
+    const { unmount } = render(<InsightsChat companyId="co-1" />);
+    await screen.findByText('Six.');
+    expect(screen.queryByRole('button', { name: 'Allowed actions' })).toBeNull();
+    unmount();
+
+    mockListChatActionGrants.mockResolvedValue([{ id: 'g1', tool_name: 'create_quote', created_at: '2026-11-09T00:00:00Z' }]);
+    render(<InsightsChat companyId="co-1" />);
+    const user = userEvent.setup();
+    // The thread first: until it loads, the button sits in the empty-page row, and the
+    // conversation's arrival re-renders it in the other one -- a click in between lands
+    // on a node that is gone.
+    await screen.findByText('Six.');
+    await user.click(screen.getByRole('button', { name: 'Allowed actions' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Allowed actions' });
+    expect(within(dialog).getByText('Create quote')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Turn off' })).toBeEnabled();
   });
 });

@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import {
   BAD_CURSOR_MESSAGE,
   MAX_PAGE,
@@ -240,7 +239,7 @@ export const getVendor = defineCompanyTool({
   },
 });
 
-export function registerVendorTools(server: McpServer): void {
+export function registerVendorTools(server: ToolTarget): void {
   registerCompanyTool(server, listVendors);
   registerCompanyTool(server, getVendor);
 }

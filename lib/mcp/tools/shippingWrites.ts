@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import {
@@ -8,7 +7,7 @@ import {
   outsideSendConsequence,
 } from '@/components/operations/operationMath';
 import { carrierAccountMismatch } from '@/components/shipments/shipmentMath';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { addressOf, companyLink } from '@/lib/mcp/tools/shared';
 import {
   FREIGHT_TERMS,
@@ -882,7 +881,7 @@ export const voidOutsideShipmentTool = defineCompanyTool({
   },
 });
 
-export function registerShippingWriteTools(server: McpServer): void {
+export function registerShippingWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createShipmentTool);
   registerCompanyTool(server, voidShipmentTool);
   registerCompanyTool(server, sendOutside);

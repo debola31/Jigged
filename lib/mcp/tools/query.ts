@@ -1,8 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { callBackend } from '@/lib/mcp/backend';
-import { defineCompanyTool, registerCompanyTool } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type ToolTarget } from '@/lib/mcp/defineTool';
 
 /**
  * Shop data by SQL, for the assistant's own answers and charts. The assistant writes the query;
@@ -156,7 +155,7 @@ export const queryShopData = defineCompanyTool({
   },
 });
 
-export function registerQueryTools(server: McpServer): void {
+export function registerQueryTools(server: ToolTarget): void {
   registerCompanyTool(server, getDataSchema);
   registerCompanyTool(server, queryShopData);
 }

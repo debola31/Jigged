@@ -1,9 +1,8 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { rollUpByPart } from '@/lib/inventoryOnHand';
 import { compareLocationNames, computePathNames } from '@/lib/locationTree';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import {
   BAD_CURSOR_MESSAGE,
   DEFAULT_PAGE,
@@ -783,7 +782,7 @@ export const getPartStockHistory = defineCompanyTool({
   },
 });
 
-export function registerInventoryTools(server: McpServer): void {
+export function registerInventoryTools(server: ToolTarget): void {
   registerCompanyTool(server, searchInventory);
   registerCompanyTool(server, listLocations);
   registerCompanyTool(server, getLocationContents);

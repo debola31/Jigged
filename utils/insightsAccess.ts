@@ -135,6 +135,83 @@ export async function submitChatQuery(
 }
 
 // ============================================================
+// Changes the chat proposes, and the person's answer
+// ============================================================
+
+/** approve runs it once; always also allows these actions from now on; decline runs nothing. */
+export type ChatDecisionKind = 'approve' | 'always' | 'decline';
+
+/** One change the chat is waiting on, as the approval card shows it. */
+export interface PendingAction {
+  id: string;
+  /** The MCP tool, e.g. create_quote. The unit "Always allow" applies to. */
+  tool: string;
+  /** The tool's own title, e.g. "Create quote". */
+  title: string;
+  /** The model's one-sentence account of exactly what will change. */
+  summary: string;
+  /** Archive, void, cancel, convert, the QuickBooks push. */
+  destructive: boolean;
+}
+
+/** The narrowing `result->pending_actions` needs: jsonb type-checks nothing. */
+export function pendingActionsOf(value: unknown): PendingAction[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item): PendingAction[] => {
+    if (!item || typeof item !== 'object') return [];
+    const { id, tool, title, summary, destructive } = item as Record<string, unknown>;
+    if (typeof id !== 'string' || typeof tool !== 'string') return [];
+    return [{
+      id,
+      tool,
+      title: typeof title === 'string' && title ? title : tool,
+      summary: typeof summary === 'string' ? summary : '',
+      destructive: destructive === true,
+    }];
+  });
+}
+
+/**
+ * The changes a turn's job is waiting on, or none. Reads one jsonb path rather than the
+ * whole result, which also holds the conversation the decision would resume.
+ */
+export async function getPendingActions(jobId: string): Promise<PendingAction[]> {
+  const { data, error } = await getSupabase()
+    .from('ai_jobs')
+    .select('pending:result->pending_actions')
+    .eq('id', jobId)
+    .maybeSingle();
+  if (error) throw error;
+  return pendingActionsOf(data?.pending);
+}
+
+/**
+ * Answer a change the chat proposed. Returns a JOB ID, exactly like a question: the
+ * decision continues the conversation as the next turn, and its answer arrives on that
+ * job's row. Everything about what is being decided is loaded server-side from `jobId`.
+ */
+export async function decideChatAction(
+  companyId: string,
+  jobId: string,
+  decision: ChatDecisionKind,
+): Promise<ChatEnqueued> {
+  const headers = await getAuthHeaders();
+  const response = await fetch(`${API_BASE_URL}/api/insights/${companyId}/chat/decide`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ job_id: jobId, decision, today: todayLocalISODate() }),
+  });
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new ChatEnqueueError(
+      errorData.detail || `Failed to send your decision (${response.status})`,
+      response.status,
+    );
+  }
+  return (await response.json()) as ChatEnqueued;
+}
+
+// ============================================================
 // The job row, read straight from Supabase
 // ============================================================
 

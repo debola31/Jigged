@@ -1,10 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { callBackend } from '@/lib/mcp/backend';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { getSupabase } from '@/lib/supabase';
 
@@ -515,7 +514,7 @@ export const pushInvoiceToQuickBooks = defineCompanyTool({
   },
 });
 
-export function registerInvoiceWriteTools(server: McpServer): void {
+export function registerInvoiceWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, previewInvoicePush);
   registerCompanyTool(server, pushInvoiceToQuickBooks);
 }

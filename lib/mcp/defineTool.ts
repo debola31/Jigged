@@ -290,13 +290,127 @@ async function settle<T extends Record<string, unknown>>(
   return finish(frame, 'ok', successResult(result.data, result.text));
 }
 
+/**
+ * Who is calling and from where, for one company-tool call. `/mcp` builds it from the request
+ * the assistant made; Jigged chat (app/chat-tools/route.ts) from the person's own session.
+ */
+export interface ToolInvocation {
+  caller: McpCaller;
+  /** The client's name for the audit log: an assistant's own claim, or "Jigged chat". */
+  clientName: string | null;
+  origin: string | null;
+  companyId: string;
+}
+
+/**
+ * One company-tool call, guards and all: company and role, the rate limit, the call inside
+ * `runAsCaller`, the result checked against the output schema, one `mcp_tool_calls` row. The
+ * ONLY call path -- `/mcp` and Jigged chat both come through here, so a chat action is checked,
+ * limited and logged exactly as the same call from Claude or ChatGPT would be.
+ */
+async function runCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawShape>(
+  tool: CompanyTool<I, O>,
+  input: z.infer<z.ZodObject<I>>,
+  { caller, clientName, origin, companyId }: ToolInvocation,
+): Promise<CallToolResult> {
+  const frame: CallFrame = {
+    caller,
+    clientName,
+    tool: tool.name,
+    isWrite: tool.access === 'write',
+    started: Date.now(),
+    companyId: null,
+  };
+  return runAsCaller(caller, async () => {
+    try {
+      const resolved = await resolveCompany(caller, companyId);
+      if (!resolved.ok) return finish(frame, 'refused', errorResult(resolved.message));
+      const company = resolved.company;
+      frame.companyId = company.id;
+
+      const limited = await rateLimitRefusal({
+        companyId: company.id,
+        userId: caller.userId,
+        isWrite: frame.isWrite,
+        placeName: company.name,
+      });
+      if (limited) return finish(frame, 'rate_limited', errorResult(limited));
+
+      const result = await tool.run(input, {
+        caller,
+        company,
+        origin,
+        link: (path) => (origin ? `${origin}${path}` : null),
+      });
+      return settle(frame, result, z.object(tool.output));
+    } catch (err) {
+      return failure(frame, err);
+    }
+  });
+}
+
+/**
+ * A company tool as Jigged chat sees it. The same definition the MCP server registers -- name,
+ * description, annotations -- with its own input only: the chat always acts in the company it
+ * was asked in, so `company_id` is the route's to supply, never the model's to choose.
+ */
+export interface CatalogTool {
+  name: string;
+  title: string;
+  description: string;
+  access: ToolAccess;
+  destructive: boolean;
+  input: z.ZodObject<z.ZodRawShape>;
+  /** Validates `args` against `input`, then runs the shared call path. */
+  call: (args: unknown, invocation: ToolInvocation) => Promise<CallToolResult>;
+}
+
+/**
+ * Collects company tools instead of serving them. `registerJiggedTools(catalog)` fills it with
+ * every tool `/mcp` offers, from the same registration code, so the two lists cannot drift.
+ * Account tools are left out: the chat always acts in one company.
+ */
+export class ToolCatalog {
+  readonly tools: CatalogTool[] = [];
+}
+
+/** Where `register*Tools` puts tools: the MCP server, or the chat's catalogue. */
+export type ToolTarget = McpServer | ToolCatalog;
+
+function invalidInputResult(name: string, error: z.ZodError): CallToolResult {
+  const problems = error.issues
+    .slice(0, 6)
+    .map((issue) => `${issue.path.join('.') || '(input)'}: ${issue.message}`)
+    .join('; ');
+  return errorResult(`The input for ${name} was not valid (${problems}). Nothing was read or changed.`);
+}
+
 export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawShape>(
-  server: McpServer,
+  target: ToolTarget,
   tool: CompanyTool<I, O>,
 ): void {
   const ownInput = z.object(tool.input);
+  if (target instanceof ToolCatalog) {
+    target.tools.push({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      access: tool.access,
+      destructive: tool.access === 'write' && Boolean(tool.destructive),
+      input: ownInput,
+      // The MCP SDK validates before the handler runs; here the catalogue does, with the same
+      // schema, and an invalid call writes no row -- exactly as on /mcp.
+      call: async (args, invocation) => {
+        const parsed = ownInput.safeParse(args);
+        if (!parsed.success) return invalidInputResult(tool.name, parsed.error);
+        return runCompanyTool(tool, parsed.data, invocation);
+      },
+    });
+    return;
+  }
+
   const inputSchema = z.object({ ...tool.input, company_id: companyIdInput });
-  server.registerTool(
+  target.registerTool(
     tool.name,
     {
       title: tool.title,
@@ -310,52 +424,25 @@ export function registerCompanyTool<I extends z.ZodRawShape, O extends z.ZodRawS
       // withMcpAuth({ required: true }) refuses an unauthenticated request before any tool runs.
       // This stays because a tool that ran without a caller would run as `anon`.
       if (!caller) return errorResult('You are not signed in to Jigged.');
-      const frame: CallFrame = {
-        caller,
-        clientName: clientNameOf(ctx),
-        tool: tool.name,
-        isWrite: tool.access === 'write',
-        started: Date.now(),
-        companyId: null,
-      };
-      const origin = originOf(ctx);
       // The SDK has validated `args` against `inputSchema` already. Parsing again splits them
       // into the company and the tool's own fields, each with its real type, which the SDK's
       // generic callback signature loses. `z.object` strips `company_id` from the second.
       const raw: unknown = args;
       const companyId = companyIdInput.parse(isRecord(raw) ? raw.company_id : undefined);
       const input = ownInput.parse(raw);
-      return runAsCaller(caller, async () => {
-        try {
-          const resolved = await resolveCompany(caller, companyId);
-          if (!resolved.ok) return finish(frame, 'refused', errorResult(resolved.message));
-          const company = resolved.company;
-          frame.companyId = company.id;
-
-          const limited = await rateLimitRefusal({
-            companyId: company.id,
-            userId: caller.userId,
-            isWrite: frame.isWrite,
-            placeName: company.name,
-          });
-          if (limited) return finish(frame, 'rate_limited', errorResult(limited));
-
-          const result = await tool.run(input, {
-            caller,
-            company,
-            origin,
-            link: (path) => (origin ? `${origin}${path}` : null),
-          });
-          return settle(frame, result, z.object(tool.output));
-        } catch (err) {
-          return failure(frame, err);
-        }
+      return runCompanyTool(tool, input, {
+        caller,
+        clientName: clientNameOf(ctx),
+        origin: originOf(ctx),
+        companyId,
       });
     },
   );
 }
 
-export function registerAccountTool<O extends z.ZodRawShape>(server: McpServer, tool: AccountTool<O>): void {
+export function registerAccountTool<O extends z.ZodRawShape>(target: ToolTarget, tool: AccountTool<O>): void {
+  if (target instanceof ToolCatalog) return;
+  const server = target;
   server.registerTool(
     tool.name,
     {

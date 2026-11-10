@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { companyLink, isAdmin, urlOutput } from '@/lib/mcp/tools/shared';
 import { getJobLifecycleStage, type JobWithRelations } from '@/types/job';
 import { isQuoteOpen, type QuoteWithRelations } from '@/types/quote';
@@ -286,7 +285,7 @@ export const search = defineCompanyTool({
   },
 });
 
-export function registerOverviewTools(server: McpServer): void {
+export function registerOverviewTools(server: ToolTarget): void {
   registerCompanyTool(server, getShopOverview);
   registerCompanyTool(server, search);
 }

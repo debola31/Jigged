@@ -37,6 +37,14 @@ class JobContext:
     chain: list[LLMProvider] | None = None
     audit_writer: AuditWriter | None = None
     readonly_dsn: str | None = None
+    # Jigged chat's actions (services/chat_actions.ChatActions), built by the route that
+    # runs the job inline: it holds the person's session token, so it lives in memory for
+    # one request and never in a payload. None on the worker and in the evals.
+    actions: Any = None
+    # An approval being acted on: {"state": parent resume_state, "pending": parent
+    # pending_actions, "decision": "approve" | "always" | "decline"}. Loaded by the route
+    # from the parent job, never from the request body.
+    resume: dict[str, Any] | None = None
 
 
 Handler = Callable[[JobContext], Awaitable[dict[str, Any]]]

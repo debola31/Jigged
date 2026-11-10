@@ -50,6 +50,8 @@ pilot flag retired · [inventory.md](modules/inventory.md)
 
 **Office and platform:** [dashboard.md](modules/dashboard.md) ·
 [ai-insights.md](modules/ai-insights.md) — the grant plus the RLS policy are the security boundary ·
+[ai-assistants.md](modules/ai-assistants.md) — the MCP server: a shop's own Claude or ChatGPT acting
+as the user, and why its tokens work only through `/mcp` ·
 [api/services/ai/semantics.md](../api/services/ai/semantics.md) — what "late", "revenue" and "this
 quarter" mean; **rendered into the insights prompt, so editing it changes the product** ·
 [data-import.md](modules/data-import.md) · [demo-mode.md](modules/demo-mode.md) ·
@@ -70,6 +72,8 @@ legal document is frozen
 - [runbooks/vercel-build-cost.md](runbooks/vercel-build-cost.md) — the two billing arms, the measured
   build-phase breakdown, why the build cache is a net loss you cannot switch off, and how to measure
   a build without undercounting it 3×
+- [runbooks/mcp-directory-submission.md](runbooks/mcp-directory-submission.md) — listing copy, test
+  prompts, the reviewer account and each portal's steps for the Claude and ChatGPT directories
 - [runbooks/typed-select-drift.md](runbooks/typed-select-drift.md) — **proposed**: derive
   `.select()` result types with `QueryData` instead of hand-writing them. Also records what `tsc`
   can and cannot see about a select (FK hints: nothing), which is why `schemaEmbedCheck.ts` stays

@@ -433,14 +433,24 @@ the live list.
 | Route file | Prefix | Criteria met |
 |---|---|---|
 | `data_import_routes.py` | `/api/data-import` | AI — `structure`, `narrative`, `suggest-fixes`; the client drives analysis, then posts to the per-entity execute routes |
-| `import_routes.py` (customers), `parts_import_routes.py`, `vendors_import_routes.py`, `work_centers_import_routes.py`, `routings_import_routes.py`, `bom_import_routes.py` | `/api/<entity>/import` | Complex logic; each exposes **`execute` only**, all six posted to by the one guided importer. *(Each also exposed `analyze` and `validate` — plus `analyze-unified` on parts — for the per-entity CSV wizards; those went with the wizards. `validate_import` survives as an internal step of `execute`.)* |
-| `insights_routes.py` | `/api/insights` | AI. **One route: `POST /{company_id}/chat`.** Saved-insights CRUD is client-side under RLS; low-stock is the shortage lens on the parts page, not an alert feed. *(Previously claimed "Insights (dashboard, refresh, chat) — 3" plus a separate "Chat history — 1".)* |
+| `import_routes.py` (customers), `parts_import_routes.py`, `vendors_import_routes.py`, `work_centers_import_routes.py`, `routings_import_routes.py`, `bom_import_routes.py` | `/api/<entity>/import` | Complex logic; each exposes **`execute` only**, all six posted to by the one guided importer and by the MCP server's import tools, which send `dry_run: true` for a preview that writes nothing ([data-import.md](modules/data-import.md#dry-run-for-ai-assistants-2026-11-09)). *(Each also exposed `analyze` and `validate` — plus `analyze-unified` on parts — for the per-entity CSV wizards; those went with the wizards. `validate_import` survives as an internal step of `execute`.)* |
+| `insights_routes.py` | `/api/insights` | AI: `POST /{company_id}/chat` and `/report` (both refuse assistant tokens: they spend AI credits). Plus, for the MCP server and with **no** LLM call, `GET /{company_id}/schema` and `POST /{company_id}/query`: one validated SELECT as `jigged_ai_readonly` ([ai-assistants.md](modules/ai-assistants.md)). Saved-insights CRUD is client-side under RLS; low-stock is the shortage lens on the parts page, not an alert feed. |
 | `admin_routes.py` | `/api/admin` | Service role + system admin: AI model health, company CRUD, `PATCH /companies/{id}/features` (the flag editor) |
 | `quickbooks_routes.py` | `/api/quickbooks` | Third-party OAuth + service role: authorize/callback/status/terms/disconnect, PO-field refresh, invoice preflight + push. Two more since 2026-09-03: `POST /{company}/jobs/{job}/invoice-status` reconciles the payment mirror when the job's Invoices menu opens (the backend, not the browser, decides whether Intuit is asked), and `POST /webhook` is Intuit's inbound notification — public, verified by `intuit-signature` against `QUICKBOOKS_WEBHOOK_VERIFIER_TOKEN`, and it makes **no** Intuit call: it stamps staleness markers and returns 200. See [invoicing.md](modules/invoicing.md#payment-status-quickbooks-online-mirror) |
 | `quote_email_routes.py` | `/api/quotes` | Transactional email (service role) |
 | `stripe_routes.py` | `/api/stripe` | Third-party secret + webhook. *(Missing from this doc entirely until 2026-08-03, though registered since it shipped.)* **Restricted** key `STRIPE_RESTRICTED_KEY` with **no fallback** to `STRIPE_SECRET_KEY` (one authoritative var, so nobody edits the unused one and wonders why nothing changed); API version pinned `2026-06-24.dahlia`; `/webhook` authenticated by `Stripe-Signature`, not a bearer token; cache writes go through the guarded `apply_stripe_subscription` RPC. |
 
-#### 8.5 Backend Structure
+#### 8.5 The MCP server: a third client
+
+**`/mcp` is a Next Route Handler, not FastAPI**, so the unchanged `utils/*Access.ts` layer serves a
+customer's Claude or ChatGPT as well as the browser. `getSupabase()` returns the caller's own client
+inside `runAsCaller`, so RLS and the billing gate apply exactly as in the browser. Only work FastAPI
+already owns (the QuickBooks push, imports, the data query) goes there, through
+[`lib/mcp/backend.ts`](../lib/mcp/backend.ts) with the caller's token and the gateway key. The
+OAuth flow, the token binding and the tool rules are in
+[modules/ai-assistants.md](modules/ai-assistants.md).
+
+#### 8.6 Backend Structure
 
 `routes/` (thin HTTP) → `models/` (Pydantic) → `services/` (`ai/` provider package:
 factory + base/claude + `model_config`; plus `email`, `insights_service`,
@@ -522,7 +532,9 @@ Feature-scoped groups, each owned by its module doc rather than repeated here:
 `STRIPE_RESTRICTED_KEY` / `STRIPE_WEBHOOK_SECRET` / `STRIPE_PRICE_ID` /
 `STRIPE_FOUNDING_PRICE_ID` ([modules/billing.md](modules/billing.md); note §8.4 —
 the restricted key deliberately has **no** fallback to `STRIPE_SECRET_KEY`),
-`QUICKBOOKS_*` + `APP_BASE_URL`, and `SENTRY_DSN` ([telemetry.md](telemetry.md)).
+`QUICKBOOKS_*` + `APP_BASE_URL`, `SENTRY_DSN` ([telemetry.md](telemetry.md)), and on the Next
+side `MCP_GATEWAY_KEY` and `OPENAI_APPS_CHALLENGE` ([modules/ai-assistants.md](modules/ai-assistants.md),
+[runbooks/mcp-directory-submission.md](runbooks/mcp-directory-submission.md)).
 `RESEND_API_KEY` is an **Edge Function** secret, not a backend one — Python stopped
 sending mail when `/api/quotes/{id}/email` and `api/services/email.py` were deleted
 ([modules/invitation-system.md](modules/invitation-system.md)).

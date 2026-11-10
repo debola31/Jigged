@@ -25,4 +25,20 @@ const authHandler = withMcpAuth(handler, verifyMcpToken, {
   resourceMetadataPath: PROTECTED_RESOURCE_METADATA_PATH,
 });
 
-export { authHandler as GET, authHandler as POST, authHandler as DELETE };
+/** The public page that explains this server: where a person pasting the URL into a browser lands. */
+const HELP_PAGE_PATH = '/ai-assistants';
+
+/**
+ * A browser opening the server URL (to check it, or by mistake) gets the help page instead of an
+ * authentication error. An MCP client never asks for HTML: it sends
+ * `Accept: application/json, text/event-stream`, so it always reaches the server.
+ */
+function GET(req: Request): Promise<Response> | Response {
+  const accept = req.headers.get('accept') ?? '';
+  if (accept.includes('text/html') && !accept.includes('text/event-stream')) {
+    return Response.redirect(new URL(HELP_PAGE_PATH, req.url), 307);
+  }
+  return authHandler(req);
+}
+
+export { GET, authHandler as POST, authHandler as DELETE };

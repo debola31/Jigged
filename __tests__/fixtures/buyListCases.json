@@ -1,0 +1,795 @@
+{
+  "$comment": [
+    "THE BUY-LIST RULE (plan 3.10, criterion B2), pinned. Fed to evaluateBuyListPart() and",
+    "buildBuyList() (lib/purchasing/buyList.ts) by __tests__/lib/purchasing/buyList.test.ts.",
+    "",
+    "Per part, in stock units:",
+    "  demand   = material still to issue on open jobs (issued counted once per job and part,",
+    "             clamped per job) + bought job parts still to ship",
+    "  position = on hand (once) + on order + on draft - demand",
+    "  listed   = position <= reorder point, or position < 0 with no reorder point",
+    "  suggest  = max(gap, minimum order) rounded up to whole purchase units, at least one",
+    "Vendor: preferred unless Do not use or archived, else the only Approved vendor, else none.",
+    "",
+    "Each case: part {stock_unit, on_hand, on_order?, on_draft?, reorder_point?, preferred_vendor_id?},",
+    "vendors? [{vendor_id, status, purchase_unit, purchase_factor, minimum_order_quantity?,",
+    "vendor_archived?}], material? [{job, job_part?, due?, required (null = units not comparable),",
+    "issued}], bought? [{job, job_part, due?, still_to_ship}], and expected {listed, plus any of:",
+    "incomparable, reason, demand, position, shortfall, vendor_id, vendor_basis, purchase_unit,",
+    "suggested_quantity, suggested_stock_quantity, incomparable_job_count, job_link {job, job_part}}."
+  ],
+  "cases": [
+    {
+      "name": "on hand is counted once across jobs, not once per job",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 15
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 10,
+          "issued": 0
+        },
+        {
+          "job": "J-2",
+          "required": 10,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "reason": "job_shortage",
+        "demand": 20,
+        "position": -5,
+        "shortfall": 5,
+        "vendor_id": null,
+        "vendor_basis": null,
+        "purchase_unit": "each",
+        "suggested_quantity": 5,
+        "job_link": null
+      }
+    },
+    {
+      "name": "issued stock is counted once per job and part, however many lines draw it",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "job_part": "jp-a",
+          "required": 5,
+          "issued": 6
+        },
+        {
+          "job": "J-1",
+          "job_part": "jp-b",
+          "required": 5,
+          "issued": 6
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "demand": 4,
+        "position": -4,
+        "shortfall": 4,
+        "suggested_quantity": 4,
+        "job_link": {
+          "job": "J-1",
+          "job_part": null
+        }
+      }
+    },
+    {
+      "name": "an over-issued job does not hide another job's need",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 10,
+          "issued": 25
+        },
+        {
+          "job": "J-2",
+          "required": 10,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "demand": 10,
+        "position": -10,
+        "suggested_quantity": 10,
+        "job_link": {
+          "job": "J-2",
+          "job_part": null
+        }
+      }
+    },
+    {
+      "name": "stock already issued nets off what is still to fetch",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 10
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 20,
+          "issued": 8
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "demand": 12,
+        "position": -2,
+        "shortfall": 2,
+        "suggested_quantity": 2
+      }
+    },
+    {
+      "name": "on order nets the shortage",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 5,
+        "on_order": 10
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 20,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "demand": 20,
+        "position": -5,
+        "shortfall": 5,
+        "suggested_quantity": 5
+      }
+    },
+    {
+      "name": "a draft nets the shortage, so the same part is not drafted twice",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 5,
+        "on_draft": 15
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 20,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": false,
+        "incomparable": false,
+        "demand": 20,
+        "position": 0
+      }
+    },
+    {
+      "name": "a job covered exactly by stock is not listed when there is no reorder point",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 20
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 20,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": false,
+        "incomparable": false,
+        "position": 0
+      }
+    },
+    {
+      "name": "a bought part on a job that is still to ship is demand",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 3
+      },
+      "bought": [
+        {
+          "job": "J-1",
+          "job_part": "jp-1",
+          "still_to_ship": 10
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "reason": "job_shortage",
+        "demand": 10,
+        "position": -7,
+        "shortfall": 7,
+        "suggested_quantity": 7,
+        "job_link": {
+          "job": "J-1",
+          "job_part": "jp-1"
+        }
+      }
+    },
+    {
+      "name": "bought parts still to ship and material demand add up",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 4,
+          "issued": 0
+        }
+      ],
+      "bought": [
+        {
+          "job": "J-2",
+          "job_part": "jp-2",
+          "still_to_ship": 6
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "demand": 10,
+        "position": -10,
+        "suggested_quantity": 10,
+        "job_link": null
+      }
+    },
+    {
+      "name": "exactly at the reorder point is listed, suggesting one purchase unit",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 50,
+        "reorder_point": 50
+      },
+      "expected": {
+        "listed": true,
+        "reason": "below_reorder_point",
+        "demand": 0,
+        "position": 50,
+        "shortfall": 0,
+        "suggested_quantity": 1,
+        "job_link": null
+      }
+    },
+    {
+      "name": "above the reorder point is not listed",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 51,
+        "reorder_point": 50
+      },
+      "expected": {
+        "listed": false,
+        "incomparable": false,
+        "position": 51
+      }
+    },
+    {
+      "name": "below the reorder point tops up to it",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 30,
+        "reorder_point": 50
+      },
+      "expected": {
+        "listed": true,
+        "position": 30,
+        "shortfall": 20,
+        "suggested_quantity": 20
+      }
+    },
+    {
+      "name": "orders and drafts count toward the reorder point",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 30,
+        "on_order": 10,
+        "on_draft": 5,
+        "reorder_point": 50
+      },
+      "expected": {
+        "listed": true,
+        "position": 45,
+        "shortfall": 5,
+        "suggested_quantity": 5
+      }
+    },
+    {
+      "name": "a reorder point and job demand together top up past the jobs",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 40,
+        "reorder_point": 10
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 50,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "reason": "both",
+        "demand": 50,
+        "position": -10,
+        "shortfall": 20,
+        "suggested_quantity": 20
+      }
+    },
+    {
+      "name": "a reorder point of 0 with nothing on hand is listed for one unit",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "reorder_point": 0
+      },
+      "expected": {
+        "listed": true,
+        "position": 0,
+        "shortfall": 0,
+        "suggested_quantity": 1
+      }
+    },
+    {
+      "name": "the suggestion rounds up to whole purchase units",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 400,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "shortfall": 400,
+        "vendor_id": "acme",
+        "vendor_basis": "preferred",
+        "purchase_unit": "bar",
+        "suggested_quantity": 3,
+        "suggested_stock_quantity": 432
+      }
+    },
+    {
+      "name": "an exact multiple of the purchase unit stays exact",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 288,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "suggested_quantity": 2,
+        "suggested_stock_quantity": 288
+      }
+    },
+    {
+      "name": "the minimum order wins when it is larger than the shortfall",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1,
+          "minimum_order_quantity": 25
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 5,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "shortfall": 5,
+        "suggested_quantity": 25
+      }
+    },
+    {
+      "name": "the minimum order is in purchase units",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144,
+          "minimum_order_quantity": 2
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 100,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "suggested_quantity": 2,
+        "suggested_stock_quantity": 288
+      }
+    },
+    {
+      "name": "a fractional minimum order is rounded up to a whole purchase unit",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1,
+          "minimum_order_quantity": 2.5
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 1,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "suggested_quantity": 3
+      }
+    },
+    {
+      "name": "0.3 needed at 0.1 per purchase unit is 3 units",
+      "part": {
+        "stock_unit": "pounds",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "tenth",
+          "purchase_factor": 0.1
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 0.3,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "shortfall": 0.3,
+        "suggested_quantity": 3,
+        "suggested_stock_quantity": 0.3
+      }
+    },
+    {
+      "name": "the round-up tolerates float noise: 1.1 at 0.1 per purchase unit is 11, not 12",
+      "part": {
+        "stock_unit": "pounds",
+        "on_hand": 0,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "tenth",
+          "purchase_factor": 0.1
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 1.1,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "suggested_quantity": 11,
+        "suggested_stock_quantity": 1.1
+      }
+    },
+    {
+      "name": "a preferred vendor marked Do not use falls through to the only approved vendor",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0,
+        "preferred_vendor_id": "bad"
+      },
+      "vendors": [
+        {
+          "vendor_id": "bad",
+          "status": "disapproved",
+          "purchase_unit": "inches",
+          "purchase_factor": 1
+        },
+        {
+          "vendor_id": "good",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 100,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "vendor_id": "good",
+        "vendor_basis": "only_approved",
+        "purchase_unit": "bar",
+        "suggested_quantity": 1
+      }
+    },
+    {
+      "name": "an archived preferred vendor falls through to the only approved vendor",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "preferred_vendor_id": "old"
+      },
+      "vendors": [
+        {
+          "vendor_id": "old",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1,
+          "vendor_archived": true
+        },
+        {
+          "vendor_id": "good",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 3,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "vendor_id": "good",
+        "vendor_basis": "only_approved"
+      }
+    },
+    {
+      "name": "a conditional preferred vendor is still the one bought from",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "preferred_vendor_id": "maybe"
+      },
+      "vendors": [
+        {
+          "vendor_id": "maybe",
+          "status": "conditional",
+          "purchase_unit": "each",
+          "purchase_factor": 1
+        },
+        {
+          "vendor_id": "good",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 3,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "vendor_id": "maybe",
+        "vendor_basis": "preferred"
+      }
+    },
+    {
+      "name": "two approved vendors and no usable preferred vendor means no vendor is chosen",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0
+      },
+      "vendors": [
+        {
+          "vendor_id": "a",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        },
+        {
+          "vendor_id": "b",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 100,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "vendor_id": null,
+        "vendor_basis": null,
+        "purchase_unit": "inches",
+        "suggested_quantity": 100
+      }
+    },
+    {
+      "name": "Do not use with only a conditional vendor left means no vendor is chosen",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 0,
+        "preferred_vendor_id": "bad"
+      },
+      "vendors": [
+        {
+          "vendor_id": "bad",
+          "status": "disapproved",
+          "purchase_unit": "each",
+          "purchase_factor": 1
+        },
+        {
+          "vendor_id": "maybe",
+          "status": "conditional",
+          "purchase_unit": "each",
+          "purchase_factor": 1
+        }
+      ],
+      "material": [
+        {
+          "job": "J-1",
+          "required": 2,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "vendor_id": null,
+        "vendor_basis": null
+      }
+    },
+    {
+      "name": "material whose units cannot be compared goes in its own bucket, never 'fine'",
+      "part": {
+        "stock_unit": "pounds",
+        "on_hand": 0
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": null,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": false,
+        "incomparable": true
+      }
+    },
+    {
+      "name": "an incomparable job does not poison the comparable total",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 1
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 4,
+          "issued": 0
+        },
+        {
+          "job": "J-2",
+          "required": null,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "incomparable": false,
+        "demand": 4,
+        "position": -3,
+        "shortfall": 3,
+        "incomparable_job_count": 1
+      }
+    },
+    {
+      "name": "an incomparable job keeps an otherwise covered part off the 'fine' pile",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 100
+      },
+      "material": [
+        {
+          "job": "J-1",
+          "required": 4,
+          "issued": 0
+        },
+        {
+          "job": "J-2",
+          "required": null,
+          "issued": 0
+        }
+      ],
+      "expected": {
+        "listed": false,
+        "incomparable": true,
+        "position": 96
+      }
+    }
+  ]
+}

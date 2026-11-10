@@ -56,11 +56,16 @@ export const UNIT_CATEGORIES: Record<string, UnitCategory> = {
   },
   count: {
     name: 'Count',
-    units: ['pieces', 'each', 'dozen'],
+    // `hundred` and `thousand` are purchase units — fasteners and hardware are priced "per C" and
+    // "per M" — so a PO can buy 2.5 hundred and land 250 each without a conversion row per part.
+    // No `C` / `M` alias: `m` already means meters. Mirrored in api/services/uom_normalizer.py.
+    units: ['pieces', 'each', 'dozen', 'hundred', 'thousand'],
     conversions: {
       pieces: 1,
       each: 1,
       dozen: 12,
+      hundred: 100,
+      thousand: 1000,
     }
   },
   area: {

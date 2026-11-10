@@ -1797,3 +1797,261 @@ select public.register_mcp_gateway_key(
   'dd78ca1fea1a4ba929300f341fe1ea3d996114f89f530f221b44de3a4ec3d586',
   'local dev key (seed.sql)'
 );
+
+-- ---------------------------------------------------------------------------
+-- Purchasing: a vendor PO in every state, price sheets and RFQs
+-- ---------------------------------------------------------------------------
+-- Every purchasing surface branches on state, so the seed has to hold each one or a branch
+-- is only reachable by hand:
+--   PO-1042  draft                Atlas, aluminium blanks, priced from the estimate
+--   PO-1043  sent                 FastenRight, screws bought by the HUNDRED (5 = 500 ea on order)
+--   PO-1044  partly received      Atlas, steel blanks: 40 of 100 in the Yard under a NEW heat,
+--                                 so a lot stamped with the vendor and receipt date exists
+--   PO-1045  received             Precision Bearings, bearings, all 200 on Shelf A
+--   PO-1046  closed (short)       FastenRight, dowels: 800 of 1000, "that's everything"
+--   PO-1047  partly received      ProFinish, the ANODIZE step of a cover job: an outside line,
+--                                 linked to a sent vendor packing slip with 25 of 40 back
+--   PO-1048  sent                 VoltEdge, motors on order, plus a CALIBRATION line on the
+--                                 CNC mill (a work centre) and FREIGHT that expects no receipt
+--   PO-1049  draft, archived      Atlas, so "archived never lists" has something to hide
+--   PO-1050  draft                created by awarding RFQ-0002
+-- Numbering continues at 1042, the way a shop moving off a QuickBooks sequence would set it.
+-- RFQ-0001 is quoted by Atlas and declined by FastenRight; RFQ-0002 is awarded; RFQ-0003 is
+-- a draft nobody has been sent.
+--
+-- Everything goes through the RPCs the app calls, as dev@jigged.test (the same impersonation
+-- the stock placement above uses), so the seed exercises the real write path and its
+-- derived state rather than hand-written rows. The parts' preferred vendors are already on
+-- their approved-vendor lists: the parts insert above fired ensure_preferred_vendor_is_listed.
+do $$
+declare
+  v_company constant uuid := '22222222-2222-2222-2222-222222222222';
+  v_dev     constant uuid := '11111111-1111-1111-1111-111111111111';
+  v_atlas   constant uuid := '30000000-0000-0000-0000-000000000001';
+  v_fasten  constant uuid := '30000000-0000-0000-0000-000000000002';
+  v_profin  constant uuid := '30000000-0000-0000-0000-000000000003';
+  v_bearco  constant uuid := '30000000-0000-0000-0000-000000000004';
+  v_volt    constant uuid := '30000000-0000-0000-0000-000000000005';
+  v_al      constant uuid := '60000000-0000-0000-0000-000000000001';
+  v_steel   constant uuid := '60000000-0000-0000-0000-000000000002';
+  v_ss      constant uuid := '60000000-0000-0000-0000-000000000003';
+  v_bearing constant uuid := '60000000-0000-0000-0000-000000000004';
+  v_oring   constant uuid := '60000000-0000-0000-0000-000000000005';
+  v_screw   constant uuid := '60000000-0000-0000-0000-000000000006';
+  v_dowel   constant uuid := '60000000-0000-0000-0000-000000000007';
+  v_motor   constant uuid := '60000000-0000-0000-0000-000000000008';
+  v_cover   constant uuid := '60000000-0000-0000-0000-000000000011';
+  v_mill    constant uuid := '40000000-0000-0000-0000-000000000002';
+  v_shelf_a constant uuid := '71000000-0000-0000-0000-000000000002';
+  v_yard    constant uuid := '71000000-0000-0000-0000-000000000004';
+  v_dowels_at uuid;
+  v_po      uuid;
+  v_line    uuid;
+  v_job     uuid;
+  v_jp      uuid;
+  v_op      uuid;
+  v_step    record;
+  v_slip    uuid;
+  v_rfq     uuid;
+  v_inv     uuid;
+  v_inv2    uuid;
+  v_rline   uuid;
+  v_rline2  uuid;
+  v_resp    uuid;
+begin
+  perform set_config(
+    'request.jwt.claims',
+    json_build_object('sub', v_dev, 'role', 'authenticated')::text,
+    true);
+
+  -- ── Numbering and printed terms ─────────────────────────────────────────────
+  perform public.save_purchasing_document_settings(v_company, 'vendor_purchase_order', jsonb_build_object(
+    'prefix', 'PO-', 'next_number', 1042,
+    'terms_and_conditions', 'Material must arrive with mill test reports where certs are required. '
+      || 'Reference our PO number on every packing slip and invoice. Partial shipments by agreement only.'));
+  perform public.save_purchasing_document_settings(v_company, 'vendor_rfq', jsonb_build_object(
+    'terms_and_conditions', 'Quote per the unit shown on each line. State lead time and how long the price holds.'));
+
+  -- ── Price sheets ────────────────────────────────────────────────────────────
+  -- Screws are bought by the hundred: the conversion row is what gives "hundred" one
+  -- meaning on this part, the way the PO form writes a preset before it saves.
+  insert into public.parts_unit_conversions (part_id, from_unit, to_primary_factor)
+  values (v_screw, 'hundred', 100)
+  on conflict do nothing;
+
+  perform public.save_part_vendor(v_screw, v_fasten, jsonb_build_object(
+      'purchase_unit', 'hundred', 'vendor_part_number', 'FR-SHCS-M5-16', 'lead_time_days', 5,
+      'minimum_order_quantity', 1, 'quoted_on', current_date - 20, 'valid_until', current_date + 160),
+    '[{"min_quantity":1,"unit_price":6.50},{"min_quantity":10,"unit_price":5.90},{"min_quantity":50,"unit_price":5.40}]');
+  perform public.save_part_vendor(v_steel, v_atlas, jsonb_build_object(
+      'vendor_part_number', 'A36-PLT-BLK', 'lead_time_days', 10,
+      'quoted_on', current_date - 45, 'valid_until', current_date + 45),
+    '[{"min_quantity":1,"unit_price":4.25},{"min_quantity":50,"unit_price":4.05},{"min_quantity":200,"unit_price":3.80}]');
+  -- Expired: the price default names it and does not use it.
+  perform public.save_part_vendor(v_oring, v_fasten, jsonb_build_object(
+      'quoted_on', current_date - 200, 'valid_until', current_date - 20),
+    '[{"min_quantity":100,"unit_price":0.16},{"min_quantity":1000,"unit_price":0.14}]');
+  -- A second source on probation, and one the shop will not use again.
+  perform public.save_part_vendor(v_bearing, v_fasten, jsonb_build_object(
+      'status', 'conditional', 'status_note', 'Fine for prototypes. Not for production runs yet.'));
+  perform public.save_part_vendor(v_motor, v_atlas, jsonb_build_object(
+      'status', 'disapproved', 'status_note', 'Shipped the wrong gear ratio twice.'));
+
+  -- ── PO-1042: draft ─────────────────────────────────────────────────────────
+  select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 1, current_date,
+    jsonb_build_object('need_by_on', current_date + 14),
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_al, 'quantity', 50,
+      'unit_price', 6.40, 'price_source', 'estimate', 'cert_required', true)));
+
+  -- ── PO-1043: sent, screws by the hundred ───────────────────────────────────
+  select id into v_po from public.create_vendor_purchase_order(v_fasten, current_date - 6, current_date,
+    jsonb_build_object('need_by_on', current_date + 3, 'ship_via', 'UPS Ground'),
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_screw, 'quantity', 5,
+      'unit', 'hundred', 'unit_price', 6.50, 'price_source', 'price_sheet')));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+
+  -- ── PO-1044: partly received, under a new heat ─────────────────────────────
+  select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 9, current_date,
+    jsonb_build_object('need_by_on', current_date - 1, 'notes_to_vendor', 'Certs with the material, please.'),
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_steel, 'quantity', 100,
+      'unit_price', 4.05, 'price_source', 'price_sheet', 'cert_required', true)));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+  select id into v_line from public.vendor_purchase_order_lines where vendor_purchase_order_id = v_po;
+  perform public.receive_vendor_purchase_order(v_po, gen_random_uuid(),
+    jsonb_build_array(jsonb_build_object('line_id', v_line, 'quantity', 40, 'location_id', v_yard,
+      'heat_number', 'HT-24-9102')),
+    now() - interval '2 days', 'AT-55120', null);
+
+  -- ── PO-1045: received in full ──────────────────────────────────────────────
+  select id into v_po from public.create_vendor_purchase_order(v_bearco, current_date - 20, current_date,
+    jsonb_build_object('need_by_on', current_date - 8),
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_bearing, 'quantity', 200,
+      'unit_price', 1.20, 'price_source', 'manual')));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+  select id into v_line from public.vendor_purchase_order_lines where vendor_purchase_order_id = v_po;
+  perform public.receive_vendor_purchase_order(v_po, gen_random_uuid(),
+    jsonb_build_array(jsonb_build_object('line_id', v_line, 'quantity', 200, 'location_id', v_shelf_a)),
+    now() - interval '9 days', 'PBC-30021', null);
+
+  -- ── PO-1046: closed short ──────────────────────────────────────────────────
+  select l.id into v_dowels_at
+    from public.inventory_locations l
+    join public.inventory_locations r on r.id = l.parent_id
+    join public.inventory_locations u on u.id = r.parent_id
+   where u.company_id = v_company and u.parent_id is null
+     and u.name = 'Small Parts Cabinet' and r.name = 'Row 1' and l.name = 'Position 2';
+  select id into v_po from public.create_vendor_purchase_order(v_fasten, current_date - 30, current_date,
+    jsonb_build_object('need_by_on', current_date - 16),
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_dowel, 'quantity', 1000,
+      'unit_price', 0.085, 'price_source', 'manual')));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+  select id into v_line from public.vendor_purchase_order_lines where vendor_purchase_order_id = v_po;
+  perform public.receive_vendor_purchase_order(v_po, gen_random_uuid(),
+    jsonb_build_array(jsonb_build_object('line_id', v_line, 'quantity', 800, 'location_id', v_dowels_at,
+      'close_remaining', true)),
+    now() - interval '15 days', 'FR-70233', 'Backordered 200; we will not wait for them.');
+
+  -- ── PO-1047: outside work on a vendor packing slip ─────────────────────────
+  -- A direct job for 40 end covers: mill and deburr done in-house, then anodize at ProFinish.
+  v_job := pg_temp.direct_job('50000000-0000-0000-0000-000000000003', 'PO-MER-7815', 12, 8);
+  v_jp  := pg_temp.add_job_part(v_job, v_cover, 10, 40, 38.50, null, now() - interval '8 days');
+  for v_step in
+    select id, vendor_service_id from public.job_operations where job_part_id = v_jp order by sequence
+  loop
+    if v_step.vendor_service_id is null then
+      update public.job_operations
+         set status = 'completed', completed_at = now() - interval '4 days', completed_by = v_dev
+       where id = v_step.id;
+      perform pg_temp.record_completion(v_step.id, v_jp, 40, now() - interval '4 days', 'Seed: run complete');
+    else
+      v_op := v_step.id;
+    end if;
+  end loop;
+
+  select id into v_po from public.create_vendor_purchase_order(v_profin, current_date - 4, current_date,
+    jsonb_build_object('need_by_on', current_date + 2),
+    jsonb_build_array(jsonb_build_object('line_kind', 'outside_service', 'job_operation_id', v_op,
+      'unit_price', 4.50, 'price_source', 'vendor_service')));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+  -- The send links itself to the PO line: the single open line for this step and vendor.
+  select shipment_id into v_slip from public.create_outside_shipment(
+    v_op, 40, p_shipped_at => now() - interval '3 days', p_due_back_on => current_date + 2,
+    p_carrier => 'Our truck');
+  insert into public.outside_shipment_receipts
+    (company_id, outside_shipment_id, job_operation_id, job_part_id, quantity_good, received_by, received_at)
+  select company_id, id, job_operation_id, job_part_id, 25, v_dev, now() - interval '1 day'
+    from public.outside_shipments where id = v_slip;
+
+  -- ── PO-1048: sent, with a calibration line on the mill and freight ─────────
+  select id into v_po from public.create_vendor_purchase_order(v_volt, current_date - 3, current_date,
+    jsonb_build_object('need_by_on', current_date + 10, 'ship_via', 'FedEx Ground'),
+    jsonb_build_array(
+      jsonb_build_object('line_kind', 'part', 'part_id', v_motor, 'quantity', 30,
+        'unit_price', 14.20, 'price_source', 'last_po'),
+      jsonb_build_object('line_kind', 'other', 'description', 'Spindle encoder recalibration, on site',
+        'work_center_id', v_mill, 'quantity', 1, 'unit_price', 380.00, 'price_source', 'manual'),
+      jsonb_build_object('line_kind', 'other', 'description', 'Inbound freight',
+        'quantity', 1, 'unit_price', 65.00, 'price_source', 'manual', 'expects_receipt', false)));
+  perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
+
+  -- ── PO-1049: an archived draft ─────────────────────────────────────────────
+  select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 12, current_date, '{}',
+    jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_ss, 'quantity', 10)));
+  perform public.set_vendor_purchase_order_state(v_po, 'archive');
+
+  -- ── RFQ-0001: quoted by Atlas, declined by FastenRight ─────────────────────
+  select id into v_rfq from public.create_vendor_rfq(v_company,
+    jsonb_build_object('title', 'Stainless rod blanks and cut bar', 'needed_by_on', current_date + 21,
+      'respond_by_on', current_date + 5),
+    jsonb_build_array(
+      jsonb_build_object('part_id', v_ss, 'quantities', jsonb_build_array(50, 100), 'cert_required', true),
+      jsonb_build_object('description', '4140 HT bar, 1.5 in dia, cut to 12 in', 'unit', 'each',
+        'quantities', jsonb_build_array(20))),
+    array[v_atlas, v_fasten]);
+  select id into v_inv  from public.vendor_rfq_invitations where vendor_rfq_id = v_rfq and vendor_id = v_atlas;
+  select id into v_inv2 from public.vendor_rfq_invitations where vendor_rfq_id = v_rfq and vendor_id = v_fasten;
+  select id into v_rline  from public.vendor_rfq_lines where vendor_rfq_id = v_rfq and line_number = 1;
+  select id into v_rline2 from public.vendor_rfq_lines where vendor_rfq_id = v_rfq and line_number = 2;
+  perform public.set_vendor_rfq_invitation_state(v_inv, 'mark_sent');
+  perform public.set_vendor_rfq_invitation_state(v_inv2, 'mark_sent');
+  perform public.save_vendor_rfq_responses(v_inv, jsonb_build_array(
+      jsonb_build_object('line_id', v_rline, 'quantity', 50, 'unit_price', 7.60, 'lead_time_days', 10,
+        'valid_until', current_date + 30, 'vendor_part_number', 'SS304-RD-1.00'),
+      jsonb_build_object('line_id', v_rline, 'quantity', 100, 'unit_price', 7.35, 'lead_time_days', 10,
+        'valid_until', current_date + 30, 'vendor_part_number', 'SS304-RD-1.00'),
+      jsonb_build_object('line_id', v_rline2, 'quantity', 20, 'unit_price', 18.50, 'lead_time_days', 7,
+        'valid_until', current_date + 30)),
+    'AQ-55211', current_date - 1);
+  perform public.set_vendor_rfq_invitation_state(v_inv2, 'decline', 'Not a stocking item for us.');
+
+  -- ── RFQ-0002: awarded, which raises PO-1050 as a draft ─────────────────────
+  select id into v_rfq from public.create_vendor_rfq(v_company,
+    jsonb_build_object('title', 'Bearings for the Q1 actuator run', 'needed_by_on', current_date + 30),
+    jsonb_build_array(jsonb_build_object('part_id', v_bearing, 'quantities', jsonb_build_array(500))),
+    array[v_bearco]);
+  select id into v_inv   from public.vendor_rfq_invitations where vendor_rfq_id = v_rfq;
+  select id into v_rline from public.vendor_rfq_lines where vendor_rfq_id = v_rfq;
+  perform public.set_vendor_rfq_invitation_state(v_inv, 'mark_sent');
+  perform public.save_vendor_rfq_responses(v_inv, jsonb_build_array(
+      jsonb_build_object('line_id', v_rline, 'quantity', 500, 'unit_price', 1.05, 'lead_time_days', 14,
+        'valid_until', current_date + 45)),
+    'PBC-Q-8812', current_date);
+  select id into v_resp from public.vendor_rfq_responses where vendor_rfq_invitation_id = v_inv;
+  perform public.award_vendor_rfq(v_rfq, array[v_resp], false, current_date);
+
+  -- ── RFQ-0003: a draft nobody has been sent ─────────────────────────────────
+  perform public.create_vendor_rfq(v_company,
+    jsonb_build_object('title', 'O-rings, next quarter'),
+    jsonb_build_array(jsonb_build_object('part_id', v_oring, 'quantities', jsonb_build_array(1000, 5000))),
+    array[v_fasten]);
+
+  -- Sends happened on the order date, not at seed time.
+  update public.vendor_purchase_orders
+     set issued_at = (ordered_on + time '09:00')::timestamptz,
+         last_sent_at = (ordered_on + time '09:00')::timestamptz
+   where company_id = v_company and issued_at is not null;
+  update public.vendor_purchase_order_revisions r
+     set sent_at = (h.ordered_on + time '09:00')::timestamptz
+    from public.vendor_purchase_orders h
+   where h.id = r.vendor_purchase_order_id and h.company_id = v_company;
+end $$;

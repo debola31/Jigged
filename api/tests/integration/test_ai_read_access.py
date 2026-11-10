@@ -408,3 +408,94 @@ async def test_an_ungranted_table_refuses_at_the_database():
             await conn.fetch(f'SELECT 1 FROM public."{target}" LIMIT 1')
     finally:
         await conn.close()
+
+
+# ===========================================================================
+# Purchasing (plan §3.12 "AI readability", §5.1; M5)
+#
+# The two tests above that check SCHEMA_CONTEXT against the database and run every semantics.md
+# reference query are what make these sections TRUE; the three below make sure the sections
+# EXIST — otherwise the model would answer "what's on order?" by re-deriving a status the views
+# already compute, the is_quote_open lesson (20260909115308) all over again.
+# ===========================================================================
+
+PURCHASING_CONTEXT_OBJECTS = {
+    "vendor_purchase_orders", "vendor_purchase_order_lines", "vendor_purchase_order_receipts",
+    "vendor_purchase_order_status", "vendor_purchase_order_line_status", "part_on_order",
+    "part_vendor_last_purchase", "part_vendors", "part_vendor_price_breaks", "vendor_rfq_status",
+}
+# Exempt from the AI: superseded prices would read as current, numbering is plumbing, and the
+# QuickBooks tables hold third-party ids.
+PURCHASING_AI_EXEMPT = {
+    "vendor_purchase_order_revisions", "purchasing_document_series", "quickbooks_vendor_map",
+    "quickbooks_purchasing_setup", "quickbooks_purchase_order_links", "quickbooks_purchase_order_line_links",
+}
+
+
+def _context_sections() -> dict[str, str]:
+    import re
+
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    sections: dict[str, str] = {}
+    current = None
+    for line in SCHEMA_CONTEXT.splitlines():
+        heading = re.match(r"^###\s+([a-z_][a-z0-9_]*)", line)
+        if heading:
+            current = heading.group(1)
+            sections[current] = ""
+        elif current:
+            sections[current] += line + "\n"
+    return sections
+
+
+def test_schema_context_describes_purchasing_through_its_views():
+    """[M5] The tables, the five-way status views and on-order are described; the exempt
+    tables are not; and the context says what a model would otherwise get wrong: statuses come
+    from the views, "late" is the predicate, outside lines are received on slips, receipts are
+    filtered on `voided_at IS NULL`, and `jobs.customer_po_number` is the CUSTOMER's PO."""
+    import re
+
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    sections = _context_sections()
+    missing = sorted(PURCHASING_CONTEXT_OBJECTS - set(sections))
+    assert not missing, f"SCHEMA_CONTEXT does not describe: {missing}"
+    described_exempt = sorted(PURCHASING_AI_EXEMPT & set(sections))
+    assert not described_exempt, f"SCHEMA_CONTEXT describes tables the AI cannot read: {described_exempt}"
+
+    assert "public.is_vendor_purchase_order_late(" in SCHEMA_CONTEXT
+    assert "vendor_purchase_order_status" in sections["vendor_purchase_orders"], (
+        "the PO table does not send the model to the status view")
+    assert "outside_shipments" in sections["vendor_purchase_order_lines"], (
+        "the lines do not say outside work is received on its vendor packing slip")
+    assert "voided_at IS NULL" in sections["vendor_purchase_order_receipts"]
+    assert re.search(r"customer_po_number.*customer'?s\s+(po|purchase order)", sections["jobs"], re.I), (
+        "jobs.customer_po_number is not described as the customer's PO")
+
+
+def test_semantics_defines_the_purchasing_terms_with_reference_sql():
+    """[M5] On order, Open PO, Late PO, Last PO price and Open value (at PO price) each have a
+    definition, and their reference SQL reads the shared definitions — which
+    test_every_reference_query_in_semantics_runs then executes as the AI role."""
+    import re
+
+    from services.insights_service import SEMANTICS_PATH
+
+    text = SEMANTICS_PATH.read_text(encoding="utf-8")
+    headings = [h.strip().lower() for h in re.findall(r"^##\s+(.+)$", text, re.MULTILINE)]
+    for term in ("on order", "open po", "late po", "last po price", "open value"):
+        assert any(h.startswith(term) for h in headings), f"semantics.md has no '## {term}' definition"
+
+    sql = "\n".join(re.findall(r"```sql\n(.*?)```", text, re.DOTALL))
+    for name in ("part_on_order", "vendor_purchase_order_status", "is_vendor_purchase_order_late",
+                 "part_vendor_last_purchase"):
+        assert name in sql, f"no reference query in semantics.md uses {name}"
+
+
+def test_the_quickbooks_purchasing_tables_are_sensitive():
+    """[M5, QB11] Blocked at both layers: no grant, and a whole-word entry in SENSITIVE_TABLES."""
+    from tools.schema_context import SENSITIVE_TABLES
+
+    quickbooks = {t for t in PURCHASING_AI_EXEMPT if t.startswith("quickbooks_")}
+    assert quickbooks <= SENSITIVE_TABLES, sorted(quickbooks - SENSITIVE_TABLES)

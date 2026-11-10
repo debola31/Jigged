@@ -31,6 +31,9 @@ Requires a local Supabase with all migrations applied. Skipped without it.
 """
 from __future__ import annotations
 
+import uuid
+from datetime import date, datetime, timezone
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -84,10 +87,28 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
     def wipe_company(table: str) -> None:
         supabase_admin.table(table).delete().eq("company_id", company_id).execute()
 
+    # Purchasing first, leaves first, as reset_demo_company does: PO lines RESTRICT parts, jobs,
+    # job parts and operations; receipts RESTRICT their lines; RFQ lines RESTRICT parts and
+    # jobs; invitations RESTRICT vendors. The preference is cleared before the list rows go,
+    # so no "a preferred vendor is always listed" rule can stand in the way of the delete.
+    supabase_admin.table("parts").update({"preferred_vendor_id": None}).eq("company_id", company_id).execute()
+    for t in ("quickbooks_purchase_order_line_links", "quickbooks_purchase_order_links",
+              "quickbooks_vendor_map", "quickbooks_purchasing_setup",
+              "vendor_rfq_responses", "vendor_rfq_invitations", "vendor_rfq_lines",
+              "part_vendor_price_breaks", "part_vendors",
+              "vendor_purchase_order_receipts", "vendor_purchase_order_revisions",
+              "outside_shipment_receipts", "outside_shipments",
+              "vendor_purchase_order_lines", "vendor_purchase_orders", "vendor_rfqs",
+              "purchasing_document_series"):
+        wipe_company(t)
+
     wipe("shipment_line_items", "shipment_id", shipment_ids)
     for t in ("shipments", "note_reactions", "note_views", "note_media", "notes",
               "job_fulfillment_audit", "job_operation_completions", "inventory_transactions",
               "part_location_stock"):
+        wipe_company(t)
+    # Lots after the ledger and the balances, before parts: material_lots.part_id RESTRICTs.
+    for t in ("lot_certificates", "material_lots"):
         wipe_company(t)
     wipe("job_materials", "job_id", job_ids)
     wipe("job_operations", "job_id", job_ids)
@@ -703,3 +724,177 @@ def test_operator_events_are_still_recorded_for_the_real_company(supabase_admin,
     ).execute()
 
     assert _operator_event_count(supabase_admin, source_id) == before + 1
+
+
+# ===========================================================================
+# Purchasing in the demo (plan §2 "Demo data", §5.1; V1, S6)
+#
+# There is no purchasing template: the demo starts with no purchase orders. But a demo user can
+# make every kind of purchasing row, and each one is a RESTRICT parent somewhere — PO lines of
+# parts, jobs and operations; receipts of their lines; RFQ lines of parts and jobs; invitations
+# of vendors; and the heat a receipt records is a material_lots row, which RESTRICTs its part
+# and which reset_demo_company never deleted before this. Reset is one transaction, so a single
+# missed table rolls the whole reset back and the demo can never be reset again (#675's shape).
+# ===========================================================================
+
+PURCHASING_ROWS = (
+    "vendor_purchase_orders", "vendor_purchase_order_lines", "vendor_purchase_order_receipts",
+    "vendor_purchase_order_revisions", "vendor_rfqs", "vendor_rfq_lines", "vendor_rfq_invitations",
+    "vendor_rfq_responses", "part_vendor_price_breaks", "purchasing_document_series",
+    "material_lots", "lot_certificates",
+)
+
+
+def _count_rows(supabase_admin, table: str, company_id: str) -> int:
+    # By company_id rather than id: purchasing_document_series is keyed (company, kind).
+    res = (
+        supabase_admin.table(table)
+        .select("company_id", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return res.count or 0
+
+
+def _first(rows):
+    return rows[0] if isinstance(rows, list) else rows
+
+
+def _stage_purchasing(supabase_admin, client, demo_id: str) -> dict:
+    """Every kind of purchasing row a demo user can make, through the real RPCs as the real
+    user: a sent PO with a part line, an outside line linked to a slip and an "other" line on a
+    machine; a receipt that records a heat (so a lot) with a certificate on it; and an RFQ with
+    an invitation."""
+    admin = supabase_admin
+    today = date.today().isoformat()
+
+    job_ids = [
+        j["id"] for j in admin.table("jobs").select("id").eq("company_id", demo_id)
+        .is_("deleted_at", "null").execute().data
+    ]
+    outside_ops = (
+        admin.table("job_operations")
+        .select("id, job_part_id, vendor_service_id, status")
+        .in_("job_id", job_ids).not_.is_("vendor_service_id", "null").execute().data
+    )
+    op = next(o for o in outside_ops if o["status"] != "completed")
+    vendor = (
+        admin.table("vendor_services").select("vendor_id").eq("id", op["vendor_service_id"])
+        .single().execute().data["vendor_id"]
+    )
+    piece_part = (
+        admin.table("job_parts").select("part_id").eq("id", op["job_part_id"]).single().execute().data["part_id"]
+    )
+    piece_unit = (
+        admin.table("parts").select("primary_unit").eq("id", piece_part).single().execute().data["primary_unit"]
+    )
+    material = next(
+        p for p in admin.table("parts").select("id, primary_unit").eq("company_id", demo_id)
+        .eq("source", "bought").is_("deleted_at", "null").execute().data
+        if p["primary_unit"]
+    )
+    machine = (
+        admin.table("work_centers").select("id").eq("company_id", demo_id).is_("deleted_at", "null")
+        .limit(1).execute().data[0]["id"]
+    )
+    places = admin.table("inventory_locations").select("id, parent_id").eq("company_id", demo_id).execute().data
+    parents = {p["parent_id"] for p in places if p["parent_id"]}
+    leaf = next(p["id"] for p in places if p["id"] not in parents)
+
+    po_id = _first(client.rpc("create_vendor_purchase_order", {
+        "p_vendor_id": vendor, "p_ordered_on": today, "p_today": today, "p_header": {},
+        "p_lines": [
+            {"line_kind": "part", "part_id": material["id"], "quantity": 5, "unit": material["primary_unit"],
+             "unit_price": 2.5, "price_source": "manual", "description": "Demo material"},
+            {"line_kind": "outside_service", "job_operation_id": op["id"], "quantity": 1, "unit": piece_unit,
+             "unit_price": 3.5, "price_source": "vendor_service", "description": "Demo outside step"},
+            {"line_kind": "other", "work_center_id": machine, "quantity": 1, "unit": "each",
+             "unit_price": 450, "price_source": "manual", "description": "Calibration"},
+        ],
+    }).execute().data)["id"]
+    client.rpc("set_vendor_purchase_order_state",
+               {"p_id": po_id, "p_action": "mark_sent", "p_today": today}).execute()
+    lines = {
+        line["line_kind"]: line["id"] for line in admin.table("vendor_purchase_order_lines")
+        .select("id, line_kind").eq("vendor_purchase_order_id", po_id).execute().data
+    }
+
+    slip = _first(client.rpc("create_outside_shipment",
+                             {"p_job_operation_id": op["id"], "p_quantity": 1}).execute().data)["shipment_id"]
+    linked = (
+        admin.table("outside_shipments").select("vendor_purchase_order_line_id").eq("id", slip)
+        .single().execute().data["vendor_purchase_order_line_id"]
+    )
+    assert linked == lines["outside_service"], "the demo slip did not link to its PO line"
+
+    client.rpc("receive_vendor_purchase_order", {
+        "p_id": po_id, "p_receipt_group_id": str(uuid.uuid4()),
+        "p_receipts": [{"line_id": lines["part"], "quantity": 5, "quantity_unit": "purchase",
+                        "location_id": leaf, "heat_number": "DEMO-HEAT-1"}],
+        "p_received_at": datetime.now(timezone.utc).isoformat(),
+    }).execute()
+    lot = (
+        admin.table("vendor_purchase_order_receipts").select("lot_id").eq("vendor_purchase_order_id", po_id)
+        .execute().data[0]["lot_id"]
+    )
+    admin.table("lot_certificates").insert({
+        "company_id": demo_id, "lot_id": lot, "file_name": "mill-cert.pdf",
+        "file_path": f"{demo_id}/lots/{lot}/mill-cert.pdf",
+    }).execute()
+
+    client.rpc("create_vendor_rfq", {
+        "p_company_id": demo_id, "p_vendor_ids": [vendor], "p_header": {"title": "Demo request"},
+        "p_lines": [{"part_id": material["id"], "description": "Demo material",
+                     "unit": material["primary_unit"], "quantities": [10]}],
+    }).execute()
+    return {"vendor": vendor, "po_id": po_id}
+
+
+def test_seeded_preferred_vendors_are_on_their_vendors_lists(supabase_admin, demo):
+    """[V1] The template writes `preferred_vendor_id` directly; the trigger on `parts` puts each
+    of those vendors on its part's approved list, so the demo's Buying tab is never empty for a
+    part that has a preferred vendor."""
+    demo_id = demo["demo_id"]
+    preferred = (
+        supabase_admin.table("parts").select("id, part_name, preferred_vendor_id")
+        .eq("company_id", demo_id).not_.is_("preferred_vendor_id", "null").execute().data
+    )
+    assert preferred, "the template sets no preferred vendor, so this proves nothing"
+    listed = {
+        (r["part_id"], r["vendor_id"]) for r in supabase_admin.table("part_vendors")
+        .select("part_id, vendor_id").eq("company_id", demo_id).is_("deleted_at", "null").execute().data
+    }
+    missing = [p["part_name"] for p in preferred if (p["id"], p["preferred_vendor_id"]) not in listed]
+    assert not missing, f"preferred vendors missing from the approved list: {missing}"
+
+
+def test_reset_clears_purchasing_twice_and_restarts_the_numbering(supabase_admin, demo):
+    """[S6] With a sent PO, an outside line linked to a slip, an "other" line on a machine, a
+    receipt with a heat and a certificate, and an RFQ invitation all present, reset succeeds —
+    twice, the #675 shape — leaves no purchasing row, lot or certificate behind, and the next PO
+    is PO-0001 again because the series went with it."""
+    demo_id, client, user = demo["demo_id"], demo["client"], demo["user"]
+    _stage_purchasing(supabase_admin, client, demo_id)
+    staged = {t: _count_rows(supabase_admin, t, demo_id) for t in PURCHASING_ROWS}
+    for table in ("vendor_purchase_orders", "vendor_purchase_order_receipts", "vendor_rfq_invitations",
+                  "material_lots", "lot_certificates", "purchasing_document_series"):
+        assert staged[table] > 0, f"the staging made no {table}, so the reset proves nothing about it"
+
+    args = {"p_source_company_id": demo["source_id"], "p_user_id": user["user_id"]}
+    client.rpc("reset_demo_company", args).execute()
+    client.rpc("reset_demo_company", args).execute()
+
+    left = {t: _count_rows(supabase_admin, t, demo_id) for t in PURCHASING_ROWS}
+    assert left == {t: 0 for t in PURCHASING_ROWS}, f"reset left purchasing rows behind: {left}"
+
+    vendor = (
+        supabase_admin.table("vendors").select("id").eq("company_id", demo_id).is_("deleted_at", "null")
+        .limit(1).execute().data[0]["id"]
+    )
+    today = date.today().isoformat()
+    created = _first(client.rpc("create_vendor_purchase_order", {
+        "p_vendor_id": vendor, "p_ordered_on": today, "p_today": today, "p_header": {},
+        "p_lines": [{"line_kind": "other", "description": "Freight", "quantity": 1, "unit": "each",
+                     "unit_price": 45, "price_source": "manual"}],
+    }).execute().data)
+    assert created["po_number"] == "PO-0001", "the numbering survived the reset"

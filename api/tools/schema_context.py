@@ -514,6 +514,17 @@ SENSITIVE_TABLES = frozenset({
     "demo_data_templates",
     "quickbooks_connections",
     "quickbooks_customer_map",
+    # The purchasing push's QuickBooks plumbing (20261110043600): the vendor map, the
+    # item / AP-account choices, and the PO links with their sync tokens. Third-party ids,
+    # like the customer map above. Blocked at both layers: the migration REVOKEs SELECT from
+    # jigged_ai_readonly and adds no ai_readonly_select policy (all four are on the exempt
+    # list of tenant_tables_missing_ai_decision), and these whole-word entries refuse a
+    # query that names them before it runs. "Is this PO in QuickBooks?" is answered by
+    # vendor_purchase_order_status.quickbooks_state, which carries no QuickBooks id.
+    "quickbooks_vendor_map",
+    "quickbooks_purchasing_setup",
+    "quickbooks_purchase_order_links",
+    "quickbooks_purchase_order_line_links",
     # The customer's own carrier account number — their shared secret, not ours.
     # "Which customers ship on their own UPS account?" is a reasonable question
     # for an owner to type, and answering it from this table would put account

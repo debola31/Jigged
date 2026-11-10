@@ -1116,6 +1116,13 @@ export type Database = {
             foreignKeyName: "inventory_transactions_part_id_fkey"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "inventory_transactions_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
@@ -1322,6 +1329,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "job_parts"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "job_materials_material_part_id_fkey"
+            columns: ["material_part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "job_materials_material_part_id_fkey"
@@ -1732,6 +1746,13 @@ export type Database = {
             foreignKeyName: "job_parts_part_id_fkey"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "job_parts_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
@@ -1998,6 +2019,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "material_lots_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "material_lots_part_id_fkey"
@@ -2358,6 +2386,13 @@ export type Database = {
             foreignKeyName: "notes_part_fk"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "notes_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
@@ -2524,6 +2559,7 @@ export type Database = {
           vendor_contact_id: string | null
           vendor_id: string
           vendor_name: string
+          vendor_purchase_order_line_id: string | null
           voided_at: string | null
           voided_by: string | null
         }
@@ -2551,6 +2587,7 @@ export type Database = {
           vendor_contact_id?: string | null
           vendor_id: string
           vendor_name: string
+          vendor_purchase_order_line_id?: string | null
           voided_at?: string | null
           voided_by?: string | null
         }
@@ -2578,6 +2615,7 @@ export type Database = {
           vendor_contact_id?: string | null
           vendor_id?: string
           vendor_name?: string
+          vendor_purchase_order_line_id?: string | null
           voided_at?: string | null
           voided_by?: string | null
         }
@@ -2631,6 +2669,27 @@ export type Database = {
             referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "outside_shipments_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "part_vendor_last_purchase"
+            referencedColumns: ["vendor_purchase_order_line_id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_line_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "outside_shipments_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_lines"
+            referencedColumns: ["id"]
+          },
         ]
       }
       part_attachments: {
@@ -2677,6 +2736,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_attachments_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "part_attachments_part_id_fkey"
@@ -2744,6 +2810,13 @@ export type Database = {
             foreignKeyName: "part_comments_part_fk"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "part_comments_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
@@ -2797,6 +2870,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "customers"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_customer_references_part_fk"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "part_customer_references_part_fk"
@@ -2864,6 +2944,13 @@ export type Database = {
             foreignKeyName: "part_location_stock_part_fkey"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_part_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
           },
@@ -2915,7 +3002,161 @@ export type Database = {
             foreignKeyName: "part_pricing_tiers_part_id_fkey"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "part_pricing_tiers_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      part_vendor_price_breaks: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          min_quantity: number
+          part_vendor_id: string
+          source: string
+          unit_price: number
+          updated_at: string
+          vendor_rfq_response_id: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          min_quantity: number
+          part_vendor_id: string
+          source?: string
+          unit_price: number
+          updated_at?: string
+          vendor_rfq_response_id?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          min_quantity?: number
+          part_vendor_id?: string
+          source?: string
+          unit_price?: number
+          updated_at?: string
+          vendor_rfq_response_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_vendor_price_breaks_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_vendor_price_breaks_sheet_fk"
+            columns: ["part_vendor_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "part_vendors"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "part_vendor_price_breaks_vendor_rfq_response_id_fkey"
+            columns: ["vendor_rfq_response_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_responses"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      part_vendors: {
+        Row: {
+          company_id: string
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          lead_time_days: number | null
+          minimum_order_quantity: number | null
+          notes: string | null
+          part_id: string
+          purchase_unit: string
+          quoted_on: string | null
+          status: string
+          status_note: string | null
+          updated_at: string
+          valid_until: string | null
+          vendor_id: string
+          vendor_part_number: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          lead_time_days?: number | null
+          minimum_order_quantity?: number | null
+          notes?: string | null
+          part_id: string
+          purchase_unit: string
+          quoted_on?: string | null
+          status?: string
+          status_note?: string | null
+          updated_at?: string
+          valid_until?: string | null
+          vendor_id: string
+          vendor_part_number?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          lead_time_days?: number | null
+          minimum_order_quantity?: number | null
+          notes?: string | null
+          part_id?: string
+          purchase_unit?: string
+          quoted_on?: string | null
+          status?: string
+          status_note?: string | null
+          updated_at?: string
+          valid_until?: string | null
+          vendor_id?: string
+          vendor_part_number?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "part_vendors_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_vendors_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "part_vendors_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "part_vendors_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -3028,8 +3269,22 @@ export type Database = {
             foreignKeyName: "parts_bom_child_part_id_fkey"
             columns: ["child_part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "parts_bom_child_part_id_fkey"
+            columns: ["child_part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "parts_bom_parent_part_id_fkey"
+            columns: ["parent_part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "parts_bom_parent_part_id_fkey"
@@ -3063,6 +3318,13 @@ export type Database = {
           to_primary_factor?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "parts_unit_conversions_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
           {
             foreignKeyName: "parts_unit_conversions_part_id_fkey"
             columns: ["part_id"]
@@ -3119,6 +3381,50 @@ export type Database = {
           uploaded_at?: string | null
         }
         Relationships: []
+      }
+      purchasing_document_series: {
+        Row: {
+          company_id: string
+          created_at: string
+          document_kind: string
+          min_digits: number
+          next_number: number
+          prefix: string
+          terms_and_conditions: string | null
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          document_kind: string
+          min_digits?: number
+          next_number?: number
+          prefix: string
+          terms_and_conditions?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          document_kind?: string
+          min_digits?: number
+          next_number?: number
+          prefix?: string
+          terms_and_conditions?: string | null
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "purchasing_document_series_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       quickbooks_connections: {
         Row: {
@@ -3502,6 +3808,271 @@ export type Database = {
           },
         ]
       }
+      quickbooks_purchase_order_line_links: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          link_id: string
+          qb_item_id: string | null
+          qb_line_id: string
+          updated_at: string
+          vendor_purchase_order_line_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          link_id: string
+          qb_item_id?: string | null
+          qb_line_id: string
+          updated_at?: string
+          vendor_purchase_order_line_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          link_id?: string
+          qb_item_id?: string | null
+          qb_line_id?: string
+          updated_at?: string
+          vendor_purchase_order_line_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_purchase_order_line_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_line_links_line_fk"
+            columns: ["vendor_purchase_order_line_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "part_vendor_last_purchase"
+            referencedColumns: ["vendor_purchase_order_line_id", "company_id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_line_links_line_fk"
+            columns: ["vendor_purchase_order_line_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_line_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_line_links_line_fk"
+            columns: ["vendor_purchase_order_line_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_lines"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_line_links_link_fk"
+            columns: ["link_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "quickbooks_purchase_order_links"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      quickbooks_purchase_order_links: {
+        Row: {
+          attempt_content_version: number | null
+          company_id: string
+          created_at: string
+          id: string
+          last_failure: string | null
+          operation: string
+          provider: string
+          pushed_at: string | null
+          pushed_by: string | null
+          pushed_content_version: number | null
+          pushed_payload_hash: string | null
+          pushed_revision: number | null
+          qb_closed: boolean
+          qb_doc_number: string | null
+          qb_po_id: string | null
+          qb_request_id: string
+          qb_sync_token: string | null
+          qb_url: string | null
+          qb_vendor_id: string | null
+          realm_id: string
+          status: string
+          transaction_date: string | null
+          updated_at: string
+          vendor_purchase_order_id: string
+        }
+        Insert: {
+          attempt_content_version?: number | null
+          company_id: string
+          created_at?: string
+          id?: string
+          last_failure?: string | null
+          operation?: string
+          provider?: string
+          pushed_at?: string | null
+          pushed_by?: string | null
+          pushed_content_version?: number | null
+          pushed_payload_hash?: string | null
+          pushed_revision?: number | null
+          qb_closed?: boolean
+          qb_doc_number?: string | null
+          qb_po_id?: string | null
+          qb_request_id: string
+          qb_sync_token?: string | null
+          qb_url?: string | null
+          qb_vendor_id?: string | null
+          realm_id: string
+          status?: string
+          transaction_date?: string | null
+          updated_at?: string
+          vendor_purchase_order_id: string
+        }
+        Update: {
+          attempt_content_version?: number | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          last_failure?: string | null
+          operation?: string
+          provider?: string
+          pushed_at?: string | null
+          pushed_by?: string | null
+          pushed_content_version?: number | null
+          pushed_payload_hash?: string | null
+          pushed_revision?: number | null
+          qb_closed?: boolean
+          qb_doc_number?: string | null
+          qb_po_id?: string | null
+          qb_request_id?: string
+          qb_sync_token?: string | null
+          qb_url?: string | null
+          qb_vendor_id?: string | null
+          realm_id?: string
+          status?: string
+          transaction_date?: string | null
+          updated_at?: string
+          vendor_purchase_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_purchase_order_links_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_links_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_links_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_orders"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchase_order_links_pushed_by_fkey"
+            columns: ["pushed_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_purchasing_setup: {
+        Row: {
+          chosen_by: string | null
+          company_id: string
+          created_at: string
+          created_in_quickbooks: boolean
+          details: Json
+          id: string
+          posting_account_id: string | null
+          posting_account_name: string | null
+          provider: string
+          qb_id: string | null
+          qb_name: string | null
+          quickbooks_connection_id: string | null
+          quickbooks_desktop_connection_id: string | null
+          realm_id: string
+          setup_key: string
+          updated_at: string
+        }
+        Insert: {
+          chosen_by?: string | null
+          company_id: string
+          created_at?: string
+          created_in_quickbooks?: boolean
+          details?: Json
+          id?: string
+          posting_account_id?: string | null
+          posting_account_name?: string | null
+          provider: string
+          qb_id?: string | null
+          qb_name?: string | null
+          quickbooks_connection_id?: string | null
+          quickbooks_desktop_connection_id?: string | null
+          realm_id: string
+          setup_key: string
+          updated_at?: string
+        }
+        Update: {
+          chosen_by?: string | null
+          company_id?: string
+          created_at?: string
+          created_in_quickbooks?: boolean
+          details?: Json
+          id?: string
+          posting_account_id?: string | null
+          posting_account_name?: string | null
+          provider?: string
+          qb_id?: string | null
+          qb_name?: string | null
+          quickbooks_connection_id?: string | null
+          quickbooks_desktop_connection_id?: string | null
+          realm_id?: string
+          setup_key?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_purchasing_setup_chosen_by_fkey"
+            columns: ["chosen_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchasing_setup_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchasing_setup_quickbooks_connection_id_fkey"
+            columns: ["quickbooks_connection_id"]
+            isOneToOne: false
+            referencedRelation: "quickbooks_connections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_purchasing_setup_quickbooks_desktop_connection__fkey"
+            columns: ["quickbooks_desktop_connection_id"]
+            isOneToOne: false
+            referencedRelation: "quickbooks_desktop_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       quickbooks_terms_cache: {
         Row: {
           company_id: string
@@ -3545,6 +4116,67 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      quickbooks_vendor_map: {
+        Row: {
+          company_id: string
+          created_at: string
+          id: string
+          linked_by: string | null
+          provider: string
+          qb_display_name: string | null
+          qb_vendor_id: string
+          realm_id: string
+          updated_at: string
+          vendor_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          id?: string
+          linked_by?: string | null
+          provider?: string
+          qb_display_name?: string | null
+          qb_vendor_id: string
+          realm_id: string
+          updated_at?: string
+          vendor_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          id?: string
+          linked_by?: string | null
+          provider?: string
+          qb_display_name?: string | null
+          qb_vendor_id?: string
+          realm_id?: string
+          updated_at?: string
+          vendor_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "quickbooks_vendor_map_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_vendor_map_linked_by_fkey"
+            columns: ["linked_by"]
+            isOneToOne: false
+            referencedRelation: "user_company_access"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quickbooks_vendor_map_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
             referencedColumns: ["id"]
           },
         ]
@@ -3614,6 +4246,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "quote_line_items_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "quote_line_items_part_id_fkey"
@@ -3857,6 +4496,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "companies"
             referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "routings_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: true
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
           },
           {
             foreignKeyName: "routings_part_id_fkey"
@@ -4305,6 +4951,990 @@ export type Database = {
           },
         ]
       }
+      vendor_purchase_order_lines: {
+        Row: {
+          cert_required: boolean
+          closed_at: string | null
+          closed_by: string | null
+          closed_reason: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          description: string
+          expects_receipt: boolean
+          id: string
+          job_id: string | null
+          job_number: string | null
+          job_operation_id: string | null
+          job_part_id: string | null
+          line_kind: string
+          line_number: number
+          need_by_on: string | null
+          operation_label: string | null
+          part_id: string | null
+          part_name: string | null
+          price_source: string | null
+          promised_on: string | null
+          quantity: number
+          service_name: string | null
+          stock_factor: number | null
+          stock_unit: string | null
+          unit: string
+          unit_price: number | null
+          updated_at: string
+          vendor_part_number: string | null
+          vendor_purchase_order_id: string
+          vendor_service_id: string | null
+          work_center_id: string | null
+          work_center_name: string | null
+        }
+        Insert: {
+          cert_required?: boolean
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          description: string
+          expects_receipt?: boolean
+          id?: string
+          job_id?: string | null
+          job_number?: string | null
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          line_kind: string
+          line_number: number
+          need_by_on?: string | null
+          operation_label?: string | null
+          part_id?: string | null
+          part_name?: string | null
+          price_source?: string | null
+          promised_on?: string | null
+          quantity: number
+          service_name?: string | null
+          stock_factor?: number | null
+          stock_unit?: string | null
+          unit: string
+          unit_price?: number | null
+          updated_at?: string
+          vendor_part_number?: string | null
+          vendor_purchase_order_id: string
+          vendor_service_id?: string | null
+          work_center_id?: string | null
+          work_center_name?: string | null
+        }
+        Update: {
+          cert_required?: boolean
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          description?: string
+          expects_receipt?: boolean
+          id?: string
+          job_id?: string | null
+          job_number?: string | null
+          job_operation_id?: string | null
+          job_part_id?: string | null
+          line_kind?: string
+          line_number?: number
+          need_by_on?: string | null
+          operation_label?: string | null
+          part_id?: string | null
+          part_name?: string | null
+          price_source?: string | null
+          promised_on?: string | null
+          quantity?: number
+          service_name?: string | null
+          stock_factor?: number | null
+          stock_unit?: string | null
+          unit?: string
+          unit_price?: number | null
+          updated_at?: string
+          vendor_part_number?: string | null
+          vendor_purchase_order_id?: string
+          vendor_service_id?: string | null
+          work_center_id?: string | null
+          work_center_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_order_lines_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_operation_id_fkey"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_part_id_fkey"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_orders"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_vendor_service_id_fkey"
+            columns: ["vendor_service_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_work_center_id_fkey"
+            columns: ["work_center_id"]
+            isOneToOne: false
+            referencedRelation: "work_centers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_purchase_order_receipts: {
+        Row: {
+          company_id: string
+          created_at: string
+          entry_index: number
+          heat_number: string | null
+          id: string
+          inventory_transaction_id: string | null
+          line_kind: string
+          location_id: string | null
+          location_name: string | null
+          lot_code: string | null
+          lot_id: string | null
+          notes: string | null
+          part_id: string | null
+          quantity: number
+          receipt_group_id: string
+          received_at: string
+          received_by: string | null
+          started_tracking: boolean
+          stock_quantity: number | null
+          stock_unit: string | null
+          unit: string
+          updated_at: string
+          vendor_packing_slip: string | null
+          vendor_purchase_order_id: string
+          vendor_purchase_order_line_id: string
+          void_reason: string | null
+          void_transaction_id: string | null
+          voided_at: string | null
+          voided_by: string | null
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          entry_index: number
+          heat_number?: string | null
+          id?: string
+          inventory_transaction_id?: string | null
+          line_kind: string
+          location_id?: string | null
+          location_name?: string | null
+          lot_code?: string | null
+          lot_id?: string | null
+          notes?: string | null
+          part_id?: string | null
+          quantity: number
+          receipt_group_id: string
+          received_at?: string
+          received_by?: string | null
+          started_tracking?: boolean
+          stock_quantity?: number | null
+          stock_unit?: string | null
+          unit: string
+          updated_at?: string
+          vendor_packing_slip?: string | null
+          vendor_purchase_order_id: string
+          vendor_purchase_order_line_id: string
+          void_reason?: string | null
+          void_transaction_id?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          entry_index?: number
+          heat_number?: string | null
+          id?: string
+          inventory_transaction_id?: string | null
+          line_kind?: string
+          location_id?: string | null
+          location_name?: string | null
+          lot_code?: string | null
+          lot_id?: string | null
+          notes?: string | null
+          part_id?: string | null
+          quantity?: number
+          receipt_group_id?: string
+          received_at?: string
+          received_by?: string | null
+          started_tracking?: boolean
+          stock_quantity?: number | null
+          stock_unit?: string | null
+          unit?: string
+          updated_at?: string
+          vendor_packing_slip?: string | null
+          vendor_purchase_order_id?: string
+          vendor_purchase_order_line_id?: string
+          void_reason?: string | null
+          void_transaction_id?: string | null
+          voided_at?: string | null
+          voided_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_inventory_transaction_id_fkey"
+            columns: ["inventory_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_transactions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_line_fk"
+            columns: [
+              "vendor_purchase_order_line_id",
+              "company_id",
+              "vendor_purchase_order_id",
+              "line_kind",
+            ]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_line_status"
+            referencedColumns: [
+              "id",
+              "company_id",
+              "vendor_purchase_order_id",
+              "line_kind",
+            ]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_line_fk"
+            columns: [
+              "vendor_purchase_order_line_id",
+              "company_id",
+              "vendor_purchase_order_id",
+              "line_kind",
+            ]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_lines"
+            referencedColumns: [
+              "id",
+              "company_id",
+              "vendor_purchase_order_id",
+              "line_kind",
+            ]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_locations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "material_lots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_receipts_void_transaction_id_fkey"
+            columns: ["void_transaction_id"]
+            isOneToOne: false
+            referencedRelation: "inventory_transactions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_purchase_order_revisions: {
+        Row: {
+          company_id: string
+          created_at: string
+          document: Json
+          document_hash: string
+          id: string
+          revision: number
+          sent_at: string
+          sent_by: string | null
+          updated_at: string
+          vendor_purchase_order_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          document: Json
+          document_hash: string
+          id?: string
+          revision: number
+          sent_at: string
+          sent_by?: string | null
+          updated_at?: string
+          vendor_purchase_order_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          document?: Json
+          document_hash?: string
+          id?: string
+          revision?: number
+          sent_at?: string
+          sent_by?: string | null
+          updated_at?: string
+          vendor_purchase_order_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_order_revisions_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_revisions_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_revisions_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_orders"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      vendor_purchase_orders: {
+        Row: {
+          closed_at: string | null
+          closed_by: string | null
+          closed_reason: string | null
+          company_id: string
+          content_version: number
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          internal_notes: string | null
+          issued_at: string | null
+          issued_by: string | null
+          last_line_number: number
+          last_sent_at: string | null
+          need_by_on: string | null
+          notes_to_vendor: string | null
+          ordered_on: string
+          payment_terms: string | null
+          po_number: string
+          revision: number
+          sent_revision: number | null
+          ship_to_address: Json | null
+          ship_to_customer_address_id: string | null
+          ship_to_customer_id: string | null
+          ship_to_kind: string
+          ship_to_name: string
+          ship_to_vendor_address_id: string | null
+          ship_to_vendor_id: string | null
+          ship_via: string | null
+          terms_and_conditions: string | null
+          updated_at: string
+          vendor_address: Json | null
+          vendor_address_id: string | null
+          vendor_contact: Json | null
+          vendor_contact_id: string | null
+          vendor_id: string
+          vendor_name: string
+          vendor_rfq_id: string | null
+        }
+        Insert: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id: string
+          content_version?: number
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          internal_notes?: string | null
+          issued_at?: string | null
+          issued_by?: string | null
+          last_line_number?: number
+          last_sent_at?: string | null
+          need_by_on?: string | null
+          notes_to_vendor?: string | null
+          ordered_on: string
+          payment_terms?: string | null
+          po_number: string
+          revision?: number
+          sent_revision?: number | null
+          ship_to_address?: Json | null
+          ship_to_customer_address_id?: string | null
+          ship_to_customer_id?: string | null
+          ship_to_kind?: string
+          ship_to_name: string
+          ship_to_vendor_address_id?: string | null
+          ship_to_vendor_id?: string | null
+          ship_via?: string | null
+          terms_and_conditions?: string | null
+          updated_at?: string
+          vendor_address?: Json | null
+          vendor_address_id?: string | null
+          vendor_contact?: Json | null
+          vendor_contact_id?: string | null
+          vendor_id: string
+          vendor_name: string
+          vendor_rfq_id?: string | null
+        }
+        Update: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id?: string
+          content_version?: number
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          internal_notes?: string | null
+          issued_at?: string | null
+          issued_by?: string | null
+          last_line_number?: number
+          last_sent_at?: string | null
+          need_by_on?: string | null
+          notes_to_vendor?: string | null
+          ordered_on?: string
+          payment_terms?: string | null
+          po_number?: string
+          revision?: number
+          sent_revision?: number | null
+          ship_to_address?: Json | null
+          ship_to_customer_address_id?: string | null
+          ship_to_customer_id?: string | null
+          ship_to_kind?: string
+          ship_to_name?: string
+          ship_to_vendor_address_id?: string | null
+          ship_to_vendor_id?: string | null
+          ship_via?: string | null
+          terms_and_conditions?: string | null
+          updated_at?: string
+          vendor_address?: Json | null
+          vendor_address_id?: string | null
+          vendor_contact?: Json | null
+          vendor_contact_id?: string | null
+          vendor_id?: string
+          vendor_name?: string
+          vendor_rfq_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_orders_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_customer_address_id_fkey"
+            columns: ["ship_to_customer_address_id"]
+            isOneToOne: false
+            referencedRelation: "customer_addresses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_customer_id_fkey"
+            columns: ["ship_to_customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_vendor_address_id_fkey"
+            columns: ["ship_to_vendor_address_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_addresses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_vendor_id_fkey"
+            columns: ["ship_to_vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_address_id_fkey"
+            columns: ["vendor_address_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_addresses"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_contact_id_fkey"
+            columns: ["vendor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_rfq_id_fkey"
+            columns: ["vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_rfq_id_fkey"
+            columns: ["vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfqs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_rfq_invitations: {
+        Row: {
+          company_id: string
+          created_at: string
+          declined_at: string | null
+          declined_by: string | null
+          declined_reason: string | null
+          id: string
+          quoted_on: string | null
+          sent_at: string | null
+          sent_by: string | null
+          updated_at: string
+          vendor_contact: Json | null
+          vendor_contact_id: string | null
+          vendor_id: string
+          vendor_name: string
+          vendor_quote_reference: string | null
+          vendor_rfq_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          declined_at?: string | null
+          declined_by?: string | null
+          declined_reason?: string | null
+          id?: string
+          quoted_on?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
+          updated_at?: string
+          vendor_contact?: Json | null
+          vendor_contact_id?: string | null
+          vendor_id: string
+          vendor_name: string
+          vendor_quote_reference?: string | null
+          vendor_rfq_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          declined_at?: string | null
+          declined_by?: string | null
+          declined_reason?: string | null
+          id?: string
+          quoted_on?: string | null
+          sent_at?: string | null
+          sent_by?: string | null
+          updated_at?: string
+          vendor_contact?: Json | null
+          vendor_contact_id?: string | null
+          vendor_id?: string
+          vendor_name?: string
+          vendor_quote_reference?: string | null
+          vendor_rfq_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_rfq_invitations_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_invitations_rfq_fk"
+            columns: ["vendor_rfq_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_invitations_rfq_fk"
+            columns: ["vendor_rfq_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfqs"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_invitations_vendor_contact_id_fkey"
+            columns: ["vendor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_invitations_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_rfq_lines: {
+        Row: {
+          cert_required: boolean
+          company_id: string
+          created_at: string
+          description: string
+          id: string
+          job_id: string | null
+          job_number: string | null
+          line_number: number
+          notes: string | null
+          part_id: string | null
+          part_name: string | null
+          quantities: number[]
+          unit: string
+          updated_at: string
+          vendor_rfq_id: string
+        }
+        Insert: {
+          cert_required?: boolean
+          company_id: string
+          created_at?: string
+          description: string
+          id?: string
+          job_id?: string | null
+          job_number?: string | null
+          line_number: number
+          notes?: string | null
+          part_id?: string | null
+          part_name?: string | null
+          quantities: number[]
+          unit: string
+          updated_at?: string
+          vendor_rfq_id: string
+        }
+        Update: {
+          cert_required?: boolean
+          company_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          job_id?: string | null
+          job_number?: string | null
+          line_number?: number
+          notes?: string | null
+          part_id?: string | null
+          part_name?: string | null
+          quantities?: number[]
+          unit?: string
+          updated_at?: string
+          vendor_rfq_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_rfq_lines_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_lines_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_lines_rfq_fk"
+            columns: ["vendor_rfq_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_lines_rfq_fk"
+            columns: ["vendor_rfq_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfqs"
+            referencedColumns: ["id", "company_id"]
+          },
+        ]
+      }
+      vendor_rfq_responses: {
+        Row: {
+          awarded_at: string | null
+          awarded_by: string | null
+          company_id: string
+          created_at: string
+          id: string
+          lead_time_days: number | null
+          minimum_order_quantity: number | null
+          no_bid: boolean
+          notes: string | null
+          quantity: number
+          unit_price: number | null
+          updated_at: string
+          valid_until: string | null
+          vendor_part_number: string | null
+          vendor_purchase_order_line_id: string | null
+          vendor_rfq_id: string
+          vendor_rfq_invitation_id: string
+          vendor_rfq_line_id: string
+        }
+        Insert: {
+          awarded_at?: string | null
+          awarded_by?: string | null
+          company_id: string
+          created_at?: string
+          id?: string
+          lead_time_days?: number | null
+          minimum_order_quantity?: number | null
+          no_bid?: boolean
+          notes?: string | null
+          quantity: number
+          unit_price?: number | null
+          updated_at?: string
+          valid_until?: string | null
+          vendor_part_number?: string | null
+          vendor_purchase_order_line_id?: string | null
+          vendor_rfq_id: string
+          vendor_rfq_invitation_id: string
+          vendor_rfq_line_id: string
+        }
+        Update: {
+          awarded_at?: string | null
+          awarded_by?: string | null
+          company_id?: string
+          created_at?: string
+          id?: string
+          lead_time_days?: number | null
+          minimum_order_quantity?: number | null
+          no_bid?: boolean
+          notes?: string | null
+          quantity?: number
+          unit_price?: number | null
+          updated_at?: string
+          valid_until?: string | null
+          vendor_part_number?: string | null
+          vendor_purchase_order_line_id?: string | null
+          vendor_rfq_id?: string
+          vendor_rfq_invitation_id?: string
+          vendor_rfq_line_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_rfq_responses_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_responses_invitation_fk"
+            columns: ["vendor_rfq_invitation_id", "company_id", "vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_invitations"
+            referencedColumns: ["id", "company_id", "vendor_rfq_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_responses_line_fk"
+            columns: ["vendor_rfq_line_id", "company_id", "vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_lines"
+            referencedColumns: ["id", "company_id", "vendor_rfq_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_responses_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "part_vendor_last_purchase"
+            referencedColumns: ["vendor_purchase_order_line_id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_responses_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_line_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_rfq_responses_vendor_purchase_order_line_id_fkey"
+            columns: ["vendor_purchase_order_line_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_rfqs: {
+        Row: {
+          closed_at: string | null
+          closed_by: string | null
+          closed_reason: string | null
+          company_id: string
+          created_at: string
+          created_by: string | null
+          deleted_at: string | null
+          id: string
+          internal_notes: string | null
+          needed_by_on: string | null
+          notes_to_vendors: string | null
+          respond_by_on: string | null
+          rfq_number: string
+          ship_to_address: Json | null
+          ship_to_name: string
+          terms_and_conditions: string | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          internal_notes?: string | null
+          needed_by_on?: string | null
+          notes_to_vendors?: string | null
+          respond_by_on?: string | null
+          rfq_number: string
+          ship_to_address?: Json | null
+          ship_to_name: string
+          terms_and_conditions?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          closed_at?: string | null
+          closed_by?: string | null
+          closed_reason?: string | null
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          deleted_at?: string | null
+          id?: string
+          internal_notes?: string | null
+          needed_by_on?: string | null
+          notes_to_vendors?: string | null
+          respond_by_on?: string | null
+          rfq_number?: string
+          ship_to_address?: Json | null
+          ship_to_name?: string
+          terms_and_conditions?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_rfqs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       vendor_services: {
         Row: {
           company_id: string
@@ -4360,6 +5990,7 @@ export type Database = {
         Row: {
           company_id: string
           created_at: string
+          default_payment_terms: string | null
           deleted_at: string | null
           id: string
           name: string
@@ -4368,6 +5999,7 @@ export type Database = {
         Insert: {
           company_id: string
           created_at?: string
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name: string
@@ -4376,6 +6008,7 @@ export type Database = {
         Update: {
           company_id?: string
           created_at?: string
+          default_payment_terms?: string | null
           deleted_at?: string | null
           id?: string
           name?: string
@@ -4616,7 +6249,330 @@ export type Database = {
             foreignKeyName: "part_location_stock_part_fkey"
             columns: ["part_id"]
             isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "part_location_stock_part_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
             referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      part_on_order: {
+        Row: {
+          company_id: string | null
+          draft_line_count: number | null
+          next_expected_on: string | null
+          on_draft_quantity: number | null
+          on_order_quantity: number | null
+          open_line_count: number | null
+          part_id: string | null
+          stock_unit: string | null
+          unit_mismatch_line_count: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "parts_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      part_vendor_last_purchase: {
+        Row: {
+          company_id: string | null
+          ordered_on: string | null
+          part_id: string | null
+          po_number: string | null
+          quantity: number | null
+          stock_factor: number | null
+          stock_unit: string | null
+          unit: string | null
+          unit_price: number | null
+          unit_price_per_stock_unit: number | null
+          vendor_id: string | null
+          vendor_purchase_order_id: string | null
+          vendor_purchase_order_line_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_order_lines_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_purchase_order_line_status: {
+        Row: {
+          amount: number | null
+          at_vendor_quantity: number | null
+          cert_required: boolean | null
+          closed_at: string | null
+          company_id: string | null
+          created_at: string | null
+          description: string | null
+          expected_on: string | null
+          expects_receipt: boolean | null
+          id: string | null
+          is_archived: boolean | null
+          job_id: string | null
+          job_number: string | null
+          job_operation_id: string | null
+          job_part_id: string | null
+          line_kind: string | null
+          line_number: number | null
+          linked_slip_count: number | null
+          need_by_on: string | null
+          open_amount: number | null
+          open_quantity: number | null
+          open_stock_quantity: number | null
+          operation_label: string | null
+          ordered_stock_quantity: number | null
+          over_received_quantity: number | null
+          part_id: string | null
+          part_name: string | null
+          po_number: string | null
+          price_source: string | null
+          promised_on: string | null
+          quantity: number | null
+          received_quantity: number | null
+          received_stock_quantity: number | null
+          remaining_quantity: number | null
+          remaining_stock_quantity: number | null
+          sent_quantity: number | null
+          service_name: string | null
+          status: string | null
+          stock_factor: number | null
+          stock_unit: string | null
+          unit: string | null
+          unit_price: number | null
+          updated_at: string | null
+          vendor_id: string | null
+          vendor_part_number: string | null
+          vendor_purchase_order_id: string | null
+          vendor_service_id: string | null
+          work_center_id: string | null
+          work_center_name: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_order_lines_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "jobs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_operation_id_fkey"
+            columns: ["job_operation_id"]
+            isOneToOne: false
+            referencedRelation: "job_operations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_job_part_id_fkey"
+            columns: ["job_part_id"]
+            isOneToOne: false
+            referencedRelation: "job_parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "part_on_order"
+            referencedColumns: ["part_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_part_id_fkey"
+            columns: ["part_id"]
+            isOneToOne: false
+            referencedRelation: "parts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_order_status"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_po_fk"
+            columns: ["vendor_purchase_order_id", "company_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_purchase_orders"
+            referencedColumns: ["id", "company_id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_vendor_service_id_fkey"
+            columns: ["vendor_service_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_services"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_order_lines_work_center_id_fkey"
+            columns: ["work_center_id"]
+            isOneToOne: false
+            referencedRelation: "work_centers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_purchase_order_status: {
+        Row: {
+          closed_at: string | null
+          company_id: string | null
+          content_version: number | null
+          created_at: string | null
+          deleted_at: string | null
+          has_unpriced_lines: boolean | null
+          has_unsent_changes: boolean | null
+          id: string | null
+          is_archived: boolean | null
+          issued_at: string | null
+          job_ids: string[] | null
+          job_numbers: string[] | null
+          last_sent_at: string | null
+          line_count: number | null
+          need_by_on: string | null
+          next_expected_on: string | null
+          open_amount: number | null
+          ordered_amount: number | null
+          ordered_on: string | null
+          outstanding_line_count: number | null
+          payment_terms: string | null
+          po_number: string | null
+          quickbooks_state: string | null
+          revision: number | null
+          search_text: string | null
+          sent_revision: number | null
+          ship_to_customer_id: string | null
+          ship_to_kind: string | null
+          ship_to_name: string | null
+          ship_to_vendor_id: string | null
+          ship_via: string | null
+          status: string | null
+          updated_at: string | null
+          vendor_id: string | null
+          vendor_name: string | null
+          vendor_rfq_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_purchase_orders_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_customer_id_fkey"
+            columns: ["ship_to_customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_ship_to_vendor_id_fkey"
+            columns: ["ship_to_vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_id_fkey"
+            columns: ["vendor_id"]
+            isOneToOne: false
+            referencedRelation: "vendors"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_rfq_id_fkey"
+            columns: ["vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfq_status"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "vendor_purchase_orders_vendor_rfq_id_fkey"
+            columns: ["vendor_rfq_id"]
+            isOneToOne: false
+            referencedRelation: "vendor_rfqs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      vendor_rfq_status: {
+        Row: {
+          awarded_line_count: number | null
+          closed_at: string | null
+          company_id: string | null
+          created_at: string | null
+          declined_count: number | null
+          deleted_at: string | null
+          id: string | null
+          invited_count: number | null
+          is_archived: boolean | null
+          line_count: number | null
+          needed_by_on: string | null
+          respond_by_on: string | null
+          responded_count: number | null
+          rfq_number: string | null
+          sent_count: number | null
+          status: string | null
+          title: string | null
+          updated_at: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "vendor_rfqs_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -4718,6 +6674,10 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      apply_part_cost_from_vendor: {
+        Args: { p_expected: Json; p_part_vendor_id: string; p_today: string }
+        Returns: Json
+      }
       apply_qbo_invoice_mirror: {
         Args: {
           p_checked_at: string
@@ -4743,7 +6703,18 @@ export type Database = {
         }
         Returns: undefined
       }
+      archive_part_vendor: { Args: { p_part_vendor_id: string }; Returns: Json }
       archive_parts: { Args: { p_ids: string[] }; Returns: undefined }
+      assert_office_member: { Args: { p_company_id: string }; Returns: string }
+      award_vendor_rfq: {
+        Args: {
+          p_response_ids: string[]
+          p_rfq_id: string
+          p_save_to_price_sheets?: boolean
+          p_today?: string
+        }
+        Returns: Json
+      }
       bulk_put_away: {
         Args: {
           p_from_location_id: string
@@ -4783,6 +6754,10 @@ export type Database = {
           p_note?: string
         }
         Returns: undefined
+      }
+      company_address_block_snapshot: {
+        Args: { p_company_id: string }
+        Returns: Json
       }
       company_can_write: {
         Args: { check_company_id: string }
@@ -4912,6 +6887,31 @@ export type Database = {
           p_shipping_method: string
         }
         Returns: string
+      }
+      create_vendor_purchase_order: {
+        Args: {
+          p_header?: Json
+          p_lines?: Json
+          p_ordered_on: string
+          p_today: string
+          p_vendor_id: string
+        }
+        Returns: {
+          id: string
+          po_number: string
+        }[]
+      }
+      create_vendor_rfq: {
+        Args: {
+          p_company_id: string
+          p_header?: Json
+          p_lines?: Json
+          p_vendor_ids?: string[]
+        }
+        Returns: {
+          id: string
+          rfq_number: string
+        }[]
       }
       definer_writers_missing_write_gate: {
         Args: never
@@ -5078,6 +7078,10 @@ export type Database = {
         Returns: boolean
       }
       is_system_admin: { Args: { check_user_id: string }; Returns: boolean }
+      is_vendor_purchase_order_late: {
+        Args: { p_expected_on: string; p_status: string; p_today: string }
+        Returns: boolean
+      }
       job_last_ship_date: { Args: { p_job_id: string }; Returns: string }
       job_part_last_ship_date: {
         Args: { p_job_part_id: string }
@@ -5108,6 +7112,10 @@ export type Database = {
         }[]
       }
       next_order_number: { Args: { company_uuid: string }; Returns: number }
+      next_purchasing_document_number: {
+        Args: { p_company_id: string; p_document_kind: string }
+        Returns: string
+      }
       no_client_access_grant_leaks: {
         Args: never
         Returns: {
@@ -5176,6 +7184,20 @@ export type Database = {
         }
         Returns: number
       }
+      part_unit_factor: {
+        Args: { p_part_id: string; p_unit: string }
+        Returns: number
+      }
+      part_vendor_write: {
+        Args: {
+          p_break_keys: string[]
+          p_changes: Json
+          p_part_id: string
+          p_price_breaks: Json
+          p_vendor_id: string
+        }
+        Returns: Json
+      }
       parts_deletion_impact: {
         Args: { p_ids: string[] }
         Returns: {
@@ -5193,6 +7215,29 @@ export type Database = {
         Returns: {
           role_name: string
         }[]
+      }
+      preview_part_cost_from_vendor: {
+        Args: { p_part_vendor_id: string; p_today: string }
+        Returns: Json
+      }
+      purchasing_assert_keys: {
+        Args: { p_allowed: string[]; p_value: Json; p_what: string }
+        Returns: undefined
+      }
+      quickbooks_purchase_order_state: {
+        Args: { p_vendor_purchase_order_id: string }
+        Returns: string
+      }
+      receive_vendor_purchase_order: {
+        Args: {
+          p_id: string
+          p_notes?: string
+          p_receipt_group_id: string
+          p_receipts: Json
+          p_received_at?: string
+          p_vendor_packing_slip?: string
+        }
+        Returns: Json
       }
       reclaim_part_name: {
         Args: { p_company_id: string; p_name: string }
@@ -5216,6 +7261,52 @@ export type Database = {
           p_part_id: string
         }
         Returns: string
+      }
+      save_part_vendor: {
+        Args: {
+          p_changes?: Json
+          p_make_preferred?: boolean
+          p_part_id: string
+          p_price_breaks?: Json
+          p_vendor_id: string
+        }
+        Returns: Json
+      }
+      save_purchasing_document_settings: {
+        Args: { p_changes?: Json; p_company_id: string; p_kind: string }
+        Returns: Json
+      }
+      save_vendor_purchase_order: {
+        Args: {
+          p_changes?: Json
+          p_expected_updated_at?: string
+          p_id: string
+          p_lines?: Json
+          p_removed_line_ids?: string[]
+          p_today?: string
+        }
+        Returns: Json
+      }
+      save_vendor_rfq: {
+        Args: {
+          p_add_vendor_ids?: string[]
+          p_changes?: Json
+          p_expected_updated_at?: string
+          p_id: string
+          p_lines?: Json
+          p_removed_invitation_ids?: string[]
+          p_removed_line_ids?: string[]
+        }
+        Returns: Json
+      }
+      save_vendor_rfq_responses: {
+        Args: {
+          p_invitation_id: string
+          p_quoted_on?: string
+          p_responses?: Json
+          p_vendor_quote_reference?: string
+        }
+        Returns: Json
       }
       search_jobs_by_identifier: {
         Args: {
@@ -5241,8 +7332,41 @@ export type Database = {
         }
         Returns: undefined
       }
+      set_outside_shipment_vendor_purchase_order_line: {
+        Args: {
+          p_outside_shipment_id: string
+          p_vendor_purchase_order_line_id?: string
+        }
+        Returns: Json
+      }
       set_part_lot_tracking: {
         Args: { p_part_id: string; p_tracked: boolean }
+        Returns: Json
+      }
+      set_vendor_purchase_order_line_state: {
+        Args: {
+          p_action: string
+          p_id: string
+          p_line_ids: string[]
+          p_reason?: string
+        }
+        Returns: Json
+      }
+      set_vendor_purchase_order_state: {
+        Args: {
+          p_action: string
+          p_id: string
+          p_reason?: string
+          p_today?: string
+        }
+        Returns: Json
+      }
+      set_vendor_rfq_invitation_state: {
+        Args: { p_action: string; p_id: string; p_reason?: string }
+        Returns: Json
+      }
+      set_vendor_rfq_state: {
+        Args: { p_action: string; p_id: string; p_reason?: string }
         Returns: Json
       }
       show_limit: { Args: never; Returns: number }
@@ -5304,6 +7428,7 @@ export type Database = {
         }
         Returns: Json
       }
+      unit_name_key: { Args: { p_unit: string }; Returns: string }
       vendor_address_block_snapshot: {
         Args: { p_address_id: string }
         Returns: Json
@@ -5311,6 +7436,72 @@ export type Database = {
       vendor_contact_block_snapshot: {
         Args: { p_contact_id: string }
         Returns: Json
+      }
+      vendor_po_line_amount: {
+        Args: { p_quantity: number; p_unit_price: number }
+        Returns: number
+      }
+      vendor_purchase_order_document: {
+        Args: { p_vendor_purchase_order_id: string }
+        Returns: Json
+      }
+      vendor_purchase_order_document_hash: {
+        Args: { p_vendor_purchase_order_id: string }
+        Returns: string
+      }
+      vendor_purchase_order_insert: {
+        Args: {
+          p_company_id: string
+          p_header: Json
+          p_ordered_on: string
+          p_vendor_id: string
+          p_vendor_rfq_id?: string
+        }
+        Returns: string
+      }
+      vendor_purchase_order_lock_jobs: {
+        Args: { p_lines?: Json; p_vendor_purchase_order_id: string }
+        Returns: undefined
+      }
+      vendor_purchase_order_pushed_projection: {
+        Args: { p_vendor_purchase_order_id: string }
+        Returns: Json
+      }
+      vendor_purchase_order_receipt_result: {
+        Args: { p_receipt_group_id: string; p_vendor_purchase_order_id: string }
+        Returns: Json
+      }
+      vendor_purchase_order_resolve_ship_to: {
+        Args: { p_company_id: string; p_ship_to: Json }
+        Returns: Json
+      }
+      vendor_purchase_order_settle_versions: {
+        Args: {
+          p_may_bump_revision: boolean
+          p_projection_before: string
+          p_vendor_purchase_order_id: string
+        }
+        Returns: Json
+      }
+      vendor_purchase_order_upsert_line: {
+        Args: { p_line: Json; p_vendor_purchase_order_id: string }
+        Returns: Json
+      }
+      vendor_purchase_order_vendor_party: {
+        Args: { p_header: Json; p_vendor_id: string }
+        Returns: Json
+      }
+      vendor_purchase_order_write_lines: {
+        Args: { p_lines: Json; p_vendor_purchase_order_id: string }
+        Returns: Json
+      }
+      vendor_rfq_invite: {
+        Args: { p_vendor_id: string; p_vendor_rfq_id: string }
+        Returns: string
+      }
+      vendor_rfq_upsert_line: {
+        Args: { p_line: Json; p_vendor_rfq_id: string }
+        Returns: string
       }
       viewer_excluded_from_metrics: {
         Args: { p_access_id: string }
@@ -5323,6 +7514,10 @@ export type Database = {
       void_outside_shipment: {
         Args: { p_shipment_id: string }
         Returns: number
+      }
+      void_vendor_purchase_order_receipt: {
+        Args: { p_reason?: string; p_receipt_id: string }
+        Returns: Json
       }
       work_center_usage: {
         Args: { p_company_id: string }

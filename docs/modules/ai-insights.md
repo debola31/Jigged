@@ -894,10 +894,12 @@ old wording attributed to it.
 `claim_ai_jobs()` and `isAiWorkerAvailable` compare it byte for byte, so `qwen3:32b` against
 `qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production ran on `ollama:qwen3:32b`
 from September to 2026-11-09 and is back on a hosted model, so the chat no longer depends on a
-laptop being awake; setting the variable again is the way back. `AI_READONLY_DATABASE_URL`
-is the sandbox connection for the backend, **set for Production only** — a preview deployment has
-its own Supabase branch and no such variable, so previews stay on the worker path (they read as
-offline when the box is off) rather than run a hosted model with no sandbox. The worker carries its own
+laptop being awake; setting the variable again is the way back. **Production only:** Preview and
+Development keep `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`, so previews stay on the worker path and read
+as offline when the box is off. `AI_READONLY_DATABASE_URL` is the backend's sandbox connection, and
+it is ONE static value per Vercel environment — but every preview runs against its own Supabase
+branch, so no single Preview value can name the right database for every PR. A hosted model on a
+preview would run its SQL against whatever that one URL points at. The worker carries its own
 (`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)) — one per database, since
 it serves production and every live Supabase preview branch from one process and each job names the
 database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insights works on a PR's

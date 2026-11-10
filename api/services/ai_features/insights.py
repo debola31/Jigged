@@ -49,6 +49,12 @@ from services.insights_presentation import (
     numbers_in,
     unsupported_figures,
 )
+from services.chat_actions import (
+    ACTIONS_PROMPT,
+    APPROVAL_SUMMARY_FIELD,
+    DECLINED,
+    ActionOutcome,
+)
 from services.llm.base import LLMResult, Message, ToolCall
 from services.llm.errors import LLMError, LLMErrorEcho, LLMToolLoopExhausted
 from services.llm.ollama_provider import OLLAMA_NUM_CTX
@@ -60,6 +66,10 @@ logger = logging.getLogger(__name__)
 # As before the move. The cap exists because a model that keeps asking for one
 # more query is not converging, and each iteration is a full round trip.
 MAX_TOOL_ITERATIONS = 5
+# With actions on, a change usually needs a lookup or two first (the customer's id,
+# the part's) and then the change itself; tool search runs inside a call and costs
+# none. A resumed job counts afresh. Every call still shares the function's 300 s.
+MAX_ACTION_ITERATIONS = 8
 MAX_TOKENS = 4000
 
 # ---- the context budget --------------------------------------------------------
@@ -384,6 +394,127 @@ def _empty_answer_turns(result: LLMResult) -> list[Message]:
     return _said(result) + [Message(role="user", content=EMPTY_ANSWER_CORRECTION)]
 
 
+# ---- actions: approval, pause and resume ------------------------------------------
+
+
+def _record_action(
+    name: str, outcome: ActionOutcome, tool_trace: list[dict[str, Any]], known_figures: set[float]
+) -> int:
+    """Trace one Jigged tool call. Its figures ground the answer, as a query's do; 1 if it answered."""
+    tool_trace.append({"tool": name, "outcome": "error" if outcome.is_error else "ok"})
+    if outcome.is_error:
+        return 0
+    if outcome.data is not None:
+        numbers_in(outcome.data, known_figures)
+    return 1
+
+
+async def _decide(
+    actions: Any,
+    pending: list[dict[str, Any]],
+    decision: str,
+    tool_trace: list[dict[str, Any]],
+    known_figures: set[float],
+) -> tuple[dict[str, str], int]:
+    """The person's decision as the tool results the stopped turn is waiting for.
+
+    Approved calls run now, exactly as proposed -- the arguments on the card are the ones
+    sent. A decline runs nothing and tells the model so, in a sentence it must not argue
+    with.
+    """
+    results: dict[str, str] = {}
+    ran_ok = 0
+    for action in pending:
+        if decision == "decline":
+            results[action["id"]] = DECLINED
+            tool_trace.append({"tool": action["tool"], "outcome": "declined"})
+            continue
+        if actions is None:
+            raise RuntimeError("an approved chat action cannot run without the tool bridge")
+        arguments = dict(action.get("arguments") or {})
+        # The person saw these values on the card and approved them: they are known.
+        numbers_in(arguments, known_figures)
+        outcome = await actions.call(action["tool"], arguments)
+        results[action["id"]] = outcome.text
+        ran_ok += _record_action(action["tool"], outcome, tool_trace, known_figures)
+    return results, ran_ok
+
+
+def _pause_answer(pending: list[dict[str, Any]]) -> str:
+    """The turn the transcript shows while a change waits. It reads on its own, because
+    a later question replays it as plain text."""
+    if len(pending) == 1:
+        return f"This needs your approval before it runs: {pending[0]['summary']}"
+    listed = " ".join(f"({i}) {action['summary']}" for i, action in enumerate(pending, 1))
+    return f"These {len(pending)} changes need your approval before they run: {listed}"
+
+
+def _paused(
+    *,
+    question: str,
+    result: LLMResult,
+    stopped: list[Message],
+    done: dict[str, str],
+    waiting: list[ToolCall],
+    actions: Any,
+    known_figures: set[float],
+    counts: dict[str, int],
+    tool_trace: list[dict[str, Any]],
+    tool_names: list[str],
+    tokens_used: int,
+    refused: int,
+    grounding_corrected: bool,
+) -> dict[str, Any]:
+    """Settle the job waiting on the person, with everything a resume needs.
+
+    `pending_actions` is what the approval card shows. `resume_state` is the conversation
+    exactly as it stopped -- every message after the system turns, thinking and tool-search
+    blocks included, because those must go back unchanged -- plus the results of the calls
+    in the same turn that already ran. It lives on the job row, readable only by the
+    company under RLS like the rest of the result; the session token never does.
+    """
+    pending: list[dict[str, Any]] = []
+    trace = list(tool_trace)
+    for call in waiting:
+        spec = actions.spec(call.name)
+        summary = " ".join(str(call.arguments.get(APPROVAL_SUMMARY_FIELD) or "").split())
+        pending.append({
+            "id": call.id,
+            "tool": call.name,
+            "title": spec.title,
+            "summary": (summary or spec.title)[:500],
+            "arguments": {k: v for k, v in call.arguments.items() if k != APPROVAL_SUMMARY_FIELD},
+            "destructive": spec.destructive,
+        })
+        trace.append({"tool": call.name, "outcome": "awaiting_approval"})
+    return {
+        "answer": _pause_answer(pending),
+        "chart_config": None,
+        "tool_calls": tool_names,
+        "tool_trace": trace,
+        "provider": result.provider,
+        "model": result.model,
+        "tokens_used": tokens_used,
+        "not_permitted": refused,
+        "off_topic": False,
+        "grounding_corrected": grounding_corrected,
+        "follow_ups": [],
+        "summary": None,
+        "summary_covers_through_seq": None,
+        "summary_error": None,
+        "pending_actions": pending,
+        "resume_state": {
+            "question": question,
+            "messages": [m.model_dump(mode="json") for m in stopped],
+            "results": [{"tool_call_id": k, "content": v} for k, v in done.items()],
+            "known_figures": sorted(known_figures),
+            **counts,
+            "tool_trace": trace,
+            "tool_names": tool_names,
+        },
+    }
+
+
 async def run(ctx: JobContext) -> dict[str, Any]:
     """Answer one question. Returns the shape ai_jobs.result stores.
 
@@ -408,7 +539,18 @@ async def run(ctx: JobContext) -> dict[str, Any]:
 
         return await report.run(ctx)
 
-    question = (ctx.payload.get("question") or "").strip()
+    # ACTIONS (services/chat_actions.py): the MCP tools, deferred behind tool search, offered
+    # only when the route built a bridge for this person -- hosted chain, inline job, a session
+    # token in hand. The worker never has one, so the local path is untouched.
+    actions = ctx.actions
+    # A RESUMED job continues a conversation that stopped for the person's approval. Its
+    # payload question is the decision as the transcript shows it ("Approved: ..."); the
+    # question being worked on is the one the parent job was asked.
+    resume = ctx.resume
+    if resume is not None:
+        question = str(resume["state"].get("question") or "").strip()
+    else:
+        question = (ctx.payload.get("question") or "").strip()
     if not question:
         raise ValueError("insights job payload has no question")
 
@@ -439,12 +581,14 @@ async def run(ctx: JobContext) -> dict[str, Any]:
 
     # No `system=` parameter anywhere in this layer: the system prompt is a turn,
     # and split_system() puts it where each vendor wants it. History goes AFTER
-    # it and before the question -- the order the KV cache can reuse.
-    messages = (
-        [Message(role="system", content=system_prompt)]
-        + _history_turns(prior_summary, kept)
-        + [Message(role="user", content=question)]
-    )
+    # it and before the question -- the order the KV cache can reuse. The actions
+    # section is a second leading system turn, after everything the read-only path
+    # already caches, so it changes no byte before it.
+    system_turns = [Message(role="system", content=system_prompt)]
+    if actions is not None:
+        system_turns.append(Message(role="system", content=ACTIONS_PROMPT))
+    # The read-only path keeps passing the very CHAT_TOOLS object, as before.
+    tools = CHAT_TOOLS if actions is None else CHAT_TOOLS + actions.anthropic_tools()
 
     # Every figure in the answer has to come from a query result of THIS turn.
     # Earlier turns tell the model what the user means, never what the number is:
@@ -466,15 +610,47 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # "Jigged does not track that" answer.
     sql_ok = 0
     sql_failed = 0
+    # Jigged tools that ran and answered (actions, and the lookups they need). Their
+    # results ground an answer the way a successful query does.
+    tools_ok = 0
     corrected = False
     result = None
 
-    for _ in range(MAX_TOOL_ITERATIONS):
+    if resume is None:
+        messages = (
+            system_turns
+            + _history_turns(prior_summary, kept)
+            + [Message(role="user", content=question)]
+        )
+    else:
+        # The conversation exactly as it stopped -- thinking and tool-search blocks
+        # included, which is why it is stored, never rebuilt -- then the outcome of the
+        # decision as the tool results the model is waiting for.
+        state = resume["state"]
+        known_figures.update(float(x) for x in state.get("known_figures") or [])
+        sql_ok = int(state.get("sql_ok") or 0)
+        sql_failed = int(state.get("sql_failed") or 0)
+        tools_ok = int(state.get("tools_ok") or 0)
+        tool_trace = list(state.get("tool_trace") or [])
+        tool_names = list(state.get("tool_names") or [])
+        stopped = [Message.model_validate(m) for m in state.get("messages") or []]
+        decided, ran_ok = await _decide(actions, resume["pending"], resume["decision"], tool_trace, known_figures)
+        tools_ok += ran_ok
+        results = {r["tool_call_id"]: r["content"] for r in state.get("results") or []}
+        results.update(decided)
+        messages = system_turns + stopped + [
+            Message(role="tool", tool_call_id=call.id, content=results.get(call.id, DECLINED))
+            for call in stopped[-1].tool_calls
+        ]
+        evicted, kept = [], []
+
+    max_iterations = MAX_ACTION_ITERATIONS if actions is not None else MAX_TOOL_ITERATIONS
+    for _ in range(max_iterations):
         result = await llm.complete(
             ctx.feature,
             messages,
             max_tokens=MAX_TOKENS,
-            tools=CHAT_TOOLS,
+            tools=tools,
             request_id=ctx.request_id,
             chain=ctx.chain,
             audit_writer=ctx.audit_writer,
@@ -545,16 +721,55 @@ async def run(ctx: JobContext) -> dict[str, Any]:
             logger.info("insights %s: the model asked for a report; composing", ctx.request_id)
             return await report.run(ctx, request=brief)
 
+        # JIGGED TOOLS FIRST, through the bridge (actions, and the lookups they need). A
+        # change the person has not always-allowed is held, and if anything is held the
+        # job stops here for their approval -- after running everything else in the turn,
+        # so the resumed turn only waits on the decision.
+        action_results: dict[str, str] = {}
+        waiting: list[ToolCall] = []
+        if actions is not None:
+            for call in result.tool_calls:
+                if not actions.knows(call.name):
+                    continue
+                if actions.needs_approval(call.name):
+                    waiting.append(call)
+                    continue
+                outcome = await actions.call(call.name, call.arguments)
+                action_results[call.id] = outcome.text
+                tools_ok += _record_action(call.name, outcome, tool_trace, known_figures)
+
         # Run the tools first, then wire the messages: the count of refused
         # objects is what the eval asserts to zero, and it is invisible once the
         # dict has been through json.dumps.
         tool_results = [
             (call, await _run_tool(ctx.company_id, call, today, ctx.readonly_dsn))
             for call in result.tool_calls
+            if call.id not in action_results and call not in waiting
         ]
         refused += sum(
             1 for _, r in tool_results if r.get("error_kind") == NOT_PERMITTED_KIND
         )
+
+        if waiting:
+            return _paused(
+                question=question,
+                result=result,
+                stopped=messages[len(system_turns):] + [Message.assistant(result)],
+                done={
+                    **action_results,
+                    **{call.id: dumps_tool_result(r) for call, r in tool_results},
+                },
+                waiting=waiting,
+                actions=actions,
+                known_figures=known_figures,
+                counts={"sql_ok": sql_ok, "sql_failed": sql_failed, "tools_ok": tools_ok},
+                tool_trace=tool_trace,
+                tool_names=tool_names + [call.name for call in result.tool_calls],
+                tokens_used=tokens_used,
+                refused=refused,
+                grounding_corrected=grounding_corrected,
+            )
+
         for call, r in tool_results:
             if call.name != "execute_sql":
                 continue
@@ -581,19 +796,21 @@ async def run(ctx: JobContext) -> dict[str, Any]:
         # Rebind rather than append: the gateway's retry works on a copy, and this
         # loop owning one mutable list would make the two aliasing bugs possible
         # again from the other direction.
+        # dumps_tool_result, never a bare json.dumps: a UUID in a result row
+        # killed this exact line twice, because the type mapping lived in a
+        # helper that shaped rows elsewhere and nothing shaped them here.
+        contents = {**action_results, **{call.id: dumps_tool_result(r) for call, r in tool_results}}
+        # In the order of the calls, every call answered: one tool_result per tool_use.
         messages = messages + [Message.assistant(result)] + [
-            # dumps_tool_result, never a bare json.dumps: a UUID in a result row
-            # killed this exact line twice, because the type mapping lived in a
-            # helper that shaped rows elsewhere and nothing shaped them here.
-            Message(role="tool", tool_call_id=call.id, content=dumps_tool_result(r))
-            for call, r in tool_results
+            Message(role="tool", tool_call_id=call.id, content=contents[call.id])
+            for call in result.tool_calls
         ]
         tool_names.extend(call.name for call in result.tool_calls)
     else:
         # The cap was reached with the model still asking for tools. Previously
         # this returned a canned apology as a SUCCESS.
         raise LLMToolLoopExhausted(
-            f"the insights loop reached {MAX_TOOL_ITERATIONS} iterations without an "
+            f"the insights loop reached {max_iterations} iterations without an "
             f"answer ({refused} refused-object result(s))",
             feature=ctx.feature,
             request_id=ctx.request_id,
@@ -615,7 +832,7 @@ async def run(ctx: JobContext) -> dict[str, Any]:
     # was a narrated tool call rather than a read-back error: it is one failure
     # -- the final turn was not an answer -- and splitting it would cost a
     # migration to say something the reason in the message already says.
-    non_answer = classify_non_answer(answer) if not sql_ok else None
+    non_answer = classify_non_answer(answer) if not (sql_ok or tools_ok) else None
     if non_answer is None and not answer.strip():
         # THE OTHER RULE APPLIED TO A GROUNDED ANSWER. `sql_ok` deliberately lets a
         # grounded answer through "however it reads", because every other rule here

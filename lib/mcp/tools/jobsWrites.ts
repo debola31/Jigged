@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { findJob, getJob } from '@/lib/mcp/tools/jobs';
 import { companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { isValidQuantityValue } from '@/lib/quantityInput';
@@ -918,7 +917,7 @@ export const addJobNoteTool = defineCompanyTool({
   },
 });
 
-export function registerJobWriteTools(server: McpServer): void {
+export function registerJobWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createJob);
   registerCompanyTool(server, updateJob);
   registerCompanyTool(server, cancelJobTool);

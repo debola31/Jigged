@@ -1,7 +1,7 @@
 """Pydantic models for AI Insights & Charts feature."""
 
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -41,6 +41,22 @@ class ReportRequest(BaseModel):
     # since 2026-09-08: the job joins the thread and the trigger materialises the
     # request and the headline, with the spec beside them.
     thread_id: UUID | None = Field(default=None, description="ai_chat_threads.id this report is asked in")
+
+
+class ChatDecision(BaseModel):
+    """The person's answer to a change Jigged chat proposed and is waiting on.
+
+    `job_id` is the job that stopped for approval (its result carries
+    `pending_actions`). The route loads everything else from that row -- what was
+    proposed, the conversation to resume -- never from this body, so a client can
+    decide but cannot rewrite what it is deciding on.
+    """
+
+    job_id: UUID = Field(..., description="The ai_jobs.id whose pending_actions are being decided")
+    decision: Literal["approve", "always", "decline"] = Field(
+        ..., description="approve runs it once; always also allows these actions from now on; decline runs nothing"
+    )
+    today: date = Field(..., description="The caller's LOCAL calendar date, bound as $2 in generated SQL")
 
 
 class ChatEnqueued(BaseModel):

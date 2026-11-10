@@ -17,6 +17,9 @@ import HistoryIcon from '@mui/icons-material/History';
 import QuestionAnswerOutlinedIcon from '@mui/icons-material/QuestionAnswerOutlined';
 import SendIcon from '@mui/icons-material/Send';
 import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
+import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
+import ActionApprovalCard from './ActionApprovalCard';
+import AllowedActionsDialog from './AllowedActionsDialog';
 import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
@@ -28,11 +31,16 @@ import {
   type ReportTurn,
   type ThreadMessage,
 } from '@/utils/aiChatAccess';
+import { listChatActionGrants, type ChatActionGrant } from '@/utils/chatActionGrantsAccess';
 import {
   askedQuestionOf,
   ChatEnqueueError,
+  decideChatAction,
+  getPendingActions,
   reportResultOf,
   submitChatQuery,
+  type ChatDecisionKind,
+  type PendingAction,
   type ReportSummary,
 } from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
@@ -356,6 +364,27 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const turns = useMemo(() => pairTurns(messages ?? []), [messages]);
   const hasConversation = turns.length > 0;
 
+  // A change the chat proposed waits on the NEWEST turn only: once anything follows it
+  // the conversation has moved on, and the route refuses a decision on it (409). Read
+  // from that turn's job, so the card survives a reload and is gone once decided.
+  const lastJobId = turns.length > 0 ? turns[turns.length - 1].jobId : null;
+  const { data: pendingActions } = useLoad(
+    () => (lastJobId ? getPendingActions(lastJobId) : Promise.resolve([] as PendingAction[])),
+    [lastJobId],
+    { onError: (err) => Sentry.captureException(err) },
+  );
+
+  // The person's "Always allow" list. Re-read when a job settles (an Always allow just
+  // created one) and when one is turned off.
+  const [allowedOpen, setAllowedOpen] = useState(false);
+  const [grantsVersion, setGrantsVersion] = useState(0);
+  const { data: grants } = useLoad(
+    () => listChatActionGrants(companyId),
+    [companyId, grantsVersion, settledJobId],
+    { onError: (err) => Sentry.captureException(err) },
+  );
+  const allowedCount = grants?.length ?? 0;
+
   // Fires once per settled job. `phase` is what a rollout is judged on: the ratio
   // of offline to done is exactly the question "is the shop's box reliable
   // enough", and no other signal answers it. A report settles into its own event,
@@ -529,6 +558,45 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // A thread the route no longer recognises (archived elsewhere, or gone) is
       // not worth keeping a handle to; the next question starts a fresh one.
       if (status === 404) rememberThread(null);
+      setError({ message, status });
+    } finally {
+      setAsking(false);
+    }
+  };
+
+  /**
+   * The person's answer to a proposed change. Same shape as a question: one request,
+   * a job id back, the answer on that job's row -- the decision continues the
+   * conversation as its next turn ("Approved: ..."). Only the decision is sent; what
+   * it applies to is loaded server-side from the job.
+   */
+  const handleDecide = async (decision: ChatDecisionKind) => {
+    const actions = pendingActions ?? [];
+    if (!lastJobId || actions.length === 0 || pending) return;
+
+    const verb = decision === 'decline' ? 'Declined' : 'Approved';
+    setAsking(true);
+    setError(null);
+    setLoadingTick(0);
+    setAskedQuestion(`${verb}: ${actions.map((a) => a.summary || a.title).join('; ')}`);
+
+    try {
+      const enqueued = await decideChatAction(companyId, lastJobId, decision);
+      // Shape only: which of our tools, how many, whether any was destructive. Never the
+      // summary, which carries the shop's own names and figures.
+      posthog.capture('chat action decided', {
+        decision,
+        action_count: actions.length,
+        destructive: actions.some((a) => a.destructive),
+        tool_names: Array.from(new Set(actions.map((a) => a.tool))).sort(),
+      });
+      job.watch(enqueued.job_id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to send your decision. Please try again.';
+      const status = err instanceof ChatEnqueueError ? err.status : undefined;
+      // The same expected refusals as a question (busy, capped, offline, gone), which
+      // are the shop's state rather than our incident.
+      if (status === undefined || !REFUSAL_REASONS[status]) Sentry.captureException(err);
       setError({ message, status });
     } finally {
       setAsking(false);
@@ -729,6 +797,23 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   );
 
   /**
+   * Where a person sees and turns off what they have always-allowed. Shown only once
+   * there is something to show: an empty list behind a button is a question the
+   * screen has not earned. The approval card names this button in its help line.
+   */
+  const allowedActionsButton =
+    allowedCount > 0 ? (
+      <Button
+        variant="outlined"
+        startIcon={<VerifiedUserOutlinedIcon />}
+        onClick={() => setAllowedOpen(true)}
+        sx={{ minHeight: 48 }}
+      >
+        Allowed actions
+      </Button>
+    ) : null;
+
+  /**
    * What the empty page says in the slot the caveat vacated: an invitation, not a
    * boundary and not a warning.
    *
@@ -878,6 +963,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
               <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
                 Chat history
               </Button>
+              {allowedActionsButton}
             </Stack>
           </Box>
         )}
@@ -930,6 +1016,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                     followUpsDisabled={pending}
                   />
                 ))}
+                {!pending && (
+                  <ActionApprovalCard actions={pendingActions ?? []} busy={asking} onDecide={handleDecide} />
+                )}
                 {status}
               </Stack>
             </Box>
@@ -949,16 +1038,23 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         ) : (
           <>
             {starters}
-            <Box sx={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1, flexWrap: 'wrap' }}>
               <Button variant="outlined" startIcon={<HistoryIcon />} onClick={() => openHistory('chats')} sx={{ minHeight: 48 }}>
                 Chat history
               </Button>
+              {allowedActionsButton}
             </Box>
             {scopeLine}
           </>
         )}
       </Box>
 
+      <AllowedActionsDialog
+        open={allowedOpen}
+        onClose={() => setAllowedOpen(false)}
+        grants={grants ?? ([] as ChatActionGrant[])}
+        onChanged={() => setGrantsVersion((n) => n + 1)}
+      />
       <HistoryDrawer
         open={historyOpen}
         onClose={() => setHistoryOpen(false)}

@@ -445,6 +445,41 @@ export type Database = {
           },
         ]
       }
+      chat_action_grants: {
+        Row: {
+          company_id: string
+          created_at: string
+          deleted_at: string | null
+          id: string
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          company_id: string
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          company_id?: string
+          created_at?: string
+          deleted_at?: string | null
+          id?: string
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "chat_action_grants_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       companies: {
         Row: {
           address_line1: string | null

@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import {
   EMPTY_ADDRESS_MESSAGE,
   addressHasContent,
@@ -363,7 +362,7 @@ export const saveVendorAddressTool = defineCompanyTool({
   },
 });
 
-export function registerVendorWriteTools(server: McpServer): void {
+export function registerVendorWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createVendorTool);
   registerCompanyTool(server, updateVendorTool);
   registerCompanyTool(server, saveVendorContactTool);

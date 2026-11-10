@@ -17,6 +17,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
+from types import SimpleNamespace
 from decimal import Decimal
 from typing import Any
 
@@ -85,9 +86,15 @@ _PROFILES: dict[str, _ModelProfile] = {
 _DEFAULT_PROFILE = _ModelProfile()
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
 
-# Blocks that only carry the model's reasoning. A turn holding nothing else is not
-# a valid assistant message, so it is never replayed natively.
-_REASONING_BLOCKS = frozenset({"thinking", "redacted_thinking"})
+# The blocks the canonical fields can rebuild exactly. A turn holding any OTHER type -- thinking,
+# or the server-side tool search's server_tool_use / tool_search_tool_result -- is replayed as
+# the blocks it came in, because the API expects those back unchanged.
+_CANONICAL_BLOCKS = frozenset({"text", "tool_use"})
+
+# A server-side tool loop (tool search) that reaches its iteration limit stops with
+# `pause_turn`; re-sending the turn resumes it. Bounded, because a turn that keeps pausing is not
+# converging and the chain's own timeout is per call.
+_MAX_PAUSE_RESUMES = 3
 
 
 class AnthropicProvider:
@@ -176,7 +183,9 @@ class AnthropicProvider:
             dict(b) for b in native.blocks
             if b.get("type") != "tool_use" or b.get("id") in kept_ids
         ]
-        if all(b.get("type") in _REASONING_BLOCKS for b in blocks):
+        # Nothing a person or a tool can read -- reasoning and search only -- is not a valid
+        # assistant message; rebuild from the canonical fields instead.
+        if not any(b.get("type") in _CANONICAL_BLOCKS for b in blocks):
             return None
         return blocks
 
@@ -247,28 +256,31 @@ class AnthropicProvider:
         return self._price_in, self._price_out, self._cache_write, self._cache_read
 
     @staticmethod
-    def _native(blocks: list[Any]) -> NativeTurn | None:
+    def _dump(block: Any) -> dict[str, Any]:
+        """One SDK content block as the dict the API takes back."""
+        dump = getattr(block, "model_dump", None)
+        return dump(mode="json", exclude_none=True) if callable(dump) else dict(vars(block))
+
+    @classmethod
+    def _native(cls, blocks: list[Any]) -> NativeTurn | None:
         """The response's blocks as replayable dicts, when replay is needed.
 
-        None when the turn carries no reasoning block: the canonical fields then
-        rebuild it exactly, and a model that never thinks (claude-sonnet-4-6) sends
-        the same requests it always has.
+        None when every block is text or tool_use: the canonical fields then rebuild
+        the turn exactly, and a model that never thinks (claude-sonnet-4-6) with no
+        server tools sends the same requests it always has.
 
         THE SERVER-SIDE FALLBACK ECHO RULE. A `fallback` block marks where a
         declining model handed over. Before the last one, only text is echoed back
         -- the declining model's thinking and tool_use must not be -- and the
         marker itself is an audit note, dropped.
         """
-        dumped: list[dict[str, Any]] = []
-        for b in blocks:
-            dump = getattr(b, "model_dump", None)
-            dumped.append(dump(mode="json", exclude_none=True) if callable(dump) else dict(vars(b)))
+        dumped = [cls._dump(b) for b in blocks]
 
         boundary = max((i for i, b in enumerate(dumped) if b.get("type") == "fallback"), default=-1)
         if boundary >= 0:
             dumped = [b for b in dumped[:boundary] if b.get("type") == "text"] + dumped[boundary + 1:]
 
-        if not any(b.get("type") in _REASONING_BLOCKS for b in dumped):
+        if all(b.get("type") in _CANONICAL_BLOCKS for b in dumped):
             return None
         return NativeTurn(provider=AnthropicProvider.name, blocks=dumped)
 
@@ -388,15 +400,51 @@ class AnthropicProvider:
         # "disabled" is a 400 -- so its depth is set by effort in its profile.
 
         started = time.perf_counter()
+        msg = await self._send(kwargs, started)
+
+        # A server-side tool loop that hit its iteration limit. Re-send with what it produced so
+        # far as the assistant turn and the API resumes; the turn is everything, in order.
+        resumes = 0
+        if getattr(msg, "stop_reason", None) == "pause_turn":
+            so_far = list(getattr(msg, "content", None) or [])
+            usage_parts = [getattr(msg, "usage", None)]
+            while getattr(msg, "stop_reason", None) == "pause_turn" and resumes < _MAX_PAUSE_RESUMES:
+                resumes += 1
+                kwargs["messages"] = self._wire_messages(rest) + [
+                    {"role": "assistant", "content": [self._dump(b) for b in so_far]}
+                ]
+                msg = await self._send(kwargs, started)
+                so_far += list(getattr(msg, "content", None) or [])
+                usage_parts.append(getattr(msg, "usage", None))
+            msg = SimpleNamespace(
+                content=so_far,
+                stop_reason=getattr(msg, "stop_reason", None),
+                model=getattr(msg, "model", None),
+                usage=SimpleNamespace(**{
+                    field: sum(int(getattr(u, field, 0) or 0) for u in usage_parts)
+                    for field in ("input_tokens", "output_tokens",
+                                  "cache_creation_input_tokens", "cache_read_input_tokens")
+                }),
+            )
+            if msg.stop_reason == "pause_turn":
+                raise LLMProtocolError(
+                    f"anthropic paused the turn {resumes + 1} times without finishing",
+                    provider=self.name, model=self.model,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                )
+
+        return self._parse(msg, int((time.perf_counter() - started) * 1000))
+
+    async def _send(self, kwargs: dict[str, Any], started: float) -> Any:
+        """One request, with the SDK's errors mapped onto this layer's."""
         try:
-            if profile.fallbacks:
+            if self._profile.fallbacks:
                 # "default" lets the API route a classifier decline by category, so
                 # there is no fallback model list here to keep current.
-                msg = await self._client.beta.messages.create(
+                return await self._client.beta.messages.create(
                     **kwargs, betas=[_FALLBACK_BETA], fallbacks="default"
                 )
-            else:
-                msg = await self._client.messages.create(**kwargs)
+            return await self._client.messages.create(**kwargs)
         except anthropic.APITimeoutError as exc:
             raise LLMTimeout(
                 f"anthropic did not answer within {self.timeout_s}s",
@@ -434,8 +482,6 @@ class AnthropicProvider:
                 provider=self.name, model=self.model,
                 latency_ms=int((time.perf_counter() - started) * 1000),
             ) from exc
-
-        return self._parse(msg, int((time.perf_counter() - started) * 1000))
 
 
 __all__ = ["AnthropicProvider"]

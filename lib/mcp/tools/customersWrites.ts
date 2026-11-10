@@ -1,4 +1,3 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import {
@@ -7,7 +6,7 @@ import {
   normalizeSnapshot,
 } from '@/components/customers/customerFieldEditing';
 import { resolveCountryName, resolveSubdivisionName, subdivisionsForCountry } from '@/lib/geo';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { findCustomer } from '@/lib/mcp/tools/customers';
 import { addressOutput, companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { getSupabase } from '@/lib/supabase';
@@ -700,7 +699,7 @@ export const saveCustomerAddressTool = defineCompanyTool({
   },
 });
 
-export function registerCustomerWriteTools(server: McpServer): void {
+export function registerCustomerWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createCustomerTool);
   registerCompanyTool(server, updateCustomerTool);
   registerCompanyTool(server, saveCustomerContactTool);

@@ -4,6 +4,7 @@ API routes for AI Insights & Charts feature.
 Endpoints:
 - POST /{company_id}/chat        - Submit natural language question
 - POST /{company_id}/report      - Submit a one-page summary request
+- POST /{company_id}/chat/decide - Approve, always allow or decline a change the chat proposed
 - POST /{company_id}/query       - Run one caller-written SELECT in the sandbox (no model)
 - GET  /{company_id}/schema      - The schema notes and definitions that SELECT is written against
 
@@ -26,6 +27,7 @@ from supabase import Client, create_client
 
 import routes.company_auth as company_auth
 from models.insights_models import (
+    ChatDecision,
     ChatEnqueued,
     ChatRequest,
     DataQueryRequest,
@@ -35,6 +37,7 @@ from models.insights_models import (
 )
 from services import ai_jobs
 from services.ai_features import JobContext, handler_for
+from services.chat_actions import ChatActions, app_base_url, grant
 from services.insights_service import load_semantics
 from tools import sql_executor
 from tools.schema_context import SCHEMA_CONTEXT
@@ -355,7 +358,7 @@ async def chat(company_id: str, request: ChatRequest, http_request: Request):
     # First, before the flag or the cap: the company id is the URL's, and everything
     # after this runs with the service-role key, so without it anyone could read any
     # shop's data and spend its hourly cap.
-    await company_auth.verify_office_access(http_request, company_id)
+    user_id, _ = await company_auth.verify_office_access(http_request, company_id)
     # Jigged's own model is never invoked for an AI assistant (the customer's assistant is the AI).
     company_auth.refuse_assistant(http_request)
     ai_enabled, chat_limit = _get_company_ai_settings(company_id)
@@ -387,6 +390,9 @@ async def chat(company_id: str, request: ChatRequest, http_request: Request):
             company_id=company_id,
             feature="insights",
             payload=payload,
+            # Who asked. A change the model proposes may be approved by that person
+            # and nobody else (decide_chat_action).
+            requested_by=user_id,
             thread_id=thread_id,
             kind="chat",
         )
@@ -412,8 +418,165 @@ async def chat(company_id: str, request: ChatRequest, http_request: Request):
         # The desktop claims it. Nothing else happens in this request.
         return ChatEnqueued(job_id=job["id"], status=job["status"], executor="worker")
 
-    await _run_inline(db, job, question=request.question, company_id=company_id)
+    # A fresh question that cannot load the tools still gets an answer -- read-only, as
+    # the chat was before actions -- and the failure is reported, not hidden.
+    actions = None
+    if _chat_actions_enabled():
+        try:
+            actions = await ChatActions.open(
+                token=company_auth._bearer(http_request),
+                company_id=company_id,
+                user_id=user_id,
+                db=db,
+            )
+        except Exception as exc:  # noqa: BLE001 - degrade to read-only, visibly
+            logger.warning("chat actions unavailable for job %s: %s", job["id"], exc)
+            sentry_sdk.capture_exception(exc)
+
+    await _run_inline(db, job, question=request.question, company_id=company_id, actions=actions)
     return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
+
+
+def _chat_actions_enabled() -> bool:
+    """Actions need this deployment's own origin (APP_BASE_URL, set on Production) and are
+    on unless CHAT_ACTIONS=off -- the switch that turns them off without a deploy."""
+    return bool(app_base_url()) and os.getenv("CHAT_ACTIONS", "on").strip().lower() != "off"
+
+
+_DECISION_VERBS = {
+    "approve": "Approved",
+    "always": "Approved, and always allowed",
+    "decline": "Declined",
+}
+
+
+@router.post("/{company_id}/chat/decide", response_model=ChatEnqueued, status_code=202)
+async def decide_chat_action(company_id: str, request: ChatDecision, http_request: Request):
+    """The person's answer to a change the chat proposed: approve, always allow, or decline.
+
+    It continues the SAME conversation from where it stopped (the parent job's
+    `resume_state`), as a new job in the thread, so the transcript records the decision
+    ("Approved: ...") followed by what came of it. Same door as a question -- office
+    access, the flag, the hourly cap -- and the same one-in-flight rule per thread.
+
+    WHO MAY DECIDE: the person who asked, on the newest turn of their conversation. A change
+    the conversation has moved past is no longer waiting; approving it would resume a
+    conversation that has since gone elsewhere.
+    """
+    user_id, _ = await company_auth.verify_office_access(http_request, company_id)
+    company_auth.refuse_assistant(http_request)
+    ai_enabled, chat_limit = _get_company_ai_settings(company_id)
+    if not ai_enabled:
+        raise HTTPException(status_code=403, detail="AI Insights is disabled for this company.")
+    _check_chat_rate_limit(company_id, chat_limit)
+
+    db = _get_supabase_service_role()
+    ai_jobs.sweep(db)
+
+    parent = _waiting_job(db, company_id, str(request.job_id), user_id)
+    pending: list[dict[str, Any]] = parent["result"]["pending_actions"]
+
+    if not _chat_actions_enabled():
+        raise HTTPException(status_code=503, detail=_ACTIONS_OFF)
+    try:
+        actions = await ChatActions.open(
+            token=company_auth._bearer(http_request), company_id=company_id, user_id=user_id, db=db,
+        )
+    except Exception as exc:  # noqa: BLE001 - nothing has run; say so
+        logger.warning("chat actions unavailable for decision on %s: %s", parent["id"], exc)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(status_code=503, detail=_ACTIONS_OFF) from exc
+
+    if request.decision == "always":
+        grant(db, company_id, user_id, [action["tool"] for action in pending])
+
+    summaries = "; ".join(str(action.get("summary") or action["tool"]) for action in pending)
+    decided = f"{_DECISION_VERBS[request.decision]}: {summaries}"[:500]
+    try:
+        rows = ai_jobs.enqueue(
+            db,
+            company_id=company_id,
+            feature="insights",
+            payload={
+                "question": decided,
+                "today": _client_today(request.today).isoformat(),
+                "resume_of": parent["id"],
+                "decision": request.decision,
+            },
+            requested_by=user_id,
+            thread_id=parent["thread_id"],
+            kind="chat",
+        )
+    except (ai_jobs.AiUnavailable, LLMNotConfigured) as exc:
+        raise _map_llm_error(exc) from exc
+    except Exception as exc:
+        if _is_one_in_flight_violation(exc):
+            raise HTTPException(status_code=409, detail=_ALREADY_DECIDED) from exc
+        logger.error("chat decision enqueue failed: %s", exc, exc_info=True)
+        sentry_sdk.capture_exception(exc)
+        raise HTTPException(status_code=500, detail="Internal server error") from exc
+
+    job = rows[0]
+    if job["executor"] != "backend":
+        # The chain moved to the desktop between the question and the click. A resumed
+        # conversation carries this model's own blocks; another model cannot take it up.
+        ai_jobs.mark_failed(db, job["id"], error=_DECIDED_ON_A_WORKER_CHAIN, error_kind="internal")
+        raise HTTPException(status_code=503, detail=_ACTIONS_OFF)
+
+    await _run_inline(
+        db, job, question=decided, company_id=company_id, actions=actions,
+        resume={
+            "state": parent["result"].get("resume_state") or {},
+            "pending": pending,
+            "decision": request.decision,
+        },
+    )
+    return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
+
+
+_ACTIONS_OFF = "Jigged chat can't make changes right now, so nothing was changed. Try again shortly."
+_ALREADY_DECIDED = "That change is no longer waiting for a decision."
+# A constant, not a literal at the call: the error-kind guard reads every string literal
+# passed to mark_failed as a kind (tests/unit/test_error_kinds_match_the_check.py).
+_DECIDED_ON_A_WORKER_CHAIN = "decided after insights moved to the desktop worker; nothing ran"
+
+
+def _waiting_job(db, company_id: str, job_id: str, user_id: str) -> dict[str, Any]:
+    """The job whose proposed change is being decided, or the HTTP error that says why not.
+
+    404 when it is not this company's or not this person's (indistinguishable on purpose);
+    409 when it holds no waiting change, or the conversation has moved on since.
+    """
+    found = (
+        db.table("ai_jobs")
+        .select("id, company_id, requested_by, thread_id, kind, status, result, created_at")
+        .eq("id", job_id)
+        .limit(1)
+        .execute()
+    ).data or []
+    parent = found[0] if found else None
+    if not parent or parent["company_id"] != company_id or parent.get("requested_by") != user_id:
+        raise HTTPException(status_code=404, detail="That conversation was not found.")
+    result = parent.get("result") or {}
+    if (
+        parent.get("status") != "succeeded"
+        or parent.get("kind") != "chat"
+        or not parent.get("thread_id")
+        or not result.get("pending_actions")
+        or not result.get("resume_state")
+    ):
+        raise HTTPException(status_code=409, detail=_ALREADY_DECIDED)
+    later = (
+        db.table("ai_jobs")
+        .select("id")
+        .eq("thread_id", parent["thread_id"])
+        .gt("created_at", parent["created_at"])
+        .limit(1)
+        .execute()
+    ).data or []
+    if later:
+        raise HTTPException(status_code=409, detail=_ALREADY_DECIDED)
+    return parent
 
 
 @router.post("/{company_id}/report", response_model=ChatEnqueued, status_code=202)
@@ -484,7 +647,15 @@ async def report(company_id: str, request: ReportRequest, http_request: Request)
     return ChatEnqueued(job_id=job["id"], status="settled", executor="backend")
 
 
-async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
+async def _run_inline(
+    db,
+    job: dict,
+    *,
+    question: str,
+    company_id: str,
+    actions: ChatActions | None = None,
+    resume: dict[str, Any] | None = None,
+) -> None:
     """Work a backend-executed job inside the enqueueing request.
 
     EXACTLY ONE JOB PER REQUEST, ENFORCED BY A CHECK ON THE TABLE. N inline calls
@@ -505,6 +676,8 @@ async def _run_inline(db, job: dict, *, question: str, company_id: str) -> None:
                 company_id=company_id,
                 request_id=job["request_id"],
                 payload=job["payload"],
+                actions=actions,
+                resume=resume,
             )
         )
     except Exception as exc:  # noqa: BLE001 - every failure becomes a terminal row

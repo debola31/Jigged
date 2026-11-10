@@ -1,10 +1,9 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { ENTITY_ENDPOINT } from '@/lib/dataImportIngest';
 import { ENTITY_FIELDS, ENTITY_LABELS } from '@/lib/dataImportSchema';
 import { callBackend } from '@/lib/mcp/backend';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolResult } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolResult, type ToolTarget } from '@/lib/mcp/defineTool';
 import { companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { ALL_UNITS, resolveUnitAlias } from '@/lib/unitPresets';
 
@@ -442,7 +441,7 @@ export const importRecords = defineCompanyTool({
   run: (args, env) => runImport(args, env, false),
 });
 
-export function registerImportTools(server: McpServer): void {
+export function registerImportTools(server: ToolTarget): void {
   registerCompanyTool(server, previewImport);
   registerCompanyTool(server, importRecords);
 }

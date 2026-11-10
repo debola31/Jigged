@@ -1,8 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import * as Sentry from '@sentry/nextjs';
 import { z } from 'zod';
 
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import {
   SOURCE_HELP,
   SOURCES,
@@ -1180,7 +1179,7 @@ export const addPartNoteTool = defineCompanyTool({
   },
 });
 
-export function registerPartWriteTools(server: McpServer): void {
+export function registerPartWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createPart);
   registerCompanyTool(server, updatePart);
   registerCompanyTool(server, setPartPricingTiers);

@@ -1,8 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { countNote } from '@/lib/inventoryCountPlan';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import {
   ADMIN_ONLY,
   LOTS_HELP,
@@ -819,7 +818,7 @@ export const createStorageLocation = defineCompanyTool({
   },
 });
 
-export function registerInventoryWriteTools(server: McpServer): void {
+export function registerInventoryWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, addStock);
   registerCompanyTool(server, removeStock);
   registerCompanyTool(server, adjustStock);

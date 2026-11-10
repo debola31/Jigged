@@ -1,8 +1,7 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
 import { readQuoteValidityDays } from '@/lib/companyDefaults';
-import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolResult } from '@/lib/mcp/defineTool';
+import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolResult, type ToolTarget } from '@/lib/mcp/defineTool';
 import { findQuote, getQuote, quoteDetail } from '@/lib/mcp/tools/quotes';
 import { companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import { getSupabase } from '@/lib/supabase';
@@ -916,7 +915,7 @@ export const convertQuoteToJobsTool = defineCompanyTool({
     }),
 });
 
-export function registerQuoteWriteTools(server: McpServer): void {
+export function registerQuoteWriteTools(server: ToolTarget): void {
   registerCompanyTool(server, createQuoteTool);
   registerCompanyTool(server, updateQuoteTool);
   registerCompanyTool(server, addQuoteLine);

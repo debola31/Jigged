@@ -1,7 +1,6 @@
-import type { McpServer } from '@modelcontextprotocol/server';
 import { z } from 'zod';
 
-import { defineAccountTool, registerAccountTool } from '@/lib/mcp/defineTool';
+import { defineAccountTool, registerAccountTool, type ToolTarget } from '@/lib/mcp/defineTool';
 import { OFFICE_ROLES, isOfficeRole } from '@/lib/mcp/roles';
 import { registerArchiveTools } from '@/lib/mcp/tools/archive';
 import { registerCustomerTools } from '@/lib/mcp/tools/customers';
@@ -97,7 +96,7 @@ export const listMyCompanies = defineAccountTool({
   },
 });
 
-export function registerJiggedTools(server: McpServer): void {
+export function registerJiggedTools(server: ToolTarget): void {
   registerAccountTool(server, listMyCompanies);
   registerOverviewTools(server);
   registerJobTools(server);

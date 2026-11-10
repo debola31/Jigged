@@ -9,6 +9,8 @@ describe('clientKindOf', () => {
     ['Anthropic Claude Code', 'claude'],
     ['ChatGPT', 'chatgpt'],
     ['OpenAI Connector', 'chatgpt'],
+    ['Jigged chat', 'jigged_chat'],
+    ['Not Jigged chat', 'other'],
     ['Cursor', 'other'],
     ['', 'other'],
     [null, 'other'],

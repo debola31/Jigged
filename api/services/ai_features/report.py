@@ -233,7 +233,7 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
         if not result.tool_calls:
             if sql_failed and not sql_ok and not corrected:
                 corrected = True
-                messages = messages + insights._correction_turns(result.text)
+                messages = messages + insights._correction_turns(result)
                 continue
             break
 
@@ -271,7 +271,7 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
             tool_trace.append(trace)
 
         messages = messages + [
-            Message(role="assistant", content=result.text, tool_calls=calls)
+            Message.assistant(result, tool_calls=calls)
         ] + [
             Message(role="tool", tool_call_id=call.id, content=dumps_tool_result(r))
             for call, r in tool_results
@@ -302,7 +302,7 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
     # so the grammar applies cleanly; the same system turn, so the prefix holds.
     compose = messages
     if result.text.strip() and not final_turn_recorded:
-        compose = compose + [Message(role="assistant", content=result.text)]
+        compose = compose + [Message.assistant(result)]
     compose = compose + [Message(role="user", content=COMPOSE_REQUEST)]
 
     spec: ReportSpec | None = None
@@ -328,7 +328,7 @@ async def run(ctx: JobContext, *, request: str | None = None) -> dict[str, Any]:
         figures_repaired = True
         problems = "; ".join(f"{where} = {x:g}" for where, x in bad[:12])
         compose = compose + [
-            Message(role="assistant", content=composed.text),
+            Message.assistant(composed),
             Message(role="user", content=(
                 f"These figures appear in no query result: {problems}. Replace each with a value "
                 f"that does appear in the results above, or remove it, and reply with the full "

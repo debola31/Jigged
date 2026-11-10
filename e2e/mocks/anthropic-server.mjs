@@ -128,7 +128,9 @@ function buildDrawingFields(body) {
 }
 
 const server = http.createServer((req, res) => {
-  if (req.method === 'POST' && req.url.endsWith('/v1/messages')) {
+  // The query string is dropped first: the SDK's beta namespace posts to
+  // /v1/messages?beta=true (insights' model sends server-side fallback through it).
+  if (req.method === 'POST' && req.url.split('?')[0].endsWith('/v1/messages')) {
     const chunks = [];
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {

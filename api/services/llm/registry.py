@@ -9,9 +9,9 @@ assignments; the HTTP client is per-call anyway.
 
 TWO RULES THAT ARE POLICY, NOT PLUMBING:
 
-  * A PRODUCTION CHAIN IS ollama-ONLY OR anthropic-ONLY. Never mixed. A migrated
-    surface fails VISIBLE when the desktop is down -- the user is told insights are
-    is offline -- rather than silently falling back to a hosted model at 40x the
+  * A PRODUCTION CHAIN IS ollama-ONLY OR anthropic-ONLY. Never mixed. A surface
+    on the desktop fails VISIBLE when it is down -- the user is told insights are
+    offline -- rather than silently falling back to a hosted model at 40x the
     cost. "It still worked" is the failure mode, not the happy path.
   * DEEPINFRA NEVER ENTERS A PRODUCTION CHAIN. It exists for the eval harness and
     as a per-feature emergency toggle that ships off, and its key never goes to
@@ -30,13 +30,17 @@ from services.llm.pricing import DEEPINFRA_PRICES
 
 logger = logging.getLogger(__name__)
 
-# Dark by default: every chain is anthropic, so merging this layer changes no
-# production behaviour at all. Each surface flips to a local model by setting its
-# LLM_CHAIN_* variable, one surface at a time, after its golden check passes --
-# and reverts with one env change. Insights flipped to ollama:qwen3:32b by env in
-# September 2026; the anthropic default below IS the revert, so leave it.
+# Every production chain is anthropic. A surface can still be pointed at a local
+# model by setting its LLM_CHAIN_* variable -- that routes its jobs to the desktop
+# worker -- and pointed back by unsetting it.
+#
+# Insights ran on ollama:qwen3:32b on the owner's Mac from September to November
+# 2026 (LLM_CHAIN_INSIGHTS on Vercel). It moved back to a hosted model on
+# 2026-11-09 so the chat no longer depends on a laptop being awake, and named the
+# model here rather than in env so the code says what production runs. The worker
+# and the ollama adapter stay: one env var puts insights back on the box.
 _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
-    "insights": ("anthropic",),
+    "insights": ("anthropic:claude-opus-5-5",),
     "insights_dev": ("ollama:qwen3:8b",),
     "drawings": ("anthropic",),
     "drawings_dev": ("ollama:qwen3-vl:4b",),
@@ -47,7 +51,12 @@ _DEFAULT_CHAINS: dict[str, tuple[str, ...]] = {
 # first after the prompt changed, which re-pays the ~13K-token prefill -- ran past
 # 120 s; the warm median was 25 s. The eval's tool-loop arm resolves through here,
 # so a shorter value would score a timeout the worker would not have.
-_DEFAULT_TIMEOUTS = {"anthropic": 30.0, "deepinfra": 30.0, "ollama": 480.0}
+#
+# Anthropic's bounds ONE call inside an inline job, whose whole run shares the
+# function's maxDuration (vercel.json, 300 s). 120 s, not the 30 s it was: Opus 5.5
+# always thinks, and a report's schema-constrained compose call writes up to 3,000
+# tokens after it. A hung call still ends well inside the wall.
+_DEFAULT_TIMEOUTS = {"anthropic": 120.0, "deepinfra": 30.0, "ollama": 480.0}
 
 
 def _env(name: str, default: str | None = None) -> str | None:

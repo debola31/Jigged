@@ -73,6 +73,27 @@ class ToolCall(BaseModel):
     arguments: dict[str, Any] = Field(default_factory=dict)
 
 
+class NativeTurn(BaseModel):
+    """An assistant turn exactly as one provider returned it, for replay to it.
+
+    WHY THE CANONICAL FORMAT IS NOT ENOUGH. claude-opus-5-5 always thinks, and its
+    thinking blocks carry signatures that must come back unchanged on the next
+    request of a tool loop -- the model continues from its own reasoning, and the
+    API checks the blocks against the conversation that produced them. Text plus
+    tool_calls cannot reconstruct a signature, so the adapter that produced the
+    blocks keeps them here and is the only one that reads them back.
+
+    `provider` gates the replay: an adapter ignores a NativeTurn that is not its
+    own and falls back to the canonical fields, so a mixed transcript can never
+    send one vendor's blocks to another.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    provider: str
+    blocks: list[dict[str, Any]]
+
+
 class Message(BaseModel):
     """One conversation turn, in an OpenAI-shaped canonical format.
 
@@ -80,12 +101,34 @@ class Message(BaseModel):
     the multimodal path is not a retrofit when the drawing surface starts sending
     images to a VLM -- which is exactly the migration this shape exists to avoid
     having to do under pressure.
+
+    `native` is set only on an assistant turn rebuilt from an LLMResult, by
+    Message.assistant(); see NativeTurn for why.
     """
 
     role: Role
     content: str | list[ContentPart] = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     tool_call_id: str | None = None
+    native: NativeTurn | None = None
+
+    @classmethod
+    def assistant(
+        cls, result: "LLMResult", *, tool_calls: list[ToolCall] | None = None
+    ) -> "Message":
+        """The assistant turn for `result`, ready to append to the conversation.
+
+        `tool_calls` narrows the calls replayed when a loop handles one itself
+        instead of returning a tool_result for it (report.py's compose_report);
+        the adapter drops the matching native blocks too, because a tool_use
+        with no tool_result is a 400.
+        """
+        return cls(
+            role="assistant",
+            content=result.text,
+            tool_calls=result.tool_calls if tool_calls is None else tool_calls,
+            native=result.native,
+        )
 
     def parts(self) -> list[ContentPart]:
         if isinstance(self.content, str):
@@ -119,6 +162,9 @@ class LLMResult(BaseModel):
     tokens_out: int = 0
     latency_ms: int = 0
     est_cost_usd: Decimal = Decimal("0")
+    # The provider's own content blocks, when replaying them is required for the
+    # next turn to be valid. None for every provider that rebuilds from text.
+    native: NativeTurn | None = None
 
 
 @runtime_checkable
@@ -186,6 +232,7 @@ __all__ = [
     "LLMProvider",
     "LLMResult",
     "Message",
+    "NativeTurn",
     "Role",
     "TextPart",
     "ToolCall",

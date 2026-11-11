@@ -4,6 +4,7 @@
  * message, and nothing here has an insert for one.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isBillingWriteBlocked } from '@/lib/supabaseErrors';
 
 function buildQueryStub(initial?: { data?: unknown; error?: unknown }) {
   const builder: Record<string, unknown> = {};
@@ -74,9 +75,13 @@ describe('createThread', () => {
     expect(thread.id).toBe('t-1');
   });
 
-  it('surfaces a refused insert as an error, never a silent null', async () => {
-    queueBuilders([buildQueryStub({ error: { message: 'permission denied' } })]);
-    await expect(createThread('co-1', 'q')).rejects.toThrow(/permission denied/);
+  it('keeps a billing refusal classifiable without exposing database policy details', async () => {
+    const raw = { code: '42501', message: 'new row violates row-level security policy "billing_gate_insert" for table "ai_chat_threads"' };
+    queueBuilders([buildQueryStub({ error: raw })]);
+    const error = await createThread('co-1', 'q').catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(Error);
+    expect(isBillingWriteBlocked(error)).toBe(true);
+    expect((error as Error).message).not.toMatch(/billing_gate|ai_chat_threads|row-level security/);
   });
 });
 

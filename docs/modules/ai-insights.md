@@ -1000,6 +1000,13 @@ one heading — *Ask about your shop* — one composer with no picker, and three
 answers in prose, one that charts, one that comes back as a page. Whether an answer is prose, a chart
 or a one-page report is the model's call from the words (`compose_report`, below).
 
+**Subscription access is explained before typing.** The composer stays usable; a blocked
+attempt focuses an inline subscription notice instead of writing a thread or enqueueing AI.
+Admins get the shared billing action; other office users are directed to their shop admin.
+History remains readable, and the question survives a trip to billing. This follows the
+[billing interaction rule](../interaction-standards.md#4-unavailable-actions-keep-visible-and-explain-not-hidedisable) and uses the
+existing entitlement (including demo, past-due and grace access), not a new subscription rule.
+
 **ONE COLUMN IN EVERY STATE.** There is no longer an empty-state/conversation ternary: the order is
 heading, transcript, composer, footer, and each slot empties rather than moving, so the composer is a
 single DOM node at a single index for the life of the component. The swap it replaced was the

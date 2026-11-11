@@ -25,11 +25,15 @@ import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
 import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import ActionApprovalCard from './ActionApprovalCard';
 import AllowedActionsDialog from './AllowedActionsDialog';
+import ChatSubscriptionNotice from './ChatSubscriptionNotice';
 import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
 import { useAiJob } from '@/hooks/useAiJob';
 import { useLoad } from '@/hooks/useLoad';
+import { useSubscription } from '@/components/providers/SubscriptionProvider';
+import { writeBlockedState } from '@/lib/billingCopy';
+import { isBillingWriteBlocked } from '@/lib/supabaseErrors';
 import {
   createThread,
   listThreadMessages,
@@ -194,6 +198,7 @@ function loadingMessageFor(tick: number): string {
 }
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
+const DRAFT_STORAGE_PREFIX = 'jigged.aiDraft.';
 
 /** Display only an internal quote form for this company. */
 function quoteDraftPath(url: string | null, companyId: string): string | null {
@@ -301,6 +306,16 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
  * settles the thread is simply re-read.
  */
 export default function InsightsChat({ companyId }: InsightsChatProps) {
+  const subscription = useSubscription();
+  const subscriptionNoticeRef = useRef<HTMLDivElement | null>(null);
+  // A denial from Postgres wins over a stale client cache until refresh replaces
+  // that snapshot. A refreshed, entitled shop unlocks without clearing its draft.
+  const [billingDenial, setBillingDenial] = useState<{
+    companyId: string; billing: typeof subscription.billing;
+  } | null>(null);
+  const contextSaysBlocked = !subscription.isLoading && !subscription.canWrite;
+  const serverSaysBlocked = billingDenial?.companyId === companyId && billingDenial.billing === subscription.billing;
+  const subscriptionRequired = contextSaysBlocked || serverSaysBlocked;
   const [stagedUploads, setStagedUploads] = useState<{
     companyId: string; prepared: PreparedChatUpload; uploaded?: ChatUploadRef; threadId?: string;
   }[]>([]);
@@ -344,6 +359,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
    */
   const inFlightQuestion = askedQuestion || askedQuestionOf(job.job) || '';
   const storageKey = `${THREAD_STORAGE_PREFIX}${companyId}`;
+  const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${companyId}`;
 
   // Re-attach to the conversation after a reload. Deferred into a microtask for
   // the same two reasons useAiJob gives: a synchronous setState here is a
@@ -355,6 +371,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       try {
         const saved = window.sessionStorage.getItem(storageKey);
         if (saved) setThreadId(saved);
+        const draft = window.sessionStorage.getItem(draftStorageKey);
+        if (draft) setQuestion((current) => current || draft);
       } catch {
         /* private mode, or storage disabled — a lost handle starts a new thread */
       }
@@ -362,7 +380,19 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, draftStorageKey]);
+
+  // Keep a typed question through Checkout/Portal navigation. Only a successful
+  // enqueue consumes the saved draft; a refused attempt must not erase it.
+  const rememberQuestion = (value: string) => {
+    setQuestion(value);
+    try {
+      if (value) window.sessionStorage.setItem(draftStorageKey, value);
+      else window.sessionStorage.removeItem(draftStorageKey);
+    } catch {
+      /* storage disabled — the draft still lives in this tab's React state */
+    }
+  };
 
   const rememberThread = (id: string | null) => {
     setThreadId(id);
@@ -515,8 +545,16 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     setHistoryOpen(false);
   };
 
+  const canUseChat = () => {
+    if (subscription.isLoading) return false;
+    if (!subscriptionRequired) return true;
+    subscriptionNoticeRef.current?.focus();
+    return false;
+  };
+
   const handleAttachFiles = async (files: File[]) => {
     if (!files.length || pending || uploadStatus) return;
+    if (!canUseChat()) return;
     setError(null);
     setUploadStatus('Opening the files…');
     try {
@@ -531,6 +569,19 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const handleSubmit = async (input?: string, source: QuestionSource = 'typed') => {
     const q = (input || question).trim();
     if (!q || pending || uploadStatus) return;
+    if (!canUseChat()) {
+      if (subscriptionRequired) {
+        posthog.capture('ai job refused', {
+          feature: 'insights',
+          reason: 'subscription_required',
+          turn_index: turns.length,
+          from_example: source === 'example',
+          from_suggestion: source === 'suggestion',
+          question_length_bucket: questionLengthBucket(q),
+        });
+      }
+      return;
+    }
 
     setAsking(true);
     setError(null);
@@ -561,6 +612,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         ? await submitChatQuery(companyId, q, tid, uploads)
         : await submitChatQuery(companyId, q, tid);
       setStagedUploads([]);
+      rememberQuestion('');
       // Shape, never content: `executor` is the whole point of the rollout -- it
       // says whether the local box or a hosted model served this shop -- and
       // `turn_index` is how many answered turns this thread already had, which is
@@ -586,19 +638,18 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       const message =
         err instanceof Error ? err.message : 'Failed to send your question. Please try again.';
       const status = err instanceof ChatEnqueueError ? err.status : undefined;
+      const billingBlocked = isBillingWriteBlocked(err);
       // A question REFUSED AT THE DOOR never becomes a job row, so `ai job
       // settled` cannot see it -- and until this event existed the refusal was
       // invisible in BOTH tools: this catch captured nothing, and Sentry is
       // skipped for every one of these statuses. That is how "does the shop ever
       // ask and find the box off" stayed unanswerable through the whole pilot.
       //
-      // ONE LIST, TWO OUTCOMES, and it is the SAME list as before: a mapped
-      // status is an expected refusal and becomes a rate in PostHog; anything
-      // unmapped is still ours and still pages. Sentry's behaviour does not
-      // change here -- REFUSAL_REASONS holds exactly the statuses the old
-      // `[403, 404, 409, 429, 503]` array skipped, so the negation it replaced
-      // is now spelled as the map's own absence.
-      const refusal = status === undefined ? undefined : REFUSAL_REASONS[status];
+      // Billing is an expected refusal too, even when it arrives from a direct
+      // Supabase insert rather than an HTTP response. Anything else outside the
+      // known status map still belongs in Sentry.
+      const refusal = billingBlocked ? 'subscription_required'
+        : status === undefined ? undefined : REFUSAL_REASONS[status];
       if (refusal) {
         posthog.capture('ai job refused', {
           feature: 'insights',
@@ -614,8 +665,16 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // A thread the route no longer recognises (archived elsewhere, or gone) is
       // not worth keeping a handle to; the next question starts a fresh one.
       if (status === 404) rememberThread(null);
-      setError({ message, status });
-      setQuestion(q);
+      if (billingBlocked) {
+        setBillingDenial({ companyId, billing: subscription.billing });
+        void subscription.refresh();
+      } else {
+        setError({ message, status });
+        // A route's 403 may also be billing. Refresh its state rather than
+        // guessing from a sentence shared with other permission failures.
+        if (status === 403) void subscription.refresh();
+      }
+      rememberQuestion(q);
     } finally {
       setUploadStatus(null);
       setAsking(false);
@@ -631,6 +690,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const handleDecide = async (decision: ChatDecisionKind) => {
     const actions = pendingActions ?? [];
     if (!lastJobId || actions.length === 0 || pending) return;
+    if (!canUseChat()) return;
 
     const verb = decision === 'decline' ? 'Declined' : 'Approved';
     setAsking(true);
@@ -654,20 +714,26 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       const status = err instanceof ChatEnqueueError ? err.status : undefined;
       // The same expected refusals as a question (busy, capped, offline, gone), which
       // are the shop's state rather than our incident.
-      if (status === undefined || !REFUSAL_REASONS[status]) Sentry.captureException(err);
-      setError({ message, status });
+      if (isBillingWriteBlocked(err)) {
+        setBillingDenial({ companyId, billing: subscription.billing });
+        void subscription.refresh();
+      } else {
+        if (status === undefined || !REFUSAL_REASONS[status]) Sentry.captureException(err);
+        setError({ message, status });
+        if (status === 403) void subscription.refresh();
+      }
     } finally {
       setAsking(false);
     }
   };
 
   const handleChipClick = (prompt: string) => {
-    setQuestion(prompt);
+    rememberQuestion(prompt);
     handleSubmit(prompt, 'example');
   };
 
   const handleFollowUp = (prompt: string) => {
-    setQuestion(prompt);
+    rememberQuestion(prompt);
     handleSubmit(prompt, 'suggestion');
   };
 
@@ -715,6 +781,11 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
   const composer = (
     <Box>
+      {subscriptionRequired && (
+        <Box id="chat-subscription-notice" role="region" aria-label="Chat subscription" tabIndex={-1} ref={subscriptionNoticeRef}>
+          <ChatSubscriptionNotice state={contextSaysBlocked ? writeBlockedState(subscription.billing) : undefined} />
+        </Box>
+      )}
       {attachments.length > 0 && (
         <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mb: 1 }} aria-label="Attached files">
           {attachments.map(({ prepared }) => (
@@ -737,8 +808,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           <Box component="span" sx={{ display: 'inline-flex', alignSelf: 'flex-end' }}>
             <IconButton
               aria-label="Attach files"
-              disabled={pending || !!uploadStatus || attachments.length >= CHAT_MAX_UPLOADS}
-              onClick={() => fileInputRef.current?.click()}
+              disabled={pending || !!uploadStatus || subscription.isLoading || attachments.length >= CHAT_MAX_UPLOADS}
+              onClick={() => { if (canUseChat()) fileInputRef.current?.click(); }}
               sx={{ width: 48, height: 48 }}
             >
               <AddIcon />
@@ -752,7 +823,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           maxRows={4}
           placeholder={placeholder}
           value={question}
-          onChange={(e) => setQuestion(e.target.value)}
+          onChange={(e) => rememberQuestion(e.target.value)}
           onKeyDown={handleKeyDown}
           disabled={pending || !!uploadStatus}
           slotProps={{
@@ -765,13 +836,13 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             // Playwright refused it as "not an input element"; the same mismatch is
             // why focusing that locator silently did nothing. `htmlInput` is the slot
             // that reaches the real element, and is what the rest of the repo uses.
-            htmlInput: { 'aria-label': 'Your question' },
+            htmlInput: { 'aria-label': 'Your question', 'aria-describedby': subscriptionRequired ? 'chat-subscription-notice' : undefined },
           }}
         />
         <Button
           variant="contained"
           onClick={() => handleSubmit()}
-          disabled={!question.trim() || pending || !!uploadStatus}
+          disabled={!question.trim() || pending || !!uploadStatus || subscription.isLoading}
           sx={{ minWidth: 48, minHeight: 48, px: 2 }}
           aria-label="Send question"
           aria-busy={pending}
@@ -827,7 +898,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       {/* Failed, including the poll wall -- which renders rather than stopping
           silently. A conversation that outgrew the window gets New conversation
           instead of Try again, because asking again walks into the same wall. */}
-      {!pending && job.phase === 'failed' && (
+      {!pending && !subscriptionRequired && job.phase === 'failed' && (
         <Alert
           severity="error"
           action={
@@ -848,12 +919,12 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
       {/* An enqueue-time 503 is the SAME state as a mid-job outage -- insights
           are unavailable -- and gets the same quiet notice. */}
-      {error && error.status === 503 && (
+      {!subscriptionRequired && error && error.status === 503 && (
         <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />}>
           {error.message}
         </Alert>
       )}
-      {error && error.status !== 503 && <Alert severity="error">{error.message}</Alert>}
+      {!subscriptionRequired && error && error.status !== 503 && <Alert severity="error">{error.message}</Alert>}
     </>
   );
 
@@ -974,7 +1045,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             variant="outlined"
             startIcon={<Icon sx={{ color: 'text.secondary' }} />}
             onClick={() => handleChipClick(prompt)}
-            disabled={pending}
+            disabled={pending || subscription.isLoading}
             sx={{
               minHeight: 48,
               justifyContent: 'flex-start',

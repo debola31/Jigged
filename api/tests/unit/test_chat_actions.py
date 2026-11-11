@@ -27,6 +27,7 @@ from services.chat_actions import (
     ActionOutcome,
     ChatActions,
     ToolSpec,
+    app_base_url,
 )
 from services.llm.base import LLMResult, Message, ToolCall
 
@@ -177,6 +178,65 @@ async def test_open_refuses_without_this_deployments_own_origin(monkeypatch):
     monkeypatch.delenv("APP_BASE_URL", raising=False)
     with pytest.raises(RuntimeError):
         await ChatActions.open(token="t", company_id="c0", user_id="u1", db=_Db())
+
+
+def test_preview_tools_use_the_current_deployment_instead_of_a_shared_alias(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL_URL", "jigged-current-pr.vercel.app")
+    monkeypatch.setenv("APP_BASE_URL", "https://preview.jigged.app")
+    assert app_base_url() == "https://jigged-current-pr.vercel.app"
+
+
+@pytest.mark.parametrize("host", ["", "https://other.example", "other.example", "jigged.vercel.app/path", "user@jigged.vercel.app"])
+def test_preview_without_a_valid_deployment_origin_never_falls_back_to_another_environment(monkeypatch, host):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL_URL", host)
+    monkeypatch.setenv("APP_BASE_URL", "https://jigged.app")
+    assert app_base_url() is None
+
+
+def test_production_tools_keep_the_configured_origin(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "production")
+    monkeypatch.setenv("VERCEL_URL", "jigged-current.vercel.app")
+    monkeypatch.setenv("APP_BASE_URL", "https://jigged.app/")
+    assert app_base_url() == "https://jigged.app"
+
+
+async def test_protected_preview_can_load_and_call_tools_as_the_person(monkeypatch):
+    monkeypatch.setenv("VERCEL_ENV", "preview")
+    monkeypatch.setenv("VERCEL_URL", "jigged-current-pr.vercel.app")
+    monkeypatch.setenv("VERCEL_AUTOMATION_BYPASS_SECRET", "test-bypass-secret")
+    seen = []
+
+    def respond(request):
+        seen.append(request)
+        if request.method == "GET":
+            return httpx.Response(200, json={"tools": []})
+        return httpx.Response(200, json={"structuredContent": {"ok": True}})
+
+    actions = await ChatActions.open(
+        token="session-token", company_id="c0", user_id="u1", db=_Db(),
+        transport=httpx.MockTransport(respond),
+    )
+    outcome = await actions.call("create_quote", {})
+    assert not outcome.is_error
+    assert [r.method for r in seen] == ["GET", "POST"]
+    for request in seen:
+        assert str(request.url) == "https://jigged-current-pr.vercel.app/chat-tools"
+        assert request.headers["authorization"] == "Bearer session-token"
+        assert request.headers["x-vercel-protection-bypass"] == "test-bypass-secret"
+        assert "test-bypass-secret" not in str(request.url)
+        assert "test-bypass-secret" not in request.content.decode()
+
+
+@pytest.mark.parametrize("environment, host", [("production", "jigged.test"), ("preview", "different.vercel.app")])
+async def test_preview_bypass_is_never_sent_to_another_origin_or_production(monkeypatch, environment, host):
+    monkeypatch.setenv("VERCEL_ENV", environment)
+    monkeypatch.setenv("VERCEL_URL", host)
+    monkeypatch.setenv("VERCEL_AUTOMATION_BYPASS_SECRET", "test-bypass-secret")
+    actions, seen = _bridge()
+    await actions.call("get_quote", {})
+    assert "x-vercel-protection-bypass" not in seen[0].headers
 
 
 # ---------------------------------------------------------------------- the loop

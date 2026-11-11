@@ -547,15 +547,17 @@ browser ──/chat──▶ FastAPI insights loop (Opus 5.5) ──tool search�
 |---|---|---|
 | The catalogue | `lib/mcp/chatCatalog.ts` — `registerJiggedTools` into a `ToolCatalog` | One list with `/mcp`. A test holds it to the server's registrations |
 | The door | `app/chat-tools/route.ts` | The person's own session token (an assistant's OAuth token is refused — its door is `/mcp`); the shared call path `runCompanyTool`; one `mcp_tool_calls` row as client `jigged-chat` / "Jigged chat" |
-| The bridge | `api/services/chat_actions.py` | The token goes only to `APP_BASE_URL`, from env — never a URL the request supplied. Tools deferred behind BM25 tool search (~30K tokens of definitions stay out of the prefix). Write tools gain a `summary_for_approval` field the model must fill; it is stripped before the call |
+| The bridge | `api/services/chat_actions.py` | The token goes only to this deployment's origin from env: `VERCEL_URL` on previews, `APP_BASE_URL` elsewhere. Protected preview calls carry the server's automation bypass header. Tools deferred behind BM25 tool search (~30K tokens of definitions stay out of the prefix). Write tools gain a `summary_for_approval` field the model must fill; it is stripped before the call |
 | The pause | `insights._paused` | A write the person has not always-allowed stops the job: `result.pending_actions` (the card) and `result.resume_state` (the conversation exactly as it stopped, thinking and tool-search blocks included — they must go back unchanged). The answer reads on its own: "This needs your approval before it runs: …" |
 | The decision | `POST /api/insights/{company_id}/chat/decide` | Only the person who asked (`ai_jobs.requested_by`), only on the newest turn of the thread (409 otherwise). The body carries the decision alone; what runs is loaded from the job. A new job in the same thread, so the transcript reads "Approved: …" then the result |
 | Always allow | `public.chat_action_grants` | Written by the backend on "Always allow"; listed and turned off by the person (column grant: `deleted_at` only) under **Allowed actions** beside Chat history. A restrictive policy refuses assistant tokens outright |
 
 **Grounding still holds.** Figures in a Jigged tool's result count as known, like a query's, and so
 do the values the person approved on the card; `tools_ok` stands beside `sql_ok` in the non-answer
-gate. **Off switch:** `CHAT_ACTIONS=off` on Vercel turns actions off without a deploy; no
-`APP_BASE_URL` (previews) has the same effect. A fresh question that cannot load the tools is
+gate. **Off switch:** `CHAT_ACTIONS=off` on Vercel turns actions off without a deploy; no valid
+deployment origin has the same effect. Previews use their immutable `VERCEL_URL`, not the shared
+`preview.jigged.app` alias, so tools cannot cross into a different PR when that alias moves.
+`VERCEL_AUTOMATION_BYPASS_SECRET` is sent as a header only to that preview's own origin. A fresh question that cannot load the tools is
 answered read-only and reported to Sentry; a decision that cannot load them is a 503 and runs
 nothing.
 
@@ -935,16 +937,20 @@ old wording attributed to it.
 `claim_ai_jobs()` and `isAiWorkerAvailable` compare it byte for byte, so `qwen3:32b` against
 `qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production ran on `ollama:qwen3:32b`
 from September to 2026-11-09 and is back on a hosted model, so the chat no longer depends on a
-laptop being awake; setting the variable again is the way back. **Production only:** Preview and
-Development keep `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`, so previews stay on the worker path and read
-as offline when the box is off. `AI_READONLY_DATABASE_URL` is the backend's sandbox connection, and
-it is ONE static value per Vercel environment — but every preview runs against its own Supabase
-branch, so no single Preview value can name the right database for every PR. A hosted model on a
-preview would run its SQL against whatever that one URL points at. The worker carries its own
+laptop being awake; setting the variable again is the way back. The shared Preview and Development
+configuration uses `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`, so a preview without an override reads as
+offline when its worker is unavailable. A preview can run hosted Claude by setting **both**
+`LLM_CHAIN_INSIGHTS=anthropic:claude-opus-5-5` and `AI_READONLY_DATABASE_URL` as Vercel **Git-branch
+overrides**. The latter must connect as `jigged_ai_readonly` to that PR's own Supabase project,
+using the pooler address advertised by that project; do not reuse the parent's pooler host or a
+shared Preview database URL. Verify the role has neither superuser nor bypass-RLS privileges
+before deploying. The Anthropic key must be available to Preview. The tool bridge derives its
+origin and protection header from Vercel's system environment, as described above.
+Without a branch override, a hosted preview would query whatever the shared database URL names.
+The worker carries its own
 (`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)) — one per database, since
 it serves production and every live Supabase preview branch from one process and each job names the
-database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insights works on a PR's
-Vercel preview with nothing run per PR. All on top of the standard
+database its SQL runs against (`JobContext.readonly_dsn`). All on top of the standard
 Supabase vars.
 
 ## Drawing packages in chat

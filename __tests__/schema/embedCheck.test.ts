@@ -152,6 +152,40 @@ describe('schemaEmbedCheck — select parsing', () => {
   });
 });
 
+describe('schemaEmbedCheck — JSON projections', () => {
+  const schema = new Map([['ai_jobs', new Set(['id', 'payload'])]]);
+
+  function check(select: string): Violation[] {
+    const file = path.join(REPO_ROOT, '__tmp_embed_json_fixture.ts');
+    writeFileSync(file, `await supabase.from('messages').select(${JSON.stringify(select)});\n`);
+    try {
+      return validateFile(file, schema);
+    } finally {
+      unlinkSync(file);
+    }
+  }
+
+  it.each([
+    'payload->uploads',
+    'uploads:payload->uploads',
+    'status:payload->>status',
+    'name:payload->parts->0->>name',
+  ])('validates the base column of %s inside an embed', (projection) => {
+    const [column] = parseSelect(projection).columns;
+    expect(column.name).toBe('payload');
+    expect(column.raw).toBe(projection);
+    expect(check(`job:ai_jobs(id,${projection})`)).toEqual([]);
+  });
+
+  it('still rejects a missing JSON base column and a missing neighbouring column', () => {
+    const violations = check('job:ai_jobs(uploads:missing_payload->uploads,missing_column)');
+    expect(violations.map(({ reason, column }) => ({ reason, column }))).toEqual([
+      { reason: 'unknown-column', column: 'missing_payload' },
+      { reason: 'unknown-column', column: 'missing_column' },
+    ]);
+  });
+});
+
 describe('schemaEmbedCheck — extraction', () => {
   it('extracts inline .select() string contents', () => {
     const source = `

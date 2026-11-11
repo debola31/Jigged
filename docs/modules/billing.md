@@ -216,6 +216,13 @@ The DB refuses the write; the UI has to explain it. That path lives in
 - `SubscriptionRequiredNotice` says it up front on the five create routes, as an
   explanation rather than a disabled control — see
   [interaction-standards §4](../interaction-standards.md).
+- Chat explains the requirement above its composer with an admin-only billing action;
+  others are directed to their shop admin. Send, starters, follow-ups, attachments and
+  approvals check entitlement before any write. History stays readable, and a draft
+  survives billing navigation in company-scoped session storage. A billing RLS denial
+  refreshes stale entitlement and shows the same notice, never database policy text.
+  Verified by [InsightsChat.test.tsx](../../__tests__/components/insights/InsightsChat.test.tsx),
+  `describe('InsightsChat — subscription access')` (13 tests).
 - **The wording comes from `subscription_status`, not from entitlement.**
   [`lib/billingCopy.ts`](../../lib/billingCopy.ts) maps the billing row to
   `never_started | ended | paused`, because `read_only` deliberately collapses

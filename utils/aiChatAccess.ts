@@ -1,6 +1,7 @@
 import { getSupabase } from '@/lib/supabase';
 import type { ChartConfig, ReportSummary } from '@/utils/insightsAccess';
 import { chatUploadRefSchema, type ChatUploadRef } from '@/lib/chatUploads';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
 // ============================================================
 // Insights conversations — direct Supabase queries under RLS
@@ -77,7 +78,7 @@ export async function createThread(companyId: string, title: string): Promise<Ch
     .select('id, title, created_at, updated_at')
     .single();
 
-  if (error) throw new Error(`Failed to start a conversation: ${error.message}`);
+  if (error) throw toFriendlyError(error, { fallback: 'Could not start a conversation. Please try again.' });
   return data;
 }
 

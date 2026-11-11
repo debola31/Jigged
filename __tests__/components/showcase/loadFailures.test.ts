@@ -52,6 +52,23 @@ describe('a showcase file that failed to load', () => {
 });
 
 describe('a light model', () => {
+  it('shares a rate-limited load through its retry and recovers for every caller', async () => {
+    vi.useFakeTimers();
+    try {
+      const url = `${BUCKET}/models/rate-limited.glb`;
+      loadAsync.mockClear();
+      loadAsync.mockRejectedValueOnce(Object.assign(new Error('rate limited'), { response: { status: 429 } }));
+      const first = lightModel(url);
+      expect(lightModel(url)).toBe(first);
+      await vi.advanceTimersByTimeAsync(1000);
+      await expect(first).resolves.toEqual({ scene: { url } });
+      expect(loadAsync).toHaveBeenCalledTimes(2);
+      expect(lightModel(url)).toBe(first);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('settles as { error } and never rejects, so nothing in a canvas throws for a missing file', async () => {
     const loaded = await lightModel(`${BUCKET}/models/missing.glb`);
     expect('error' in loaded && (loaded.error as Error).message).toMatch(/responded with 400/);

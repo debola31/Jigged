@@ -6,7 +6,7 @@ afterEach(() => vi.useRealTimers());
 describe('temporary showcase asset failures', () => {
   it.each([
     ['rate limit', Object.assign(new Error('HTTP error'), { response: { status: 429 } })],
-    ['server error', new Error('fetch for "bench.glb" responded with 503: ')],
+    ['server error', Object.assign(new Error('HTTP error'), { response: { status: 503 } })],
     ['network', new TypeError('Load failed')],
     ['image error', new Event('error')],
   ])('backs off and recovers without exposing the first failure: %s', async (_, error) => {

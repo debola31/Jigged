@@ -6,10 +6,8 @@ function transient(error: unknown): boolean {
   if (typeof Event !== 'undefined' && error instanceof Event) return error.type === 'error';
   if (!error || typeof error !== 'object') return false;
   const response = 'response' in error ? error.response as Response | undefined : undefined;
-  const status = response?.status ?? (error instanceof Error
-    ? Number(error.message.match(/responded with (\d{3}):/)?.[1])
-    : 0);
-  return status === 429 || (status >= 500 && status <= 599);
+  const status = response?.status;
+  return status === 429 || (status !== undefined && status >= 500 && status <= 599);
 }
 
 /** Retry temporary Storage failures twice, with backoff; missing files and decode errors fail immediately. */

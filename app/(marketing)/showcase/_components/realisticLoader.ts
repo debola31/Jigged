@@ -1,6 +1,7 @@
 // The realistic shop models' loader, as moonshot/web/realism/SPEC.md has it: meshopt geometry, KTX2
 // textures, and one shared copy of the tiles every model names. Imported only once the light shop
 // has settled on a desktop, or a thing's card opens there, so none of it weighs on the first view.
+import { retryLoad } from './retryLoad';
 import { LoaderUtils, LoadingManager, type Loader, type Object3D, type Texture, type WebGLRenderer } from 'three';
 import { GLTFLoader, type GLTFParser } from 'three/addons/loaders/GLTFLoader.js';
 import { KTX2Loader } from 'three/addons/loaders/KTX2Loader.js';
@@ -36,11 +37,17 @@ export function realisticLoader(gl: WebGLRenderer): RealisticLoader {
       const uri: string | undefined = parser.json.images[index].uri;
       if (!uri?.includes('tiles/')) return load(index, loader);
       const url = LoaderUtils.resolveURL(uri, parser.options.path);
-      if (!tiles.has(url)) tiles.set(url, load(index, loader));
+      if (!tiles.has(url)) {
+        tiles.set(url, load(index, loader).catch((error: unknown) => {
+          // A fresh GLTF parse must be able to request this tile again after a temporary failure.
+          tiles.delete(url);
+          throw error;
+        }));
+      }
       return tiles.get(url)!.then((t) => t.clone());
     };
     return { name: 'jigged_shared_tiles' };
   };
   const gltf = new GLTFLoader(manager).setMeshoptDecoder(MeshoptDecoder).setKTX2Loader(ktx2).register(sharedTiles);
-  return { load: async (url) => (await gltf.loadAsync(url)).scene };
+  return { load: async (url) => (await retryLoad(() => gltf.loadAsync(url))).scene };
 }

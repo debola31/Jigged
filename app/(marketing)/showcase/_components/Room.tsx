@@ -9,6 +9,7 @@
 // Nothing here loads before the shop draws: the floor and walls start as plain colours, and their
 // tiles and the HDRI (about 2 MB, from the bucket's room/ prefix) follow once the models are in.
 
+import { retryLoad } from './retryLoad';
 import { Environment, Lightformer, useProgress } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useState } from 'react';
@@ -437,7 +438,7 @@ async function loadMedia(gl: WebGLRenderer): Promise<Media> {
   const loader = new TextureLoader(manager);
   const anisotropy = Math.min(8, gl.capabilities.getMaxAnisotropy());
   const tile = async (file: string, colour = false) => {
-    const t = await loader.loadAsync(mediaUrl(`room/${file}`));
+    const t = await retryLoad(() => loader.loadAsync(mediaUrl(`room/${file}`)));
     t.wrapS = t.wrapT = RepeatWrapping;
     t.anisotropy = anisotropy;
     if (colour) t.colorSpace = SRGBColorSpace;
@@ -451,7 +452,7 @@ async function loadMedia(gl: WebGLRenderer): Promise<Media> {
     tile('wall_normal.webp'),
     tile('wall_rough.webp'),
     tile('line_color.webp', true),
-    new HDRLoader(manager).loadAsync(mediaUrl('room/machine_shop_02_1k.hdr')),
+    retryLoad(() => new HDRLoader(manager).loadAsync(mediaUrl('room/machine_shop_02_1k.hdr'))),
   ]);
   env.mapping = EquirectangularReflectionMapping;
   return { floor: [floorColour, floorNormal, floorRough], wall: [wallColour, wallNormal, wallRough], line, env };

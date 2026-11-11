@@ -8,9 +8,12 @@ import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import AddIcon from '@mui/icons-material/Add';
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
@@ -730,11 +733,18 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             event.target.value = '';
             void handleAttachFiles(files);
           }} />
-        <Button variant="outlined" aria-label="Attach files" title="Attach a ZIP, PDF, DXF or STEP file"
-          disabled={pending || !!uploadStatus || attachments.length >= CHAT_MAX_UPLOADS}
-          onClick={() => fileInputRef.current?.click()} sx={{ minWidth: 48, minHeight: 48, px: 1 }}>
-          <AttachFileIcon />
-        </Button>
+        <Tooltip title="Attach files">
+          <Box component="span" sx={{ display: 'inline-flex', alignSelf: 'flex-end' }}>
+            <IconButton
+              aria-label="Attach files"
+              disabled={pending || !!uploadStatus || attachments.length >= CHAT_MAX_UPLOADS}
+              onClick={() => fileInputRef.current?.click()}
+              sx={{ width: 48, height: 48 }}
+            >
+              <AddIcon />
+            </IconButton>
+          </Box>
+        </Tooltip>
         <TextField
           fullWidth
           size="small"
@@ -769,13 +779,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
         </Button>
       </Box>
-      {uploadStatus ? (
+      {uploadStatus && (
         <Typography role="status" aria-live="polite" variant="body2" sx={{ mt: 1, color: 'warning.light' }}>
           {uploadStatus}
-        </Typography>
-      ) : (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          Attach ZIP, PDF, DXF or STEP files, then say what you need.
         </Typography>
       )}
     </Box>

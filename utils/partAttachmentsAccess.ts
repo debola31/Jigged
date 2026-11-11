@@ -5,6 +5,7 @@ import {
   uploadFileToStorage,
   deleteFileFromStorage,
   getSignedUrl,
+  copyFileInStorage,
 } from '@/utils/storageHelpers';
 import { getCurrentMember } from '@/utils/operatorAccess';
 import type { PartAttachment, PartAttachmentKind } from '@/types/part';
@@ -75,7 +76,7 @@ export function detectAttachmentKind(fileName: string): PartAttachmentKind {
  * Returns an error string if the file is not an acceptable part attachment, or
  * null if it's fine. Allowlists by extension and enforces the per-kind size cap.
  */
-export function validatePartAttachmentFile(file: File): string | null {
+export function validatePartAttachmentFile(file: Pick<File, 'name' | 'size'>): string | null {
   const ext = fileExtension(file.name);
   if (!ALLOWED_EXTENSIONS.includes(ext)) {
     return 'Only PDF, DXF, STEP (.step/.stp), and DWG files can be attached.';
@@ -150,6 +151,31 @@ export async function uploadPartAttachment(
   }
 
   return rowToAttachment(data as unknown as AttachmentRow);
+}
+
+/** File an uploaded chat source on a part. The part owns its copy and can delete it independently. */
+export async function copyChatFileToPart(
+  companyId: string, partId: string,
+  file: { path: string; name: string; size: number; mime_type: string },
+): Promise<void> {
+  if (!file.path.startsWith(`${companyId}/chat/`) || file.path.split('/').includes('..')) {
+    throw new Error('That file does not belong to this company.');
+  }
+  const validation = validatePartAttachmentFile(file);
+  if (validation) throw new Error(validation);
+  const member = await getCurrentMember(companyId);
+  if (!member) throw new Error('Could not identify your account — reload the page and try again.');
+  const target = generateStoragePath(companyId, 'parts', partId, file.name);
+  await copyFileInStorage(file.path, target);
+  const { error } = await getSupabase().from('part_attachments').insert({
+    company_id: companyId, part_id: partId, storage_path: target,
+    file_name: file.name, kind: detectAttachmentKind(file.name),
+    size_bytes: file.size, mime_type: file.mime_type || null, uploaded_by: member.id,
+  });
+  if (error) {
+    await deleteFileFromStorage(target).catch(() => {});
+    throw error;
+  }
 }
 
 /** List a part's attachments, newest first, with the uploader's display name. */

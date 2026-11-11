@@ -130,6 +130,23 @@ describe('listThreadMessages', () => {
     expect(messages[1].chart_config).toEqual(chart);
   });
 
+  it('reloads upload badges and the quote draft link without reading the full job payload', async () => {
+    const upload = {
+      id: '11111111-1111-1111-1111-111111111111', name: 'parts.zip',
+      manifest_path: 'private/manifest.json', part_count: 31, file_count: 93, summary: 'fields',
+    };
+    const q = buildQueryStub({ data: [
+      { id: 'm1', seq: 1, role: 'user', content: 'Set up parts', created_at: 'c', job: { uploads: [upload] } },
+      { id: 'm2', seq: 2, role: 'assistant', content: 'Ready', created_at: 'c',
+        tool_trace: [{ tool: 'setup_parts_from_upload', quote_draft_url: 'https://jigged.app/dashboard/co-1/quotes/new?parts=p1' }] },
+    ] });
+    queueBuilders([q]);
+    const [user, assistant] = await listThreadMessages('t-1');
+    expect(user.uploads).toEqual([upload]);
+    expect(assistant.quoteDraftUrl).toContain('/quotes/new?parts=p1');
+    expect(q.select).toHaveBeenCalledWith(expect.stringContaining('uploads:payload->uploads'));
+  });
+
   it('carries a report turn and the job that made it, and nothing for a plain answer', async () => {
     const spec = { title: 'Operations summary', period_label: 'Q3' };
     queueBuilders([

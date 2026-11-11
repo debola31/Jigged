@@ -73,6 +73,8 @@ export interface CreateOptions {
    */
   materialsByStem?: Map<string, ResolvedMaterial[]>;
   onProgress?: (done: number, total: number) => void;
+  /** Chat's files already live in Storage; it files private copies instead of uploading bytes again. */
+  attachUploadedFiles?: (partId: string, row: DrawingRow) => Promise<{ attached: number; errors: string[] }>;
 }
 
 /**
@@ -246,7 +248,9 @@ export async function createPartsFromRows(
         // Files and work are independent, so they overlap. The routing has to land
         // BEFORE the markup is seeded, though — see below.
         const [{ attached, errors }] = await Promise.all([
-          attachFiles(companyId, partId, row),
+          options.attachUploadedFiles
+            ? options.attachUploadedFiles(partId, row)
+            : attachFiles(companyId, partId, row),
           (async () => {
             if (operations.length === 0) return;
 

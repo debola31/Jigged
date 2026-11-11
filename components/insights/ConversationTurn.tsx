@@ -14,8 +14,11 @@ import InsightChart from './InsightChart';
 import type { ReportTurn } from '@/utils/aiChatAccess';
 import type { ChartConfig } from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
+import type { ChatUploadRef } from '@/lib/chatUploads';
 
 interface ConversationTurnProps {
+  uploads?: ChatUploadRef[];
+  quoteDraftPath?: string | null;
   question: string;
   answer: string;
   chartConfig: ChartConfig | null;
@@ -67,6 +70,8 @@ interface ConversationTurnProps {
  * History rail lists every turn that carried one -- so there is nothing to save.
  */
 export default function ConversationTurn({
+  uploads = [],
+  quoteDraftPath = null,
   question,
   answer,
   chartConfig,
@@ -111,7 +116,18 @@ export default function ConversationTurn({
         <Typography variant="body2" sx={{ whiteSpace: 'pre-line' }}>
           {question}
         </Typography>
+        {uploads.map((upload) => (
+          <Typography key={upload.id} variant="caption" sx={{ display: 'block', mt: 1 }}>
+            {upload.name} · {upload.part_count} parts · {upload.file_count} files
+          </Typography>
+        ))}
       </Box>
+
+      {quoteDraftPath && (
+        <Button variant="outlined" href={quoteDraftPath} sx={{ alignSelf: 'flex-start', minHeight: 48 }}>
+          Review quote draft
+        </Button>
+      )}
 
       {/* The answer. `pre-line` keeps the model's line breaks.
 

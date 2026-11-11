@@ -11,9 +11,10 @@ APPROVAL LIVES HERE, not in the route. A tool that changes data runs only when t
 approved that call, or has chosen "Always allow" for that action before (public.chat_action_grants,
 per person, per action, per company -- the user's call, 2026-11-09). Reads never ask.
 
-THE TOKEN GOES TO ONE PLACE: APP_BASE_URL, this deployment's own origin, from env. Never a URL
-the request supplied -- an Origin header pointed at another host would hand the person's session
-to it. No APP_BASE_URL (a preview), no actions; the chat still answers questions.
+THE TOKEN GOES TO ONE PLACE: this deployment's own origin, from env. Previews use VERCEL_URL
+so a shared alias cannot send tools to another PR; elsewhere APP_BASE_URL names the origin.
+Never use a URL the request supplied -- an Origin header pointed at another host would hand the
+person's session to it. Protected preview calls also carry Vercel's automation bypass header.
 
 THE TOOLS ARE DEFERRED. Sixty-odd definitions are ~30K tokens, as much again as the whole
 insights prompt, so each is sent with `defer_loading: true` behind the server-side tool search
@@ -26,6 +27,7 @@ import logging
 import os
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx
 
@@ -95,8 +97,32 @@ class ActionOutcome:
 
 def app_base_url() -> str | None:
     """This deployment's own origin, from env only. See the module docstring."""
+    if os.getenv("VERCEL_ENV") == "preview":
+        host = (os.getenv("VERCEL_URL") or "").strip()
+        parsed = urlsplit(f"https://{host}")
+        if (
+            host
+            and parsed.netloc == host
+            and parsed.hostname
+            and parsed.hostname.endswith(".vercel.app")
+            and not parsed.username
+            and not parsed.password
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return f"https://{host}"
+        return None
     value = (os.getenv("APP_BASE_URL") or "").strip().rstrip("/")
     return value or None
+
+
+def _request_headers(token: str, base_url: str) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    bypass = (os.getenv("VERCEL_AUTOMATION_BYPASS_SECRET") or "").strip()
+    if bypass and os.getenv("VERCEL_ENV") == "preview" and base_url.rstrip("/") == app_base_url():
+        headers["x-vercel-protection-bypass"] = bypass
+    return headers
 
 
 class ChatActions:
@@ -148,10 +174,10 @@ class ChatActions:
         """
         base = base_url or app_base_url()
         if not base:
-            raise RuntimeError("APP_BASE_URL is not set, so Jigged chat has no tools to call")
+            raise RuntimeError("This deployment's tool origin is not set, so Jigged chat has no tools to call")
         async with httpx.AsyncClient(timeout=_TIMEOUT_S, transport=transport) as client:
             response = await client.get(
-                f"{base}/chat-tools", headers={"Authorization": f"Bearer {token}"}
+                f"{base}/chat-tools", headers=_request_headers(token, base)
             )
         response.raise_for_status()
         specs = [
@@ -219,7 +245,7 @@ class ChatActions:
             async with httpx.AsyncClient(timeout=_TIMEOUT_S, transport=self._transport) as client:
                 response = await client.post(
                     f"{self.base_url}/chat-tools",
-                    headers={"Authorization": f"Bearer {self._token}"},
+                    headers=_request_headers(self._token, self.base_url),
                     json={"company_id": self.company_id, "tool": name, "arguments": args},
                 )
         except httpx.HTTPError as exc:

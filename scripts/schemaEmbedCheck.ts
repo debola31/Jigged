@@ -309,6 +309,10 @@ export function parseSelect(s: string): ParsedSelect {
         alias = name.substring(0, colonIdx).trim();
         name = name.substring(colonIdx + 1).trim();
       }
+      // JSON keys belong to the selected value, not the table's column list.
+      // Validate the base column in e.g. uploads:payload->uploads or payload->>status.
+      const jsonPathIdx = name.indexOf('->');
+      if (jsonPathIdx !== -1) name = name.substring(0, jsonPathIdx).trim();
       columns.push({ raw: tok, alias, name });
     }
   }

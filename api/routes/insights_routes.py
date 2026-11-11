@@ -310,11 +310,26 @@ def _thread_replay(db, company_id: str, thread_id: str) -> dict:
         for row in rows
         if row["role"] in ("user", "assistant") and row["seq"] > covers
     ]
-    return {
+    replay = {
         "thread_id": thread_id,
         "summary": {"content": summary["content"], "covers_through_seq": covers} if summary else None,
         "history": history,
     }
+    # Keep original references available after the discussion is compacted.
+    uploads = []
+    jobs = (
+        db.table("ai_jobs").select("payload->uploads")
+        .eq("company_id", company_id).eq("thread_id", thread_id)
+        .not_.is_("payload->uploads", "null")
+        .order("created_at", desc=True).limit(3).execute()
+    ).data or []
+    for job in jobs:
+        for upload in job.get("uploads") or []:
+            if not any(prior["id"] == upload["id"] for prior in uploads):
+                uploads.append(upload)
+    if uploads:
+        replay["prior_uploads"] = uploads[:3]
+    return replay
 
 
 # How far the browser's date may sit from the server's before we stop believing it.
@@ -380,6 +395,14 @@ async def chat(company_id: str, request: ChatRequest, http_request: Request):
         "today": _client_today(request.today).isoformat(),
     }
     thread_id = str(request.thread_id) if request.thread_id else None
+    if request.uploads:
+        if not thread_id:
+            raise HTTPException(status_code=400, detail="Start a conversation before attaching files.")
+        for upload in request.uploads:
+            expected = f"{company_id}/chat/{thread_id}/{upload.id}/manifest.json"
+            if upload.manifest_path != expected:
+                raise HTTPException(status_code=400, detail="That upload does not belong to this conversation.")
+        payload["uploads"] = [upload.model_dump(mode="json") for upload in request.uploads]
 
     try:
         if thread_id:

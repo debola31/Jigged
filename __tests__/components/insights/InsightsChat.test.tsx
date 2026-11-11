@@ -18,6 +18,13 @@ import { render, screen, resetRouterMocks, within } from '../../test-utils';
 import InsightsChat from '@/components/insights/InsightsChat';
 import { ChatEnqueueError } from '@/utils/insightsAccess';
 
+const mockPrepareChatUpload = vi.fn();
+const mockUploadChatFiles = vi.fn();
+vi.mock('@/utils/chatUploadsAccess', () => ({
+  prepareChatUpload: (...args: unknown[]) => mockPrepareChatUpload(...args),
+  uploadChatFiles: (...args: unknown[]) => mockUploadChatFiles(...args),
+}));
+
 const mockSubmitChatQuery = vi.fn();
 const mockListReports = vi.fn();
 const mockGetPendingActions = vi.fn();
@@ -105,6 +112,52 @@ beforeEach(() => {
   mockListChartTurns.mockResolvedValue([]);
   mockSubmitChatQuery.mockResolvedValue({ job_id: 'job-1', status: 'queued', executor: 'worker' });
   mockUseAiJob.mockReturnValue(IDLE_JOB);
+  mockPrepareChatUpload.mockResolvedValue({ id: 'upload-1', name: 'parts.zip', rows: [{}] });
+  mockUploadChatFiles.mockResolvedValue({
+    id: 'upload-1', name: 'parts.zip', manifest_path: 'private/manifest.json',
+    part_count: 1, file_count: 3, summary: 'drawing fields',
+  });
+});
+
+describe('InsightsChat — uploaded drawings', () => {
+  it('stages a package without an AI call, then sends the uploaded reference with the question', async () => {
+    const user = userEvent.setup();
+    render(<InsightsChat companyId="co-1" />);
+    await user.upload(screen.getByLabelText('Choose chat files'), new File(['zip bytes'], 'parts.zip'));
+    expect(await screen.findByText('parts.zip · 1 part')).toBeInTheDocument();
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(mockUploadChatFiles).not.toHaveBeenCalled();
+    await ask('Set up these parts and draft a quote for review.');
+    expect(mockUploadChatFiles).toHaveBeenCalledWith('co-1', 'thread-1', expect.objectContaining({ id: 'upload-1' }), expect.any(Function));
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'Set up these parts and draft a quote for review.', 'thread-1', [expect.objectContaining({ file_count: 3 })]);
+    expect(screen.queryByText('parts.zip · 1 part')).not.toBeInTheDocument();
+  });
+
+  it('keeps the question and successful upload on an enqueue rejection, and reuses the bytes on retry', async () => {
+    const user = userEvent.setup();
+    mockSubmitChatQuery.mockRejectedValueOnce(new ChatEnqueueError('Busy', 409));
+    render(<InsightsChat companyId="co-1" />);
+    await user.upload(screen.getByLabelText('Choose chat files'), new File(['zip bytes'], 'parts.zip'));
+    await screen.findByText('parts.zip · 1 part');
+    await ask('Set up these parts');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Busy');
+    expect(screen.getByLabelText('Your question')).toHaveValue('Set up these parts');
+    await user.click(screen.getByRole('button', { name: 'Send question' }));
+    expect(mockSubmitChatQuery).toHaveBeenCalledTimes(2);
+    expect(mockUploadChatFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a review link from the stored successful action, and refuses another company path', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 't-1');
+    mockListThreadMessages.mockResolvedValue([
+      ...turn(1, 'Draft a quote', 'The parts are ready.', { quoteDraftUrl: 'https://jigged.app/dashboard/co-1/quotes/new?parts=p1' }),
+      ...turn(3, 'Again', 'Done.', { quoteDraftUrl: 'https://example.com/dashboard/other/quotes/new' }),
+    ]);
+    render(<InsightsChat companyId="co-1" />);
+    const link = await screen.findByRole('link', { name: 'Review quote draft' });
+    expect(link).toHaveAttribute('href', '/dashboard/co-1/quotes/new?parts=p1');
+    expect(screen.getAllByRole('link', { name: 'Review quote draft' })).toHaveLength(1);
+  });
 });
 
 describe('InsightsChat — what an enqueue refusal looks like', () => {
@@ -305,6 +358,7 @@ describe('InsightsChat — the conversation', () => {
       from_suggestion: false,
       turn_index: 2,
       question_length_bucket: 'under_5w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 
@@ -443,6 +497,7 @@ describe('InsightsChat — what to ask next', () => {
       from_suggestion: true,
       turn_index: 2,
       question_length_bucket: 'under_5w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 
@@ -473,6 +528,7 @@ describe('InsightsChat — a report is an answer, not a mode', () => {
       from_suggestion: false,
       turn_index: 0,
       question_length_bucket: '5w_15w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 

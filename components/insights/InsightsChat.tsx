@@ -6,11 +6,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import HistoryIcon from '@mui/icons-material/History';
@@ -44,6 +46,8 @@ import {
   type ReportSummary,
 } from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
+import { CHAT_FILE_ACCEPT, CHAT_MAX_UPLOADS, type ChatUploadRef } from '@/lib/chatUploads';
+import { prepareChatUpload, uploadChatFiles, type PreparedChatUpload } from '@/utils/chatUploadsAccess';
 
 /**
  * Three starters: one that answers in prose, one that draws a chart, one that
@@ -188,6 +192,15 @@ function loadingMessageFor(tick: number): string {
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
 
+/** Display only an internal quote form for this company. */
+function quoteDraftPath(url: string | null, companyId: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname === `/dashboard/${companyId}/quotes/new` ? `${parsed.pathname}${parsed.search}` : null;
+  } catch { return null; }
+}
+
 /**
  * How the person got to the question they asked. Reported as two booleans rather
  * than one enum because analyticsEventsCheck reads literal property keys, and
@@ -224,6 +237,8 @@ interface InsightsChatProps {
 
 /** A displayed exchange: the question and the answer the trigger stored with it. */
 interface Turn {
+  uploads: ChatUploadRef[];
+  quoteDraftUrl: string | null;
   key: string;
   question: string;
   answer: string;
@@ -249,6 +264,8 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
     const next = messages[i + 1];
     if (!next || next.role !== 'assistant') continue;
     turns.push({
+      uploads: m.uploads ?? [],
+      quoteDraftUrl: next.quoteDraftUrl ?? null,
       key: next.id,
       question: m.content,
       answer: next.content,
@@ -281,6 +298,12 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
  * settles the thread is simply re-read.
  */
 export default function InsightsChat({ companyId }: InsightsChatProps) {
+  const [stagedUploads, setStagedUploads] = useState<{
+    companyId: string; prepared: PreparedChatUpload; uploaded?: ChatUploadRef; threadId?: string;
+  }[]>([]);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachments = stagedUploads.filter((item) => item.companyId === companyId);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   // The status rides with the message so the render can tell downtime (503, the
@@ -480,6 +503,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   }, [turns.length, pending, hasConversation]);
 
   const startNewConversation = () => {
+    if (uploadStatus || pending) return;
+    setStagedUploads([]);
     job.reset();
     setError(null);
     setAskedQuestion('');
@@ -487,9 +512,22 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     setHistoryOpen(false);
   };
 
+  const handleAttachFiles = async (files: File[]) => {
+    if (!files.length || pending || uploadStatus) return;
+    setError(null);
+    setUploadStatus('Opening the files…');
+    try {
+      if (attachments.length >= CHAT_MAX_UPLOADS) throw new Error('Attach up to three packages per message.');
+      const prepared = await prepareChatUpload(files, setUploadStatus);
+      setStagedUploads((current) => [...current, { companyId, prepared }]);
+    } catch (err) {
+      setError({ message: err instanceof Error ? err.message : 'Could not open those files.' });
+    } finally { setUploadStatus(null); }
+  };
+
   const handleSubmit = async (input?: string, source: QuestionSource = 'typed') => {
     const q = (input || question).trim();
-    if (!q || pending) return;
+    if (!q || pending || uploadStatus) return;
 
     setAsking(true);
     setError(null);
@@ -507,7 +545,19 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // One door. Whether this comes back as prose, a chart or a one-page report
       // is decided by the model from the words, and shows on the job row's `kind`
       // when it settles (`report generated` fires for a report, below).
-      const enqueued = await submitChatQuery(companyId, q, tid);
+      const uploads: ChatUploadRef[] = [];
+      for (const attachment of attachments) {
+        const uploaded = attachment.uploaded && attachment.threadId === tid ? attachment.uploaded
+          : await uploadChatFiles(companyId, tid, attachment.prepared, setUploadStatus);
+        uploads.push(uploaded);
+        setStagedUploads((current) => current.map((item) => item.prepared.id === attachment.prepared.id
+          ? { ...item, uploaded, threadId: tid } : item));
+      }
+      setUploadStatus(null);
+      const enqueued = uploads.length
+        ? await submitChatQuery(companyId, q, tid, uploads)
+        : await submitChatQuery(companyId, q, tid);
+      setStagedUploads([]);
       // Shape, never content: `executor` is the whole point of the rollout -- it
       // says whether the local box or a hosted model served this shop -- and
       // `turn_index` is how many answered turns this thread already had, which is
@@ -519,6 +569,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         from_suggestion: source === 'suggestion',
         turn_index: turns.length,
         question_length_bucket: questionLengthBucket(q),
+        upload_count: uploads.length,
+        file_count: uploads.reduce((n, upload) => n + upload.file_count, 0),
+        part_count: uploads.reduce((n, upload) => n + upload.part_count, 0),
       });
       job.watch(enqueued.job_id);
     } catch (err) {
@@ -559,7 +612,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // not worth keeping a handle to; the next question starts a fresh one.
       if (status === 404) rememberThread(null);
       setError({ message, status });
+      setQuestion(q);
     } finally {
+      setUploadStatus(null);
       setAsking(false);
     }
   };
@@ -626,8 +681,10 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   };
 
   const switchThread = (id: string) => {
+    if (pending || uploadStatus) return;
     setHistoryOpen(false);
     if (id === threadId) return;
+    setStagedUploads([]);
     job.reset();
     setError(null);
     setAskedQuestion('');
@@ -654,40 +711,73 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const placeholder = hasConversation ? 'Ask a follow-up…' : 'Type your question…';
 
   const composer = (
-    <Box sx={{ display: 'flex', gap: 1.5 }}>
-      <TextField
-        fullWidth
-        size="small"
-        multiline
-        maxRows={4}
-        placeholder={placeholder}
-        value={question}
-        onChange={(e) => setQuestion(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={pending}
-        slotProps={{
-          input: { sx: { minHeight: 48 } },
-          // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
-          // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
-          // the textarea itself had no accessible name at all: a screen reader
-          // announced the one control this feature exists for as unlabelled. Found
-          // by CI, where `getByLabel('Your question')` resolved to the div and
-          // Playwright refused it as "not an input element"; the same mismatch is
-          // why focusing that locator silently did nothing. `htmlInput` is the slot
-          // that reaches the real element, and is what the rest of the repo uses.
-          htmlInput: { 'aria-label': 'Your question' },
-        }}
-      />
-      <Button
-        variant="contained"
-        onClick={() => handleSubmit()}
-        disabled={!question.trim() || pending}
-        sx={{ minWidth: 48, minHeight: 48, px: 2 }}
-        aria-label="Send question"
-        aria-busy={pending}
-      >
-        {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
-      </Button>
+    <Box>
+      {attachments.length > 0 && (
+        <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mb: 1 }} aria-label="Attached files">
+          {attachments.map(({ prepared }) => (
+            <Chip key={prepared.id} icon={<AttachFileIcon />}
+              label={`${prepared.name} · ${prepared.rows.length} ${prepared.rows.length === 1 ? 'part' : 'parts'}`}
+              onDelete={pending || uploadStatus ? undefined : () => setStagedUploads((current) => current.filter((item) => item.prepared.id !== prepared.id))}
+              sx={{ maxWidth: '100%' }} />
+          ))}
+        </Stack>
+      )}
+      <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <input ref={fileInputRef} type="file" multiple accept={CHAT_FILE_ACCEPT} hidden
+          aria-label="Choose chat files"
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void handleAttachFiles(files);
+          }} />
+        <Button variant="outlined" aria-label="Attach files" title="Attach a ZIP, PDF, DXF or STEP file"
+          disabled={pending || !!uploadStatus || attachments.length >= CHAT_MAX_UPLOADS}
+          onClick={() => fileInputRef.current?.click()} sx={{ minWidth: 48, minHeight: 48, px: 1 }}>
+          <AttachFileIcon />
+        </Button>
+        <TextField
+          fullWidth
+          size="small"
+          multiline
+          maxRows={4}
+          placeholder={placeholder}
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={pending || !!uploadStatus}
+          slotProps={{
+            input: { sx: { minHeight: 48 } },
+            // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
+            // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
+            // the textarea itself had no accessible name at all: a screen reader
+            // announced the one control this feature exists for as unlabelled. Found
+            // by CI, where `getByLabel('Your question')` resolved to the div and
+            // Playwright refused it as "not an input element"; the same mismatch is
+            // why focusing that locator silently did nothing. `htmlInput` is the slot
+            // that reaches the real element, and is what the rest of the repo uses.
+            htmlInput: { 'aria-label': 'Your question' },
+          }}
+        />
+        <Button
+          variant="contained"
+          onClick={() => handleSubmit()}
+          disabled={!question.trim() || pending || !!uploadStatus}
+          sx={{ minWidth: 48, minHeight: 48, px: 2 }}
+          aria-label="Send question"
+          aria-busy={pending}
+        >
+          {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+        </Button>
+      </Box>
+      {uploadStatus ? (
+        <Typography role="status" aria-live="polite" variant="body2" sx={{ mt: 1, color: 'warning.light' }}>
+          {uploadStatus}
+        </Typography>
+      ) : (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
+          Attach ZIP, PDF, DXF or STEP files, then say what you need.
+        </Typography>
+      )}
     </Box>
   );
 
@@ -706,7 +796,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           design-system.md measures #fbbf24 at 6.28:1 on this ground against
           #f59e0b's 4.89:1, and states the split as a rule -- light for text, main
           for the mark. */}
-      {pending && (
+      {pending && !uploadStatus && (
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <CircularProgress size={16} color="warning" />
           <Typography variant="body2" color="text.secondary">
@@ -1010,6 +1100,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                     answer={turn.answer}
                     chartConfig={turn.chartConfig}
                     report={turn.report}
+                    uploads={turn.uploads}
+                    quoteDraftPath={quoteDraftPath(turn.quoteDraftUrl, companyId)}
                     onOpenReport={() => openReportTurn(turn)}
                     followUps={i === turns.length - 1 ? turn.followUps : []}
                     onFollowUp={handleFollowUp}

@@ -947,6 +947,37 @@ database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insigh
 Vercel preview with nothing run per PR. All on top of the standard
 Supabase vars.
 
+## Drawing packages in chat
+
+The composer accepts ZIP, PDF, DXF and STEP files through **Attach files**. Selection reads the
+drawings locally, with no AI call; removable chips show the pending packages. Sending uploads the
+source files directly to the private attachments bucket, then writes a manifest under
+`{companyId}/chat/{threadId}/{uploadId}/manifest.json`. The API receives references and bounded
+extracted field summaries, never file bytes. ZIPs are capped at 25 MB compressed; a package at
+150 files, 100 MB expanded and 50 parts. Nested archives and unsupported file types are refused.
+Folder boundaries survive expansion, and the existing grouping pairs differently numbered STEP
+models with their drawing only when the shared part number is unambiguous.
+
+The original references live in `ai_jobs.payload.uploads`; later turns load the latest three
+packages independently of conversational summaries. History shows each package beside its question.
+The route checks company, thread and upload namespaces. Both `read_uploaded_drawings` and
+`setup_parts_from_upload` are ordinary company MCP tools, also available to Jigged chat; Storage,
+part creation and attachments run as the caller under the existing RLS and billing gates.
+
+**Set up these parts and draft a quote for me to review** uses the normal action approval.
+The setup tool calls the drawing import's identity resolver and writer, preserving existing customer
+references and avoiding merges of unrelated parts. Source files get independent private copies on
+their parts, and each row reports creation and attachment failures. It adds no invented routing,
+material cost or price. Its draft option returns New Quote with the resulting parts prefilled;
+the chat renders **Review quote draft** from the successful tool result, including after reload.
+This is an unsaved form: missing customer, quantities, prices and lead time still need completing.
+A saved quote uses the existing `create_quote` tool and its checks. Worker-served chats can read
+the extracted context; actions still require the hosted chat bridge.
+
+The numeric grounding guard accepts current user inputs, drawing fields and explicitly quoted
+input examples such as `like "2–3 weeks"`. A quoted shop claim without an example marker still
+requires evidence, as do shop figures recalled from older conversational turns.
+
 ## Dashboard surfaces
 
 **Scorecards** — a fixed metric row rendered by `components/dashboard/DashboardMetrics.tsx`

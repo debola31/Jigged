@@ -66,6 +66,31 @@ def test_a_sum_or_difference_of_two_stated_grounded_figures_is_accepted():
     assert unsupported_figures("Quotes rose by 13.", {8.0, 21.0}) == [13.0]
 
 
+@pytest.mark.parametrize("example", ['like "2–3 weeks"', 'for example, “2–3 weeks”', 'such as "10 each"'])
+async def test_quote_input_examples_are_not_shop_figures(example):
+    """PYTHON-FASTAPI-27: a capability answer failed for an example lead time."""
+    text = f"Yes, I can create quotes. Tell me the customer, quantities, and a lead time, {example}."
+    convo = Recording(turns=[_answer(text)])
+    result = await run_with(convo, {"question": "Can you create quotes?"})
+    assert result["answer"] == text
+    assert result["grounding_corrected"] is False
+    assert convo.calls == 1
+
+
+def test_examples_do_not_exempt_real_claims_or_quoted_shop_data():
+    assert unsupported_figures('You have 19 late jobs. Give a lead time like "2–3 weeks".', set()) == [19.0]
+    assert unsupported_figures('The quote says "3 weeks".', set()) == [3.0]
+    assert unsupported_figures('For example, you have 19 late jobs.', set()) == [19.0]
+    assert unsupported_figures('1. Tell me the customer.\n2. Give quantities.\n3. Give the lead time.', set()) == []
+
+
+async def test_current_user_quantities_can_be_repeated_without_a_shop_query():
+    convo = Recording(turns=[_answer('Which customer should I quote the 25 parts for?')])
+    result = await run_with(convo, {"question": "Draft a quote for 25 parts"})
+    assert result["grounding_corrected"] is False
+    assert convo.calls == 1
+
+
 # ------------------------------------------------------------- the handler
 
 

@@ -2,6 +2,7 @@ import { API_BASE_URL } from '@/lib/api';
 import type { Database, Json } from '@/types/database';
 import { getSupabase } from '@/lib/supabase';
 import { todayLocalISODate } from '@/lib/localDate';
+import type { ChatUploadRef } from '@/lib/chatUploads';
 
 // ============================================================
 // Types
@@ -100,6 +101,7 @@ export async function submitChatQuery(
    * under RLS). Omitted for a one-off question; the route then ships no history.
    */
   threadId?: string | null,
+  uploads?: ChatUploadRef[],
 ): Promise<ChatEnqueued> {
   const headers = await getAuthHeaders();
 
@@ -115,6 +117,7 @@ export async function submitChatQuery(
       question,
       today: todayLocalISODate(),
       ...(threadId ? { thread_id: threadId } : {}),
+      ...(uploads?.length ? { uploads } : {}),
     }),
   });
 

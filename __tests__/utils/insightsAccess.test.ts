@@ -127,6 +127,16 @@ describe('submitChatQuery', () => {
     expect(JSON.parse(init.body as string).thread_id).toBe('thread-1');
   });
 
+  it('sends upload references with the question, never a multipart or base64 file body', async () => {
+    fetchMock.mockResolvedValue(response(202, { job_id: 'job-3', status: 'queued', executor: 'worker' }));
+    const uploads = [{ id: 'upload-1', name: 'parts.zip', manifest_path: 'private/manifest.json', part_count: 31, file_count: 93, summary: 'fields' }];
+    await submitChatQuery('co-1', 'Set up these parts', 'thread-1', uploads);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.uploads).toEqual(uploads);
+    expect(body.question).toBe('Set up these parts');
+    expect(body.thread_id).toBe('thread-1');
+  });
+
   it('a 503 carries its status, so the ask bar can show downtime as downtime', async () => {
     // The sentence is the backend's, verbatim. The STATUS is what the component
     // branches on -- before this class existed it matched /offline/ in the prose.

@@ -297,6 +297,12 @@ export async function downloadFileFromStorage(
   return data;
 }
 
+/** Copy inside private Storage without downloading large CAD files through the app server. */
+export async function copyFileInStorage(fromPath: string, toPath: string): Promise<void> {
+  const { error } = await getSupabase().storage.from(getStorageBucket()).copy(fromPath, toPath);
+  if (error) throw toFriendlyError(error, { entity: 'file', fallback: 'Failed to copy that file.' });
+}
+
 /**
  * Move file from one location to another in storage
  */

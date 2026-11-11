@@ -38,6 +38,7 @@
     "ag-grid-community": "^35.0.0",
     "ag-grid-react": "^35.0.0",
     "browser-image-compression": "^2.0.2",
+    "fflate": "^0.8.3",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "mcp-handler": "2.3.0",

@@ -1,26 +1,69 @@
 'use client';
 
 import posthog from 'posthog-js';
+import NextLink from 'next/link';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
+import MuiLink from '@mui/material/Link';
 import Tooltip from '@mui/material/Tooltip';
 import UndoIcon from '@mui/icons-material/Undo';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import ChatBubbleOutlineIcon from '@mui/icons-material/ChatBubbleOutline';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import Inventory2Icon from '@mui/icons-material/Inventory2';
+import ReceiptLongOutlinedIcon from '@mui/icons-material/ReceiptLongOutlined';
 
 import { isOutsideOperation } from '@/types/job';
 import type { OutsideOperationSummary } from '@/types/outsideShipment';
 import type { JobOperation, OperationStatus } from '@/types/job';
 import type { OperationCompletionSummary } from '@/types/operationCompletion';
 import type { OperationActuals } from '@/types/operationInterval';
+import type { VendorPoJobLine } from '@/types/vendorPo';
 import { formatTime } from '@/types/routings';
 import { formatDuration } from '@/lib/duration';
+import { formatShortDate } from '@/lib/purchasing/priceDefault';
+import { VENDOR_PO_OVERDUE } from '@/lib/purchasing/vendorPoStatus';
 import OperationStatusChip from './OperationStatusChip';
+
+/** The vendor PO line an outside step ships against, as the card and the send dialog show it. */
+export interface OperationPoLink {
+  poNumber: string;
+  lineNumber: number;
+  /** The PO's page. */
+  href: string;
+  /** The line's expected date: the earliest due-back of its slips still out, else its need-by. */
+  expectedOn: string | null;
+  isLate: boolean;
+}
+
+/**
+ * The ONE vendor PO line a slip sent on this step would link to — the rule
+ * `create_outside_shipment` applies when it auto-links: an outside-service line for this step,
+ * to this vendor, the line not closed, on a PO that is not closed (a DRAFT counts, so a slip sent
+ * before Mark as sent still links). Archived POs never reach here (`listVendorPoLinesForJob` reads
+ * live POs only).
+ *
+ * Two qualifying lines link to NEITHER in the database, so they name neither here. The PO writers
+ * refuse a second open line per (step, vendor), so that is a state only a race could leave.
+ */
+export function outsidePoLineForOperation(
+  lines: readonly VendorPoJobLine[],
+  operationId: string,
+  vendorId: string | null,
+): VendorPoJobLine | null {
+  const eligible = lines.filter(
+    (l) =>
+      l.lineKind === 'outside_service' &&
+      l.jobOperationId === operationId &&
+      (vendorId === null || l.vendorId === vendorId) &&
+      l.status !== 'closed' &&
+      l.poStatus !== 'closed',
+  );
+  return eligible.length === 1 ? eligible[0] : null;
+}
 
 interface OperationCardProps {
   operation: JobOperation;
@@ -59,6 +102,15 @@ interface OperationCardProps {
    * which is what hides the badge there rather than showing a dead control.
    */
   onShowActivity?: (operationId: string, stepName: string) => void;
+  /**
+   * Outside steps: the vendor PO line this step ships against (a caption with a link), or `null`
+   * when it is on none — then `createPoHref` offers "Create PO". `undefined` while the job's PO
+   * lines are unknown (not loaded, or the read failed): the card then says nothing either way,
+   * because "Create PO" on a failed read is how a step ends up on two POs.
+   */
+  purchaseOrder?: OperationPoLink | null;
+  /** The new-PO form, prefilled with this step. */
+  createPoHref?: string;
 }
 
 // Background and border colors for each status
@@ -94,6 +146,8 @@ export default function OperationCard({
   onSend,
   onReceive,
   onShowActivity,
+  purchaseOrder,
+  createPoHref,
 }: OperationCardProps) {
 
   const status = operation.status as OperationStatus;
@@ -295,6 +349,39 @@ export default function OperationCard({
                 .filter(Boolean)
                 .join(' · ')}
             </Typography>
+          )}
+          {/* THE VENDOR PO, AS A CAPTION — never a third button. The two movements (Send,
+              Receive) stay the controls; the PO is the paperwork they run against, and the slip
+              links itself to it at send. "Create PO" only on a step that still has work at the
+              vendor to pay for, and never while the PO lines are unknown. */}
+          {isExternal && purchaseOrder && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.5, flexWrap: 'wrap' }}>
+              <ReceiptLongOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+              <Typography variant="caption" color="text.secondary">
+                <MuiLink component={NextLink} href={purchaseOrder.href} sx={{ fontWeight: 500 }}>
+                  {purchaseOrder.poNumber}
+                </MuiLink>
+                {purchaseOrder.expectedOn ? ` · due ${formatShortDate(purchaseOrder.expectedOn)}` : ''}
+                {purchaseOrder.isLate && (
+                  <>
+                    {' · '}
+                    <Box component="span" sx={{ color: 'warning.light', fontWeight: 600 }}>
+                      {VENDOR_PO_OVERDUE.label}
+                    </Box>
+                  </>
+                )}
+              </Typography>
+            </Box>
+          )}
+          {isExternal && purchaseOrder === null && createPoHref && status !== 'completed' && (
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.75, mt: 0.5 }}>
+              <ReceiptLongOutlinedIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+              <Typography variant="caption">
+                <MuiLink component={NextLink} href={createPoHref}>
+                  Create PO
+                </MuiLink>
+              </Typography>
+            </Box>
           )}
         </Box>
 

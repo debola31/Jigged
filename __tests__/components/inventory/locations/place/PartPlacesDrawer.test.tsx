@@ -22,9 +22,15 @@ vi.mock('@/utils/inventoryLocationsAccess', () => ({
 vi.mock('@/utils/lotCertificatesAccess', () => ({
   listLotCertificatesForLots: vi.fn(async () => new Map()),
 }));
+// What is on order for the part (plan §3.10): nothing, unless a case says otherwise.
+vi.mock('@/utils/vendorPoAccess', () => ({
+  getOnOrderForParts: vi.fn(async () => new Map()),
+}));
 
 import PartPlacesDrawer from '@/components/inventory/locations/place/PartPlacesDrawer';
 import { getBalancesForPart } from '@/utils/inventoryLocationsAccess';
+import { getOnOrderForParts } from '@/utils/vendorPoAccess';
+import type { PartOnOrder } from '@/types/vendorPo';
 
 const PART = { id: 'p-oring', name: 'BUY-ORING-214', unit: 'ea' };
 
@@ -159,5 +165,77 @@ describe('PartPlacesDrawer', () => {
     setup(null);
     expect(screen.queryByRole('heading', { name: 'BUY-ORING-214' })).not.toBeInTheDocument();
     expect(getBalancesForPart).not.toHaveBeenCalled();
+  });
+});
+
+describe('PartPlacesDrawer — also on order (plan §3.10, criterion B4)', () => {
+  const onOrder = (over: Partial<PartOnOrder> = {}): PartOnOrder => ({
+    partId: 'p-oring',
+    stockUnit: 'ea',
+    onOrder: 288,
+    onDraft: 0,
+    nextExpectedOn: '2026-03-09',
+    openLineCount: 1,
+    draftLineCount: 0,
+    unitMismatchLineCount: 0,
+    refs: [
+      {
+        vendorPurchaseOrderId: 'po-1042',
+        poNumber: 'PO-1042',
+        vendorId: 'v1',
+        lineId: 'line-1',
+        lineNumber: 1,
+        stockQuantity: 288,
+        expectedOn: '2026-03-09',
+        isDraft: false,
+        status: 'open',
+      },
+    ],
+    ...over,
+  });
+
+  it('says what is on order, with the PO and when it is due, as a link to it', async () => {
+    vi.mocked(getOnOrderForParts).mockResolvedValue(new Map([['p-oring', onOrder()]]));
+    setup();
+
+    const line = await screen.findByText(/also on order: 288 ea/i);
+    expect(line).toHaveTextContent('Also on order: 288 ea · PO-1042 due 3/9/26');
+    expect(screen.getByRole('link', { name: 'PO-1042' })).toHaveAttribute(
+      'href',
+      '/dashboard/co1/purchasing/orders/po-1042',
+    );
+    expect(getOnOrderForParts).toHaveBeenCalledWith('co1', ['p-oring']);
+  });
+
+  it('keeps drafts out of "on order" — the vendor has not seen them — and shows them apart', async () => {
+    vi.mocked(getOnOrderForParts).mockResolvedValue(
+      new Map([
+        [
+          'p-oring',
+          onOrder({
+            onOrder: 0,
+            onDraft: 144,
+            refs: [{ ...onOrder().refs[0], poNumber: 'PO-1050', vendorPurchaseOrderId: 'po-1050', isDraft: true, status: 'draft', stockQuantity: 144 }],
+          }),
+        ],
+      ]),
+    );
+    setup();
+    expect(await screen.findByText('+144 ea on a draft PO, not sent yet')).toBeInTheDocument();
+    expect(screen.queryByText(/also on order/i)).not.toBeInTheDocument();
+  });
+
+  it('says nothing when nothing is on order', async () => {
+    setup();
+    await screen.findByRole('heading', { name: 'BUY-ORING-214' });
+    await screen.findByText('Cabinet 3 › Shelf A');
+    expect(screen.queryByText(/on order/i)).not.toBeInTheDocument();
+  });
+
+  /** A failed read must not look like "nothing on order" — that is the line's whole point. */
+  it('says it could not check, rather than nothing, when the read fails', async () => {
+    vi.mocked(getOnOrderForParts).mockRejectedValue(new Error('Failed to load what is on order.'));
+    setup();
+    expect(await screen.findByText(/couldn't check what's on order/i)).toBeInTheDocument();
   });
 });

@@ -277,7 +277,7 @@ export default function PartIdentitySection({
             onChange={onReorderChange}
             onBlur={handleBlur}
             error={!!fieldErrors.reorder_point}
-            helperText={fieldErrors.reorder_point || 'Optional. Triggers low-stock alerts.'}
+            helperText={fieldErrors.reorder_point || 'Optional. Puts this part on To buy when stock plus orders reach it.'}
             disabled={busy}
             InputLabelProps={{ shrink: true }}
             inputProps={{ min: 0, step: 'any', inputMode: 'decimal' }}

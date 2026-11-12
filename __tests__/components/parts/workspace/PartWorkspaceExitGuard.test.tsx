@@ -15,6 +15,8 @@ const render = (ui: React.ReactElement) =>
   rtlRender(<ThemeProvider theme={jiggedTheme}>{ui}</ThemeProvider>);
 
 const mockReplace = vi.fn();
+// The query string the page opens with — empty unless a test asks for a tab.
+const nav = vi.hoisted(() => ({ search: '' }));
 const mockGetPartWithRelations = vi.fn();
 const mockGetPartUnitConversions = vi.fn();
 const mockGetPartNamesByIds = vi.fn();
@@ -35,7 +37,7 @@ vi.mock('next/navigation', () => ({
   useParams: () => ({ partId: 'p1', companyId: 'c1' }),
   useRouter: () => ({ replace: mockReplace, push: vi.fn() }),
   usePathname: () => '/dashboard/c1/parts/p1',
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => new URLSearchParams(nav.search),
 }));
 vi.mock('@/utils/partsAccess', () => ({
   getPartWithRelations: (...a: unknown[]) => mockGetPartWithRelations(...a),
@@ -56,6 +58,16 @@ vi.mock('@/components/parts/workspace/tabs/WorkspaceTab', () => ({
   default: ({ onDirtyChange }: { onDirtyChange?: (k: string, d: boolean) => void }) => (
     <button type="button" onClick={() => onDirtyChange?.('pricing', true)}>
       stage-an-edit
+    </button>
+  ),
+}));
+
+// The Buying tab (bought parts only) stands in the same way: its open price-sheet editor reports
+// dirty state up under its own key.
+vi.mock('@/components/parts/workspace/tabs/BuyingTab', () => ({
+  default: ({ onDirtyChange }: { onDirtyChange?: (k: string, d: boolean) => void }) => (
+    <button type="button" onClick={() => onDirtyChange?.('buying', true)}>
+      stage-a-sheet-edit
     </button>
   ),
 }));
@@ -134,5 +146,74 @@ describe('PartWorkspace — unsaved-changes exit guard', () => {
 
     await waitFor(() => expect(mockReplace).toHaveBeenCalled());
     expect(String(mockReplace.mock.calls[0][0])).toContain('tab=usage');
+  });
+});
+
+/**
+ * The Buying tab (purchasing plan §3.8): bought parts only, behind the same guard as every other
+ * tab — leaving the Workspace with unsaved pricing for Buying asks first, and an open price-sheet
+ * edit on Buying is staged work too.
+ */
+describe('PartWorkspace — the Buying tab', () => {
+  const user = userEvent.setup();
+  const boughtPart = { ...part, part_name: 'BAR-6061', source: 'bought' } as unknown as Part;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    nav.search = '';
+    mockGetPartUnitConversions.mockResolvedValue([]);
+    mockGetPartNamesByIds.mockResolvedValue({});
+    mockGetPartCostExplain.mockResolvedValue({
+      is_priceable: true,
+      missing_markups: [],
+      missing_op_rates: [],
+      missing_leaves: [],
+    });
+  });
+
+  it('appears for a bought part, and not for a made one', async () => {
+    mockGetPartWithRelations.mockResolvedValue(part);
+    const { unmount } = render(<PartWorkspace mode="existing" />);
+    await screen.findByRole('tab', { name: /Usage/i });
+    expect(screen.queryByRole('tab', { name: /Buying/i })).toBeNull();
+    unmount();
+
+    mockGetPartWithRelations.mockResolvedValue(boughtPart);
+    render(<PartWorkspace mode="existing" />);
+    expect(await screen.findByRole('tab', { name: /Buying/i })).toBeInTheDocument();
+  });
+
+  it('switching to Buying with unsaved pricing asks first', async () => {
+    mockGetPartWithRelations.mockResolvedValue(boughtPart);
+    render(<PartWorkspace mode="existing" />);
+    await user.click(await screen.findByRole('button', { name: /stage-an-edit/i }));
+
+    await user.click(screen.getByRole('tab', { name: /Buying/i }));
+
+    expect(await screen.findByText(/You have unsaved changes/i)).toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: /Discard changes/i }));
+    await waitFor(() => expect(mockReplace).toHaveBeenCalled());
+    expect(String(mockReplace.mock.calls[0][0])).toContain('tab=buying');
+  });
+
+  it('an open price-sheet edit on Buying is guarded too', async () => {
+    nav.search = 'tab=buying';
+    mockGetPartWithRelations.mockResolvedValue(boughtPart);
+    render(<PartWorkspace mode="existing" />);
+    await user.click(await screen.findByRole('button', { name: /stage-a-sheet-edit/i }));
+
+    await user.click(screen.getByRole('tab', { name: /Workspace/i }));
+
+    expect(await screen.findByText(/You have unsaved changes/i)).toBeInTheDocument();
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
+
+  it('a made part opened at ?tab=buying lands on the Workspace tab', async () => {
+    nav.search = 'tab=buying';
+    mockGetPartWithRelations.mockResolvedValue(part);
+    render(<PartWorkspace mode="existing" />);
+    expect(await screen.findByRole('button', { name: /stage-an-edit/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /stage-a-sheet-edit/i })).toBeNull();
   });
 });

@@ -19,10 +19,79 @@ import {
   stockEquivalentLabel,
   toPurchaseQuantity,
   toStockQuantity,
+  unitNameKey,
   wholePurchaseUnits,
 } from '@/lib/purchasing/purchaseUnits';
 
 const barRow = { from_unit: 'bar', to_primary_factor: 144 };
+
+/**
+ * The database compares unit names by `unit_name_key` (migration 20261110043700): the aliases
+ * applied case-sensitively, then lower-cased. So "Bar" IS a part's "bar" conversion to the RPC. A
+ * TypeScript resolver that compared spellings exactly called that unit incomparable, asked the
+ * person for a factor the part already has, and tried to store a second row for one unit (L1).
+ */
+describe('unit names compare the way the database compares them (L1)', () => {
+  it('unitNameKey is the twin of SQL unit_name_key: aliases as written, then lower-cased', () => {
+    expect(unitNameKey('Bar')).toBe('bar');
+    expect(unitNameKey(' bar ')).toBe('bar');
+    expect(unitNameKey('ea')).toBe('each');
+    expect(unitNameKey('in')).toBe('inches');
+    // Case-sensitive aliases, exactly as the SQL CASE reads them.
+    expect(unitNameKey('L')).toBe('liters');
+    expect(unitNameKey('mL')).toBe('milliliters');
+    expect(unitNameKey('FT')).toBe('ft');
+    expect(unitNameKey(null)).toBe('');
+  });
+
+  it('reads "Bar" on a part with a "bar" conversion as that conversion, in the stored spelling', () => {
+    expect(resolvePurchaseUnit('Bar', 'inches', [barRow])).toEqual({
+      kind: 'converted', unit: 'bar', stockUnit: 'inches', factor: 144, source: 'conversion',
+    });
+    expect(resolvePurchaseUnit(' BAR ', 'inches', [barRow])).toMatchObject({ kind: 'converted', unit: 'bar', factor: 144 });
+  });
+
+  it('reads a stored "Bar" for a typed "bar" the same way', () => {
+    expect(resolvePurchaseUnit('bar', 'inches', [{ from_unit: 'Bar', to_primary_factor: 144 }])).toMatchObject({
+      kind: 'converted', unit: 'Bar', factor: 144, source: 'conversion',
+    });
+  });
+
+  it('prefers the conversion spelled exactly as typed', () => {
+    const conversions = [
+      { from_unit: 'bar', to_primary_factor: 144 },
+      { from_unit: 'Bar', to_primary_factor: 144 },
+    ];
+    expect(resolvePurchaseUnit('Bar', 'inches', conversions)).toMatchObject({ unit: 'Bar' });
+    expect(resolvePurchaseUnit('bar', 'inches', conversions)).toMatchObject({ unit: 'bar' });
+  });
+
+  it('treats the stock unit in another case as the stock unit, written as the part spells it', () => {
+    expect(resolvePurchaseUnit('bar', 'Bar', [])).toEqual({ kind: 'same', unit: 'Bar', stockUnit: 'Bar', factor: 1 });
+    expect(resolvePurchaseUnit('BAG', 'bag', [])).toMatchObject({ kind: 'same', unit: 'bag' });
+  });
+
+  it('still refuses a shop unit the part has no conversion for, whatever its case', () => {
+    expect(resolvePurchaseUnit('Bar', 'inches', [])).toEqual({ kind: 'incomparable', unit: 'Bar', stockUnit: 'inches' });
+  });
+
+  it('lists one option per unit, however its rows are capitalised', () => {
+    const options = purchaseUnitOptions('inches', [
+      { from_unit: 'bar', to_primary_factor: 144 },
+      { from_unit: 'Bar', to_primary_factor: 144 },
+    ]);
+    expect(options.filter((o) => o.unit.toLowerCase() === 'bar')).toHaveLength(1);
+  });
+
+  it('does not offer the stock unit a second time through a differently-cased conversion row', () => {
+    const options = purchaseUnitOptions('bag', [{ from_unit: 'Bag', to_primary_factor: 1 }]);
+    expect(options.map((o) => o.unit)).toEqual(['bag']);
+  });
+
+  it('takes the default purchase unit from a sheet written in another case', () => {
+    expect(defaultPurchaseUnit({ sheetUnit: 'BAR', lastOrderedUnit: null, stockUnit: 'inches', conversions: [barRow] })).toBe('bar');
+  });
+});
 
 describe('normalizeUnitName — aliases resolve before anything compares (L1)', () => {
   it('maps the unitPresets aliases to their canonical names', () => {

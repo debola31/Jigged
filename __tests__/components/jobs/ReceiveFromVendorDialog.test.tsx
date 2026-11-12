@@ -3,7 +3,15 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
-import ReceiveFromVendorDialog from '@/components/jobs/ReceiveFromVendorDialog';
+
+vi.mock('@/utils/vendorPoAccess', () => ({ closeVendorPoLines: vi.fn() }));
+
+import ReceiveFromVendorDialog, {
+  closePoLineAfterReceipt,
+  type OpenSlipOption,
+  type ReceivePoLine,
+} from '@/components/jobs/ReceiveFromVendorDialog';
+import { closeVendorPoLines } from '@/utils/vendorPoAccess';
 
 const slip = (outstanding: number) => ({
   id: 's1',
@@ -101,5 +109,132 @@ describe('ReceiveFromVendorDialog', () => {
     draw(50);
     await userEvent.clear(qtyField());
     expect(screen.getByRole('button', { name: /Record receipt/i })).toBeDisabled();
+  });
+});
+
+describe('ReceiveFromVendorDialog — the vendor PO line behind the slip', () => {
+  const PO_LINE: ReceivePoLine = {
+    vendorPurchaseOrderId: 'po-1042',
+    poNumber: 'PO-1042',
+    lineId: 'line-2',
+    lineNumber: 2,
+  };
+  const linked = (over: Partial<OpenSlipOption> = {}): OpenSlipOption => ({ ...slip(50), poLine: PO_LINE, ...over });
+
+  const drawSlips = (openSlips: OpenSlipOption[], onSubmit = vi.fn()) => {
+    render(
+      <ThemeProvider theme={jiggedTheme}>
+        <ReceiveFromVendorDialog
+          open
+          vendorName="ProFinish"
+          operationName="Anodize"
+          partName="J-0141"
+          openSlips={openSlips}
+          onClose={vi.fn()}
+          onSubmit={onSubmit}
+        />
+      </ThemeProvider>,
+    );
+    return onSubmit;
+  };
+
+  const alsoClose = () => screen.queryByRole('checkbox', { name: /also close PO-1042 line 2/i });
+
+  it('names the PO beside a lone slip', () => {
+    drawSlips([linked()]);
+    expect(screen.getByText(/Against VPS-0141-2 · PO-1042 — 50 still out/)).toBeInTheDocument();
+  });
+
+  it('names the PO on each slip in the picker', async () => {
+    drawSlips([linked(), { ...slip(10), id: 's2', slip_number: 'VPS-0141-3', poLine: null }]);
+    await userEvent.click(screen.getByRole('combobox', { name: /against which slip/i }));
+    expect(await screen.findByRole('option', { name: /VPS-0141-2 · PO-1042 — 50 still out/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^VPS-0141-3 — 10 still out/ })).toBeInTheDocument();
+  });
+
+  it('offers to close the PO line only under a ticked short-close, and leaves it unticked', async () => {
+    drawSlips([linked()]);
+    await userEvent.clear(qtyField());
+    await userEvent.type(qtyField(), '48');
+    expect(alsoClose()).not.toBeInTheDocument();
+
+    await userEvent.click(closeBox()!);
+    expect(alsoClose()).toBeInTheDocument();
+    expect(alsoClose()).not.toBeChecked();
+    expect(screen.getByText('Also close PO-1042 line 2 — nothing more expected')).toBeInTheDocument();
+  });
+
+  it('submits the PO line to close only when that box is ticked', async () => {
+    const onSubmit = drawSlips([linked()]);
+    await userEvent.clear(qtyField());
+    await userEvent.type(qtyField(), '48');
+    await userEvent.click(closeBox()!);
+    await userEvent.click(alsoClose()!);
+    await userEvent.click(screen.getByRole('button', { name: /Record receipt/i }));
+    expect(onSubmit).toHaveBeenCalledWith({
+      shipmentId: 's1',
+      quantityGood: 48,
+      closeShipment: true,
+      closePoLine: PO_LINE,
+    });
+  });
+
+  it('closes no PO line on a plain short-close', async () => {
+    const onSubmit = drawSlips([linked()]);
+    await userEvent.clear(qtyField());
+    await userEvent.type(qtyField(), '48');
+    await userEvent.click(closeBox()!);
+    await userEvent.click(screen.getByRole('button', { name: /Record receipt/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ closeShipment: true, closePoLine: null }));
+  });
+
+  it('drops the PO-line close with the short-close it depends on', async () => {
+    const onSubmit = drawSlips([linked()]);
+    await userEvent.clear(qtyField());
+    await userEvent.type(qtyField(), '48');
+    await userEvent.click(closeBox()!);
+    await userEvent.click(alsoClose()!);
+    await userEvent.click(closeBox()!);
+    expect(alsoClose()).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Record receipt/i }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ closeShipment: false, closePoLine: null }));
+  });
+
+  it('offers no PO-line close on a slip that is on no PO', async () => {
+    drawSlips([linked({ poLine: null })]);
+    await userEvent.clear(qtyField());
+    await userEvent.type(qtyField(), '48');
+    await userEvent.click(closeBox()!);
+    expect(screen.queryByRole('checkbox', { name: /also close/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('closePoLineAfterReceipt', () => {
+  const PO_LINE: ReceivePoLine = {
+    vendorPurchaseOrderId: 'po-1042',
+    poNumber: 'PO-1042',
+    lineId: 'line-2',
+    lineNumber: 2,
+  };
+
+  it('closes the one line, after the receipt, and reports nothing on success', async () => {
+    vi.mocked(closeVendorPoLines).mockResolvedValueOnce({} as Awaited<ReturnType<typeof closeVendorPoLines>>);
+    await expect(closePoLineAfterReceipt(PO_LINE)).resolves.toBeNull();
+    expect(closeVendorPoLines).toHaveBeenCalledWith('po-1042', ['line-2'], expect.any(String));
+  });
+
+  it('does nothing when no line was ticked', async () => {
+    vi.mocked(closeVendorPoLines).mockClear();
+    await expect(closePoLineAfterReceipt(null)).resolves.toBeNull();
+    expect(closeVendorPoLines).not.toHaveBeenCalled();
+  });
+
+  /** The receipt already landed; the message must not invite recording it again. */
+  it('says the receipt stands when the line could not be closed', async () => {
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(new Error('That record is not available.'));
+    const message = await closePoLineAfterReceipt(PO_LINE);
+    expect(message).toMatch(/receipt was recorded/i);
+    expect(message).toMatch(/PO-1042 line 2/);
+    expect(message).toMatch(/That record is not available\./);
   });
 });

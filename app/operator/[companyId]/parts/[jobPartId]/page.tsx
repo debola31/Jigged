@@ -218,7 +218,7 @@ export default function OperatorJobTravelerPage() {
             {traveler.customer_po_number && (
               <Box>
                 <Typography variant="caption" color="text.secondary" display="block">
-                  PO #
+                  Customer PO #
                 </Typography>
                 <Typography variant="body2" fontWeight={600}>
                   {traveler.customer_po_number}

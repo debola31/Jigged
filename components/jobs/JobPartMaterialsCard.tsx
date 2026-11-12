@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import NextLink from 'next/link';
 import {
+  Alert,
+  Button,
   Card,
   CardContent,
   Box,
+  Link as MuiLink,
   Typography,
   Chip,
   CircularProgress,
@@ -19,8 +21,11 @@ import {
   Tooltip,
 } from '@mui/material';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import { useLoad } from '@/hooks/useLoad';
+import { purchasingHubPath, vendorPoPath } from '@/lib/purchasingRoutes';
+import { formatShortDate } from '@/lib/purchasing/priceDefault';
 import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
-import type { MaterialRequirement } from '@/types/materialCheck';
+import type { MaterialCheckRow } from '@/types/materialCheck';
 
 interface JobPartMaterialsCardProps {
   /** The made part this job_part produces (job_parts.part_id). */
@@ -63,8 +68,14 @@ const NUM_SX = { fontVariantNumeric: 'tabular-nums' as const };
  *  - **Units that can't be converted show an em dash, never a zero.** A 0 in Short by reads as
  *    "you're fine", which is the one answer we must not give when we can't actually compare.
  *
- * "On order" is absent because purchase orders don't exist yet (Phase 3, #571). A permanently
- * empty column would just train people to ignore the row.
+ * **On order sits beside Short by and never nets it** (plan §3.10). Short by answers J4 — what is
+ * missing from the shelf right now — and steel on a purchase order is not on the shelf. The column
+ * shows the SENT POs with their numbers and due dates, and drafts muted and apart ("+144 on
+ * draft"): the vendor has not seen a draft, so it is not on order. The buy list is where orders are
+ * netted against need, and "See To buy" opens it on this job.
+ *
+ * **A failed load is an error with Retry**, never "No materials on this part's BOM" — the empty
+ * state is the one thing a failure must not say.
  */
 export default function JobPartMaterialsCard({
   partId,
@@ -74,27 +85,20 @@ export default function JobPartMaterialsCard({
 }: JobPartMaterialsCardProps) {
   const params = useParams();
   const companyId = params.companyId as string;
-  const [rows, setRows] = useState<MaterialRequirement[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    getJobPartMaterialCheck({
-      companyId,
-      jobId,
-      jobPartId,
-      madePartId: partId,
-      orderQuantity: orderQuantity ?? 0,
-    })
-      .then((data) => {
-        if (!cancelled) setRows(data);
-      })
-      .catch(() => {
-        if (!cancelled) setRows([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [companyId, jobId, jobPartId, partId, orderQuantity]);
+  const { data, loading, error, reload } = useLoad(
+    () =>
+      getJobPartMaterialCheck({
+        companyId,
+        jobId,
+        jobPartId,
+        madePartId: partId,
+        orderQuantity: orderQuantity ?? 0,
+      }),
+    [companyId, jobId, jobPartId, partId, orderQuantity ?? 0],
+  );
+  // Rows only from a load that SUCCEEDED: a failure keeps whatever was there before, and a first
+  // failure would otherwise fall through to the empty state.
+  const rows: MaterialCheckRow[] | null = error ? null : data;
 
   const shortCount = (rows ?? []).filter((r) => r.status === 'short').length;
   const oddCount = (rows ?? []).filter(
@@ -122,12 +126,34 @@ export default function JobPartMaterialsCard({
           {shortCount > 0 && (
             <Chip size="small" color="warning" label={`${shortCount} short`} />
           )}
+          {/* The next step for a shortage, beside the chip rather than inside it: the chip stays
+              plain text (see above), and this names where it goes. */}
+          {shortCount > 0 && (
+            <MuiLink
+              component={NextLink}
+              href={`${purchasingHubPath(companyId, 'to-buy')}&job=${encodeURIComponent(jobId)}`}
+              variant="body2"
+            >
+              See To buy
+            </MuiLink>
+          )}
           {oddCount > 0 && (
             <Chip size="small" variant="outlined" label={`${oddCount} need attention`} />
           )}
         </Box>
 
-        {rows === null ? (
+        {error ? (
+          <Alert
+            severity="error"
+            action={
+              <Button color="inherit" size="small" onClick={() => void reload()}>
+                Retry
+              </Button>
+            }
+          >
+            Couldn&apos;t load the materials for this part.
+          </Alert>
+        ) : loading || rows === null ? (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 2 }}>
             <CircularProgress size={20} />
           </Box>
@@ -146,6 +172,7 @@ export default function JobPartMaterialsCard({
                     <TableCell align="right" sx={HEAD_SX}>On hand</TableCell>
                     <TableCell align="right" sx={HEAD_SX}>Issued</TableCell>
                     <TableCell align="right" sx={HEAD_SX}>Short by</TableCell>
+                    <TableCell align="right" sx={HEAD_SX}>On order</TableCell>
                   </TableRow>
                 </TableHead>
                 <TableBody>
@@ -162,7 +189,7 @@ export default function JobPartMaterialsCard({
   );
 }
 
-function MaterialRow({ row, companyId }: { row: MaterialRequirement; companyId: string }) {
+function MaterialRow({ row, companyId }: { row: MaterialCheckRow; companyId: string }) {
   const unit = row.stockUnit ?? row.bomUnit;
 
   return (
@@ -228,6 +255,46 @@ function MaterialRow({ row, companyId }: { row: MaterialRequirement; companyId: 
           </Typography>
         )}
       </TableCell>
+
+      <TableCell align="right" sx={{ ...NUM_SX, whiteSpace: 'nowrap' }}>
+        <OnOrderCell row={row} companyId={companyId} />
+      </TableCell>
     </TableRow>
+  );
+}
+
+/**
+ * Sent POs one per line — "PO-1042 · 288 each · due 3/9/26" — then drafts, muted and summed
+ * ("+144 each on draft"), never as a PO link: a draft has not gone to the vendor. In the stock
+ * unit, the same figures `part_on_order` gives the buy list and MCP.
+ */
+function OnOrderCell({ row, companyId }: { row: MaterialCheckRow; companyId: string }) {
+  const unit = row.stockUnit ?? row.bomUnit;
+  const sent = row.onOrderRefs.filter((r) => !r.isDraft);
+  const onDraft = row.onDraft ?? 0;
+  if (sent.length === 0 && onDraft <= 0) {
+    return (
+      <Typography component="span" variant="body2" color="text.disabled">
+        —
+      </Typography>
+    );
+  }
+  return (
+    <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25 }}>
+      {sent.map((ref) => (
+        <Typography key={ref.vendorPurchaseOrderId} component="span" variant="body2" sx={NUM_SX}>
+          <MuiLink component={NextLink} href={vendorPoPath(companyId, ref.vendorPurchaseOrderId)}>
+            {ref.poNumber}
+          </MuiLink>
+          {` · ${fmt(ref.stockQuantity)} ${unit}`}
+          {ref.expectedOn ? ` · due ${formatShortDate(ref.expectedOn)}` : ''}
+        </Typography>
+      ))}
+      {onDraft > 0 && (
+        <Typography component="span" variant="caption" color="text.secondary" sx={NUM_SX}>
+          {`+${fmt(onDraft)} ${unit} on draft`}
+        </Typography>
+      )}
+    </Box>
   );
 }

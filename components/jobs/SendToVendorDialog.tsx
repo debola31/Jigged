@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
@@ -8,6 +9,7 @@ import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
 import DialogTitle from '@mui/material/DialogTitle';
+import MuiLink from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
@@ -25,6 +27,16 @@ export interface SendToVendorSubmit {
   notes: string | null;
 }
 
+/** The vendor PO line this send will ship against — the slip links itself to it. */
+export interface SendToVendorPoLine {
+  poNumber: string;
+  lineNumber: number;
+  /** The PO's page. */
+  href: string;
+  /** The line's need-by date, which prefills Due back. `null`: nothing to take it from. */
+  needByOn: string | null;
+}
+
 interface SendToVendorDialogProps {
   open: boolean;
   vendorId: string | null;
@@ -35,6 +47,13 @@ interface SendToVendorDialogProps {
   qtyToSend: number;
   /** The routing step's own text — the natural first draft of what to tell the vendor. */
   defaultInstructions?: string | null;
+  /**
+   * The step's open vendor PO line, or `null` when it is on none (then `createPoHref` offers one).
+   * `undefined` while that is unknown: the dialog then says nothing about POs at all.
+   */
+  poLine?: SendToVendorPoLine | null;
+  /** The new-PO form, prefilled with this step. */
+  createPoHref?: string;
   busy?: boolean;
   onClose: () => void;
   onSubmit: (v: SendToVendorSubmit) => void;
@@ -45,14 +64,23 @@ interface SendToVendorDialogProps {
  * that has not gone out yet — so the common case is one click, and dialling it
  * down is what makes send-50-now-50-later reachable at all.
  *
- * TWO THINGS ARE DELIBERATELY NOT DEFAULTED:
+ * TWO THINGS ARE DELIBERATELY NOT INVENTED:
  *
- * - **Due back is empty.** There is no vendor lead-time data anywhere in the
- *   product, so any date here would be invented, and an invented promise on a
- *   printed document is worse than a blank line the shop fills in.
+ * - **Due back comes from the vendor PO line, or nowhere.** The shop's own
+ *   need-by date on the step's PO line is a date somebody chose for exactly this
+ *   work, so it prefills. Without one the field stays empty: there is no vendor
+ *   lead-time data anywhere in the product, so any other date would be invented,
+ *   and an invented promise on a printed document is worse than a blank line the
+ *   shop fills in.
  * - **A vendor's ship-to is not guessed** when there is more than one and none is
  *   marked default. A second address is as likely to be an accounts-receivable
  *   desk as a second plant.
+ *
+ * THE PO LINE IS NAMED, NOT PICKED. `create_outside_shipment` links the slip
+ * itself to the step's one open outside line (a draft counts), and the PO writers
+ * allow only one per step and vendor — so a picker would offer one choice. The
+ * dialog says which line, read-only, with a link; correcting a link is the PO
+ * page's job. A step on no PO gets a "Create PO for this step" link instead.
  *
  * Missing address WARNS and does not block: the slip prints "(No address on
  * file)" and the parts still need to go out today.
@@ -65,6 +93,8 @@ export default function SendToVendorDialog({
   partName,
   qtyToSend,
   defaultInstructions,
+  poLine,
+  createPoHref,
   busy = false,
   onClose,
   onSubmit,
@@ -72,7 +102,7 @@ export default function SendToVendorDialog({
   // Mounted fresh each open (the parent renders it only while an op is
   // selected), so initialising from props is enough — no reset effect.
   const [qtyInput, setQtyInput] = useState(() => (qtyToSend > 0 ? String(qtyToSend) : ''));
-  const [dueBack, setDueBack] = useState('');
+  const [dueBack, setDueBack] = useState(() => poLine?.needByOn ?? '');
   const [notes, setNotes] = useState(() => defaultInstructions?.trim() ?? '');
   const [addressId, setAddressId] = useState<string>('');
   const [choices, setChoices] = useState<{ id: string; label: string }[]>([]);
@@ -111,9 +141,30 @@ export default function SendToVendorDialog({
     <Dialog open={open} onClose={onClose} maxWidth="xs" fullWidth>
       <DialogTitle>Send to {vendorName}</DialogTitle>
       <DialogContent>
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: poLine === undefined ? 2 : 0.5 }}>
           {operationName} · {partName}
         </Typography>
+        {poLine && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Ships against{' '}
+            <MuiLink component={NextLink} href={poLine.href} sx={{ fontWeight: 500 }}>
+              {poLine.poNumber} line {poLine.lineNumber}
+            </MuiLink>
+          </Typography>
+        )}
+        {poLine === null && (
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Not on a purchase order
+            {createPoHref && (
+              <>
+                {' · '}
+                <MuiLink component={NextLink} href={createPoHref}>
+                  Create PO for this step
+                </MuiLink>
+              </>
+            )}
+          </Typography>
+        )}
 
         <TextField
           label="Pieces going out"
@@ -134,7 +185,11 @@ export default function SendToVendorDialog({
           onChange={(e) => setDueBack(e.target.value)}
           fullWidth
           slotProps={{ inputLabel: { shrink: true } }}
-          helperText="Optional. Prints on the slip so the vendor knows when you need them."
+          helperText={
+            poLine?.needByOn && dueBack === poLine.needByOn
+              ? `From ${poLine.poNumber}'s need-by date. Prints on the slip.`
+              : 'Optional. Prints on the slip so the vendor knows when you need them.'
+          }
           sx={{ mb: 2 }}
         />
 

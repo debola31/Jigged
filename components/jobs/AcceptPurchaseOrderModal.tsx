@@ -297,7 +297,7 @@ export default function AcceptPurchaseOrderModal({
       fullWidth
       TransitionProps={{ onEnter: handleEnter }}
     >
-      <DialogTitle>Accept Purchase Order</DialogTitle>
+      <DialogTitle>Accept customer PO</DialogTitle>
       <DialogContent>
         <Box sx={{ pt: 1 }}>
           {error != null && (

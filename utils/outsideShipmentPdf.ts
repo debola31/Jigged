@@ -30,6 +30,7 @@ import type { Styles } from 'jspdf-autotable';
 import type { Company } from '@/utils/companyAccess';
 import { readLogoIncludesName } from '@/lib/companyDefaults';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import { outsideShipmentPoNumber } from '@/utils/outsideShipmentsAccess';
 import {
   attributionLine,
   buildAddressBlockLines,
@@ -91,6 +92,11 @@ export async function generateOutsideShipmentPdf(
   ];
   if (shipment.due_back_on) metaLines.push(`Due Back: ${formatDate(shipment.due_back_on)}`);
   if (shipment.job?.job_number) metaLines.push(`Job: ${shipment.job.job_number}`);
+  // The vendor PO the slip ships against, BY JOIN on the slip's line link -- never a copy frozen on
+  // the slip, because the link is set at send, by the line's insert or by a relink, and cleared when
+  // the PO is archived. To the plater it is simply "our PO": the number their invoice should quote.
+  const poNumber = outsideShipmentPoNumber(shipment);
+  if (poNumber) metaLines.push(`PO: ${poNumber}`);
   const metaBlockBottom = headerTop + 20 + metaLines.length * 14;
 
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);

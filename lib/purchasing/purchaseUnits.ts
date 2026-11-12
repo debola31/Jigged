@@ -58,12 +58,39 @@ export function normalizeUnitName(unit: string | null | undefined): string {
   return trimmed;
 }
 
+/**
+ * The TypeScript twin of SQL `unit_name_key` (migration 20261110043700): the trimmed name with
+ * `UNIT_ALIASES` applied exactly as the database applies them — case-sensitively, so `L` and `mL`
+ * survive — then lower-cased. Two names the database calls the same unit have equal keys, so
+ * "Bar" IS a part's "bar" conversion to `part_unit_factor`.
+ */
+export function unitNameKey(unit: string | null | undefined): string {
+  return resolveUnitAlias((unit ?? '').trim()).toLowerCase();
+}
+
+/**
+ * Do two names mean one unit? When the database's key says so ("Bar" and "bar"), and also when
+ * both are the same standard unit in any case ("FT" and "feet") — the importer's reading, which is
+ * safe because whatever matches, the spelling this module hands back to WRITE is one the database
+ * agrees with: the part's own stock unit, a stored row's spelling, or a preset's canonical name.
+ */
+function sameUnitName(a: string, b: string): boolean {
+  const keyA = unitNameKey(a);
+  const keyB = unitNameKey(b);
+  if (keyA === '' || keyB === '') return false;
+  if (keyA === keyB) return true;
+  return normalizeUnitName(a).toLowerCase() === normalizeUnitName(b).toLowerCase();
+}
+
 function usableFactor(factor: unknown): number | null {
   const n = typeof factor === 'number' ? factor : Number(factor);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-/** The part's stored conversion for `unit`: exact spelling first, then through aliases. */
+/**
+ * The part's stored conversion for `unit`: the exact spelling first, then any row the database
+ * would call the same unit (`unitNameKey`, aliases, case) — returned in the row's own spelling.
+ */
 function findConversion(
   unit: string,
   conversions: readonly UnitConversionRow[],
@@ -73,13 +100,13 @@ function findConversion(
     .filter((c): c is { unit: string; factor: number } => c.unit !== '' && c.factor !== null);
   const exact = usable.find((c) => c.unit === unit.trim());
   if (exact) return exact;
-  const wanted = normalizeUnitName(unit);
-  return usable.find((c) => normalizeUnitName(c.unit) === wanted) ?? null;
+  return usable.find((c) => sameUnitName(c.unit, unit)) ?? null;
 }
 
 /**
  * How `unit` relates to the part's stock unit. A blank unit means the stock unit. Anything that
- * cannot be related is `incomparable` — never factor 1.
+ * cannot be related is `incomparable` — never factor 1. Names compare the way the database
+ * compares them, so a unit in another case is the same unit.
  */
 export function resolvePurchaseUnit(
   unit: string | null | undefined,
@@ -89,7 +116,7 @@ export function resolvePurchaseUnit(
   const stock = (stockUnit ?? '').trim();
   const typed = (unit ?? '').trim();
   if (!stock) return { kind: 'incomparable', unit: normalizeUnitName(typed), stockUnit: null };
-  if (!typed || normalizeUnitName(typed) === normalizeUnitName(stock)) {
+  if (!typed || sameUnitName(typed, stock)) {
     return { kind: 'same', unit: stock, stockUnit: stock, factor: 1 };
   }
   const stored = findConversion(typed, conversions);
@@ -186,13 +213,13 @@ export function purchaseUnitOptions(
   const stock = (stockUnit ?? '').trim();
   if (!stock) return [];
   const options: PurchaseUnitBasis[] = [resolvePurchaseUnit(stock, stock, conversions)];
-  const seen = new Set([normalizeUnitName(stock)]);
+  // One option per unit as the database counts units, so "Bar" and "bar" are never offered twice.
+  const offered = [stock];
   const add = (unit: string) => {
-    const key = normalizeUnitName(unit);
-    if (!key || seen.has(key)) return;
+    if (!unit.trim() || offered.some((u) => sameUnitName(u, unit))) return;
     const basis = resolvePurchaseUnit(unit, stock, conversions);
     if (basis.kind !== 'converted') return;
-    seen.add(key);
+    offered.push(unit, basis.unit);
     options.push(basis);
   };
   for (const c of conversions) add(c.from_unit);

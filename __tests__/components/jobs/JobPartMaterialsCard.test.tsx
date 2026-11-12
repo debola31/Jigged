@@ -7,6 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
@@ -15,11 +16,11 @@ vi.mock('@/utils/materialCheckAccess', () => ({ getJobPartMaterialCheck: vi.fn()
 
 import JobPartMaterialsCard from '@/components/jobs/JobPartMaterialsCard';
 import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
-import type { MaterialRequirement } from '@/types/materialCheck';
+import type { MaterialCheckRow } from '@/types/materialCheck';
 
 const asMock = (fn: unknown) => fn as ReturnType<typeof vi.fn>;
 
-const row = (over: Partial<MaterialRequirement> & { partId: string }): MaterialRequirement => ({
+const row = (over: Partial<MaterialCheckRow> & { partId: string }): MaterialCheckRow => ({
   bomLineId: `bom-${over.partId}`,
   partName: over.partId.toUpperCase(),
   bomUnit: 'each',
@@ -34,8 +35,9 @@ const row = (over: Partial<MaterialRequirement> & { partId: string }): MaterialR
   shortBy: 0,
   status: 'ok',
   basis: { kind: 'same', unit: 'each' },
-  isLocationTracked: false,
-  locations: [],
+  onOrder: 0,
+  onDraft: 0,
+  onOrderRefs: [],
   ...over,
 });
 
@@ -186,5 +188,77 @@ describe('JobPartMaterialsCard', () => {
   it('says so when the part has no BOM at all', async () => {
     renderCard();
     expect(await screen.findByText(/no materials on this part/i)).toBeInTheDocument();
+  });
+});
+
+describe('JobPartMaterialsCard — on order (plan §3.10, criterion B4)', () => {
+  const refs = [
+    { vendorPurchaseOrderId: 'po-1042', poNumber: 'PO-1042', stockQuantity: 288, expectedOn: '2026-03-09', isDraft: false },
+    { vendorPurchaseOrderId: 'po-1050', poNumber: 'PO-1050', stockQuantity: 144, expectedOn: null, isDraft: true },
+  ];
+
+  it('adds an On order column: sent quantities with their POs, drafts muted apart', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([
+      row({ partId: 'steel', onOrder: 288, onDraft: 144, onOrderRefs: refs }),
+    ]);
+    renderCard();
+
+    expect(await screen.findByRole('columnheader', { name: /on order/i })).toBeInTheDocument();
+    const tr = await rowFor('STEEL');
+    expect(within(tr).getByRole('link', { name: 'PO-1042' })).toHaveAttribute(
+      'href',
+      '/dashboard/co1/purchasing/orders/po-1042',
+    );
+    expect(within(tr).getByText(/288 each · due 3\/9\/26/)).toBeInTheDocument();
+    // A draft is not on order: the vendor has not seen it. Shown apart, and not as a PO link.
+    expect(within(tr).getByText('+144 each on draft')).toBeInTheDocument();
+    expect(within(tr).queryByRole('link', { name: 'PO-1050' })).not.toBeInTheDocument();
+  });
+
+  it('shows an em dash when nothing is on order', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel' })]);
+    renderCard();
+    const tr = await rowFor('STEEL');
+    const cells = within(tr).getAllByRole('cell');
+    expect(cells[cells.length - 1]).toHaveTextContent('—');
+  });
+
+  /** J4 asks about the shelf right now. Steel on a PO is not on the shelf. */
+  it('leaves Short by alone — on order never nets it', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([
+      row({ partId: 'steel', onHand: 10, shortBy: 20, status: 'short', onOrder: 288, onOrderRefs: [refs[0]] }),
+    ]);
+    renderCard();
+    const tr = await rowFor('STEEL');
+    expect(within(tr).getByText('20 each')).toBeInTheDocument();
+  });
+
+  it('links to To buy for this job when something is short', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel', shortBy: 5, status: 'short' })]);
+    renderCard();
+    expect(await screen.findByRole('link', { name: /see to buy/i })).toHaveAttribute(
+      'href',
+      '/dashboard/co1/purchasing?view=to-buy&job=job1',
+    );
+  });
+
+  it('offers no To buy link when nothing is short', async () => {
+    asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel' })]);
+    renderCard();
+    await rowFor('STEEL');
+    expect(screen.queryByRole('link', { name: /see to buy/i })).not.toBeInTheDocument();
+  });
+
+  /** A failed read must never say "No materials on this part's BOM" — the one thing it must not. */
+  it('shows a failed load as an error with Retry, not as "No materials"', async () => {
+    asMock(getJobPartMaterialCheck).mockRejectedValueOnce(new Error('Failed to load the materials for this part.'));
+    renderCard();
+
+    expect(await screen.findByText(/couldn't load the materials/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no materials on this part/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /retry/i }));
+    expect(await screen.findByText(/no materials on this part/i)).toBeInTheDocument();
+    expect(getJobPartMaterialCheck).toHaveBeenCalledTimes(2);
   });
 });

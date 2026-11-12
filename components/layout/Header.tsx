@@ -13,8 +13,10 @@ import AccountMenu from '@/components/layout/AccountMenu';
 import { useDemoMode } from '@/components/providers/DemoModeProvider';
 import { usePageTitle } from './PageTitleProvider';
 import { PARTS_SUBROUTES } from '@/lib/partsSubroutes';
+import { purchasingPageTitle } from '@/lib/purchasingRoutes';
 
-function getPageTitle(pathname: string): string {
+/** Exported so the title rules can be tested without mounting the header. */
+export function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
   // pathname like /dashboard/[companyId]/customers/new -> segments = ['dashboard', companyId, 'customers', 'new']
 
@@ -23,6 +25,12 @@ function getPageTitle(pathname: string): string {
   // `/work-centers/import` wizards this used to share the word with are gone, so no
   // module branch below needs to special-case an `import` segment any more.
   if (segments[2] === 'import') return 'Import your data';
+
+  // Purchasing first, from its own route table: `/purchasing/orders/new` must never fall through
+  // to a branch below that matches a bare `new`, and a page added under /purchasing without a title
+  // fails __tests__/lib/purchasingRoutes.test.ts instead of quietly titling itself the hub.
+  const purchasingTitle = purchasingPageTitle(pathname);
+  if (purchasingTitle !== null) return purchasingTitle;
 
   // Check for quotes routes first
   if (segments.includes('quotes')) {

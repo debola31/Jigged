@@ -17,10 +17,11 @@ import { formatDateOnly, isDateOnlyPast } from '@/lib/localDate';
 import posthog from 'posthog-js';
 import {
   listOutsideShipmentsForCompany,
+  outsideShipmentPoNumber,
   outstandingOn,
   receiveOutsideShipment,
 } from '@/utils/outsideShipmentsAccess';
-import ReceiveFromVendorDialog from './ReceiveFromVendorDialog';
+import ReceiveFromVendorDialog, { closePoLineAfterReceipt, receivePoLineFor } from './ReceiveFromVendorDialog';
 import { daysAtVendorBucket } from './outsideWorkMetrics';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 
@@ -56,6 +57,10 @@ function daysSince(iso: string): number {
  * open" the same moment and lets the fetch go through `useLoad` rather than an
  * effect that sets state.
  *
+ * Each row names the vendor PO the slip ships against ("PO-1042"), as TEXT: it is
+ * what the plater quotes back on the phone, and a second link would break the
+ * one-target row below.
+ *
  * Each row is ONE link -- the job number -- deep-linking to `?op=` on the job,
  * which OperationsPanel scroll-highlights. Landing at the top of a job with
  * fourteen operations and being told to find the anodize step is how a read-only
@@ -70,6 +75,8 @@ export default function OutsideWorkDrawer({
   const router = useRouter();
   const [receiving, setReceiving] = useState<OutsideShipmentWithRelations | null>(null);
   const [busy, setBusy] = useState(false);
+  /** What the last receive could not finish (a refused receipt, or a PO line left open). */
+  const [notice, setNotice] = useState<{ severity: 'error' | 'warning'; text: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const { data, loading, error } = useLoad(
     () => listOutsideShipmentsForCompany(companyId, { openOnly: true }),
@@ -124,6 +131,12 @@ export default function OutsideWorkDrawer({
           </Alert>
         ) : null}
 
+        {notice && (
+          <Alert severity={notice.severity} sx={{ mb: 2 }} onClose={() => setNotice(null)}>
+            {notice.text}
+          </Alert>
+        )}
+
         {loading && !error && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress size={26} />
@@ -153,6 +166,7 @@ export default function OutsideWorkDrawer({
 
             {group.slips.map((s) => {
               const out = outstandingOn(s);
+              const poNumber = outsideShipmentPoNumber(s);
               const days = daysSince(s.shipped_at);
               const overdue = isDateOnlyPast(s.due_back_on);
               return (
@@ -191,6 +205,7 @@ export default function OutsideWorkDrawer({
                   </Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
                     {s.service_name}
+                    {poNumber ? ` · ${poNumber}` : ''}
                   </Typography>
                   <Box sx={{ flex: 1 }} />
                   <Typography
@@ -230,12 +245,14 @@ export default function OutsideWorkDrawer({
               slip_number: receiving.slip_number,
               shipped_at: receiving.shipped_at,
               outstanding: outstandingOn(receiving),
+              poLine: receivePoLineFor(receiving),
             },
           ]}
           busy={busy}
           onClose={() => setReceiving(null)}
           onSubmit={async (v) => {
             setBusy(true);
+            setNotice(null);
             try {
               // The SAME function the operation card calls. Two surfaces, one
               // write path -- which is what stops them drifting.
@@ -250,9 +267,20 @@ export default function OutsideWorkDrawer({
                 was_backfilled: false,
                 days_at_vendor_bucket: daysAtVendorBucket(receiving.shipped_at),
               });
+              // The same after-the-receipt step as the operation card: the receipt stands either way.
+              const poLineError = await closePoLineAfterReceipt(v.closePoLine);
+              if (poLineError) setNotice({ severity: 'warning', text: poLineError });
               setReceiving(null);
               setReloadKey((n) => n + 1);
               onReceived?.();
+            } catch (err) {
+              // A refused receipt closes the dialog and says why here: the dialog has no error
+              // slot of its own, and a failure nobody sees reads as a click that did nothing.
+              setReceiving(null);
+              setNotice({
+                severity: 'error',
+                text: err instanceof Error && err.message ? err.message : 'Failed to record the receipt.',
+              });
             } finally {
               setBusy(false);
             }

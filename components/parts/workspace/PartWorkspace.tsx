@@ -36,6 +36,7 @@ import PartIdentitySection from './PartIdentitySection';
 import PartHeaderBar, { type PartTabDescriptor } from './PartHeaderBar';
 import { getPartSetupStatus, type PartSetupStatus } from './partSetupStatus';
 import WorkspaceTab from './tabs/WorkspaceTab';
+import BuyingTab from './tabs/BuyingTab';
 import UsageTab from './tabs/UsageTab';
 import HistoryTab from './tabs/HistoryTab';
 import FilesTab from './tabs/FilesTab';
@@ -271,8 +272,15 @@ export default function PartWorkspace({
   };
 
   // --- Tabs (URL-addressable via ?tab=) ---
+  const partSource = part?.source ?? null;
   const visibleTabs = useMemo<PartTabDescriptor[]>(() => {
     const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
+    // Bought parts only: who it is bought from, at what price, and what is on order
+    // (purchasing plan §3.8). A made part's cost is its routing and materials, so the tab
+    // would be empty for it — and a tab that is blank most times you open it is one people
+    // stop opening (the Storage lesson below). `?tab=buying` on a made part falls back to
+    // Workspace like any unknown slug.
+    if (partSource === 'bought') tabs.push({ slug: 'buying', label: 'Buying' });
     // Unconditional since is_stocked was dropped: every part is stockable, so every part
     // has somewhere its stock lives — even when that is 0 at the Unassigned bucket.
     //
@@ -298,7 +306,7 @@ export default function PartWorkspace({
     // Slug stays 'history' so existing ?tab=history deep links keep working.
     tabs.push({ slug: 'history', label: 'Activity' });
     return tabs;
-  }, []);
+  }, [partSource]);
 
   const tabParam = searchParams.get('tab') ?? 'workspace';
   const activeTab = visibleTabs.some((t) => t.slug === tabParam) ? tabParam : 'workspace';
@@ -469,6 +477,17 @@ export default function PartWorkspace({
           refreshAfterMutation={refreshAfterMutation}
           setupStatus={setupStatus}
           pricingGaps={pricingGaps}
+          onDirtyChange={reportDirty}
+        />
+      )}
+
+      {activeTab === 'buying' && part.source === 'bought' && (
+        <BuyingTab
+          part={part}
+          companyId={companyId}
+          partId={partId}
+          refreshKey={refreshKey}
+          onPartChanged={refreshAfterMutation}
           onDirtyChange={reportDirty}
         />
       )}

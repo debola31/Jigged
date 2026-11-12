@@ -210,7 +210,7 @@ export default function JobsPage() {
     severity: 'error',
   });
 
-  // "New Job from PO": accept a customer PO and create a job directly (no quote).
+  // "New Job from Customer PO": accept a customer PO and create a job directly (no quote).
   const [poModalOpen, setPoModalOpen] = useState(false);
 
   // Debounce search input
@@ -764,7 +764,7 @@ export default function JobsPage() {
           startIcon={<AddIcon />}
           onClick={() => setPoModalOpen(true)}
         >
-          New Job from PO
+          New Job from Customer PO
         </Button>
       </Box>
 
@@ -790,7 +790,7 @@ export default function JobsPage() {
 
       {/* Data Grid or Empty State. Jobs come from converting an accepted quote
           (utils/quotesAccess#convertQuoteToJobs) or directly from a customer PO
-          (New Job from PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
+          (New Job from Customer PO -> utils/jobsAccess#createJobFromPurchaseOrder). */}
       {!loading && jobsError == null && visibleJobs.length === 0 ? (
         <Card elevation={2}>
           <CardContent sx={{ p: 6, textAlign: 'center' }}>
@@ -810,7 +810,7 @@ export default function JobsPage() {
                   startIcon={<AddIcon />}
                   onClick={() => setPoModalOpen(true)}
                 >
-                  New Job from PO
+                  New Job from Customer PO
                 </Button>
                 <Button
                   variant="outlined"

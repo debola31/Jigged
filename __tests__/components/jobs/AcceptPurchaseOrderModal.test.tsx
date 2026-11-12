@@ -51,6 +51,12 @@ describe('AcceptPurchaseOrderModal — expected (sell) price', () => {
     mockGetTiers.mockResolvedValue([pricedTier(55.74)]);
   });
 
+  /** "PO" alone is the CUSTOMER's here — purchase orders to vendors now exist too (plan §3.1). */
+  it('names it the customer’s PO', () => {
+    render(<AcceptPurchaseOrderModal open onClose={vi.fn()} companyId="c1" onCreated={vi.fn()} />);
+    expect(screen.getByRole('dialog', { name: 'Accept customer PO' })).toBeInTheDocument();
+  });
+
   it('pre-fills the unit price with the expected sell price when a part is picked', async () => {
     render(
       <AcceptPurchaseOrderModal open onClose={vi.fn()} companyId="c1" onCreated={vi.fn()} />,

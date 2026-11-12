@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { existsSync } from 'fs';
 import path from 'path';
 import {
   isValueLikePlaceholder,
@@ -145,5 +146,23 @@ describe('silent busy buttons (§5)', () => {
   it('ignores a button that only opens a dialog', () => {
     const src = `<Button onClick={() => setDisconnectOpen(true)} disabled={busy}>Disconnect</Button>`;
     expect(findSilentBusyButtonViolations(src, QB)).toEqual([]);
+  });
+
+  // Purchasing (plan §3.14): sending a vendor PO and choosing its purchases item are QuickBooks
+  // round trips — a Conductor hop to the shop's PC for Desktop — so both surfaces must fall under
+  // the rule. It is scoped by PATH, so this pins the paths: a rename that dropped "QuickBooks"
+  // from either would silently exempt it, and the existence check stops this passing on a path
+  // nothing lives at any more.
+  it('covers the vendor-PO push dialog and the purchasing setup panel', () => {
+    const src = `<Button onClick={handlePush} disabled={busy}>Send to QuickBooks</Button>`;
+    for (const file of [
+      'components/purchasing/SendVendorPoToQuickBooksDialog.tsx',
+      'components/settings/quickbooks/QuickBooksPurchasingPanel.tsx',
+    ]) {
+      expect(existsSync(path.join(REPO_ROOT, file)), file).toBe(true);
+      const found = findSilentBusyButtonViolations(src, file);
+      expect(found, file).toHaveLength(1);
+      expect(found[0].rule).toBe('silent-busy-button');
+    }
   });
 });

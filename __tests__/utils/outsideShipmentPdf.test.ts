@@ -319,3 +319,39 @@ describe('generateOutsideShipmentPdf — the address blocks wrap', () => {
     expect(fontBefore).toEqual(['helvetica', 'bold']);
   });
 });
+
+describe('generateOutsideShipmentPdf — the vendor PO it ships against (plan §3.6, criterion O4)', () => {
+  const linked: Partial<OutsideShipmentWithRelations> = {
+    vendor_purchase_order_line_id: 'line-2',
+    vendor_purchase_order_line: {
+      id: 'line-2',
+      line_number: 2,
+      vendor_purchase_order_id: 'po-1042',
+      vendor_purchase_order: { id: 'po-1042', po_number: 'PO-1042' },
+    },
+  };
+
+  it('prints "PO: PO-1042" when the slip ships against a vendor PO', async () => {
+    await generateOutsideShipmentPdf({ shipment: slip(linked), company, sentBefore: 0, supabase: null });
+    expect(drawn()).toContain('PO: PO-1042');
+  });
+
+  it('prints no PO line on a slip that is on none', async () => {
+    await generateOutsideShipmentPdf({
+      shipment: slip({ vendor_purchase_order_line_id: null, vendor_purchase_order_line: null }),
+      company, sentBefore: 0, supabase: null,
+    });
+    expect(drawn().some((s) => s.startsWith('PO:'))).toBe(false);
+  });
+
+  /** The meta column is measured before the logo, so a fifth line must be in that measurement. */
+  it('sits in the meta column after the job, right-aligned like its neighbours', async () => {
+    await generateOutsideShipmentPdf({ shipment: slip(linked), company, sentBefore: 0, supabase: null });
+    const calls = doc.text.mock.calls.map((c) => ({ text: String(c[0]), x: c[1], y: c[2], opts: c[3] }));
+    const job = calls.find((c) => c.text === 'Job: J-0141')!;
+    const po = calls.find((c) => c.text === 'PO: PO-1042')!;
+    expect(po.x).toBe(job.x);
+    expect(po.y).toBe(job.y + 14);
+    expect(po.opts).toEqual({ align: 'right' });
+  });
+});

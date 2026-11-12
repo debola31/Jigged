@@ -188,6 +188,18 @@ a trigger — so it goes straight through the client, the same shape `createOper
 > what makes it hard to find. `pg_trigger_depth()` counts *trigger* nesting, not function nesting,
 > so two statements inside a plpgsql body each fire at depth 1 and the rollup lands at 2. A
 > `BEFORE UPDATE OF voided_at` refusal trigger backs it up so a wrong-ordered repair script raises.
+>
+> **`outside_shipment_receipts` also carries `outside_shipment_receipts_settle_vendor_po_ins` and
+> `_upd`** (2026-11, [`20261110043800`](../../supabase/migrations/20261110043800_vendor_purchase_order_rpcs.sql)
+> §6b): a receipt or its void can close or reopen the linked vendor PO for its QuickBooks push.
+> They are AFTER *siblings* of the cascade, fired by the same receipt write at the same depth — never
+> a link in it. They write only `vendor_purchase_orders.content_version` and `content_hash`, whose
+> only trigger, the BEFORE `updated_at` stamp, writes no other table, so the rollup still lands at 2. Their
+> names sort before `trigger_recompute_op_status_on_outside_receipt_*` — triggers fire in name order
+> — so a receipt takes the PO lock before the cascade locks an operation, part or job row, the
+> order a PO writer cannot deadlock against. Pinned by
+> [`test_vendor_purchase_order_outside_service.py`](../../api/tests/integration/test_vendor_purchase_order_outside_service.py)
+> § QB9 (8), whose last test checks the sibling and the order.
 
 **Slip numbers: `VPS-{jobBase}-{n}`** — Vendor Packing Slip — byte-parallel with the customer slip's
 `PS-{jobBase}-{n}`.

@@ -419,7 +419,9 @@ function ReceiveBody({
               </Typography>
             ))}
           </Stack>
-          {failedLots.length > 0 && <CertAfterBatchPanel companyId={companyId} lots={failedLots} onDone={onClose} />}
+          {failedLots.length > 0 && (
+            <CertAfterBatchPanel companyId={companyId} lots={failedLots} surface="office_po_receipt" onDone={onClose} />
+          )}
         </DialogContent>
         {failedLots.length === 0 && (
           <DialogActions>

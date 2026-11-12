@@ -8,6 +8,7 @@ vi.mock('@/utils/vendorPoAccess', () => ({ closeVendorPoLines: vi.fn() }));
 
 import ReceiveFromVendorDialog, {
   closePoLineAfterReceipt,
+  receivePoLineFor,
   type OpenSlipOption,
   type ReceivePoLine,
 } from '@/components/jobs/ReceiveFromVendorDialog';
@@ -109,6 +110,34 @@ describe('ReceiveFromVendorDialog', () => {
     draw(50);
     await userEvent.clear(qtyField());
     expect(screen.getByRole('button', { name: /Record receipt/i })).toBeDisabled();
+  });
+});
+
+describe('receivePoLineFor — the PO line a slip read names', () => {
+  const join = {
+    id: 'line-2',
+    line_number: 2,
+    vendor_purchase_order_id: 'po-1042',
+    vendor_purchase_order: { id: 'po-1042', po_number: 'PO-1042' },
+  };
+
+  it('reads the line and its PO off the join', () => {
+    expect(receivePoLineFor({ vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: join })).toEqual({
+      vendorPurchaseOrderId: 'po-1042',
+      poNumber: 'PO-1042',
+      lineId: 'line-2',
+      lineNumber: 2,
+    });
+  });
+
+  it('is null for a slip on no PO', () => {
+    expect(receivePoLineFor({ vendor_purchase_order_line_id: null, vendor_purchase_order_line: null })).toBeNull();
+  });
+
+  /** Never offer to close a line the slip is no longer linked to. */
+  it('is null when the join names another line than the link', () => {
+    expect(receivePoLineFor({ vendor_purchase_order_line_id: 'line-9', vendor_purchase_order_line: join })).toBeNull();
+    expect(receivePoLineFor({ vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: { ...join, vendor_purchase_order: null } })).toBeNull();
   });
 });
 

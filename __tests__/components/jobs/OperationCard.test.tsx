@@ -339,10 +339,10 @@ describe('OperationCard — the vendor PO an outside step ships against', () => 
   });
 
   it('offers "Create PO" when the step is on no PO, with Send and Receive still there', () => {
-    drawCard(outsideOp(), { purchaseOrder: null, createPoHref: '/dashboard/co1/purchasing/orders/new?jobOperation=op-1' });
+    drawCard(outsideOp(), { purchaseOrder: null, createPoHref: '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1' });
     expect(screen.getByRole('link', { name: /create po/i })).toHaveAttribute(
       'href',
-      '/dashboard/co1/purchasing/orders/new?jobOperation=op-1',
+      '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1',
     );
     expect(screen.getByRole('button', { name: /Send to AcmeCoat/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Receive 50/i })).toBeInTheDocument();
@@ -392,6 +392,7 @@ describe('outsidePoLineForOperation — the one line a slip would link to', () =
     receivedQuantity: 0,
     openQuantity: 100,
     status: 'open',
+    needByOn: '2026-03-09',
     expectedOn: '2026-03-09',
     isLate: false,
     ...over,

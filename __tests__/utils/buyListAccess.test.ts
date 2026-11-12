@@ -18,7 +18,7 @@ vi.mock('@/lib/supabase', async () => {
 });
 vi.mock('@sentry/nextjs', () => ({ captureException: vi.fn() }));
 
-import { buildBuyListFromSnapshot, getBuyList } from '@/utils/buyListAccess';
+import { buildBuyListFromSnapshot, getBuyList, priceBuyListRowAt } from '@/utils/buyListAccess';
 
 const TODAY = '2026-11-09';
 
@@ -233,5 +233,48 @@ describe('buildBuyListFromSnapshot', () => {
     expect(steel).toMatchObject({ vendorBasis: 'chosen', purchaseUnit: 'inches', suggestedQuantity: 306 });
     expect(moved.groups.map((g) => g.vendorName)).toContain('Beta Metals');
     expect(stub.tables).toEqual([]);
+  });
+});
+
+describe('priceBuyListRowAt — a typed quantity re-priced by the list’s own rule', () => {
+  /** Acme's sheet with a 10+ break, so a typed quantity can cross it. */
+  const snapshot = {
+    priceInputsByPart: {
+      steel: {
+        sheetsByVendor: {
+          'v-acme': {
+            vendorName: 'Acme Steel',
+            status: 'approved' as const,
+            purchaseUnit: 'bar',
+            stockFactor: 144,
+            validUntil: null,
+            breaks: [
+              { minQuantity: 1, unitPrice: 60 },
+              { minQuantity: 10, unitPrice: 50 },
+            ],
+          },
+        },
+        lastPurchases: [],
+        costTiers: [{ quantity: 1, costPerUnit: 0.4 }],
+      },
+    },
+  };
+  const row = { partId: 'steel', purchaseUnit: 'bar', purchaseFactor: 144 };
+  const acme = { vendorId: 'v-acme', vendorName: 'Acme Steel' };
+
+  it('takes the break the typed quantity reaches', () => {
+    expect(priceBuyListRowAt(snapshot, row, acme, 3, TODAY)).toMatchObject({ unitPrice: 60, priceSource: 'price_sheet' });
+    expect(priceBuyListRowAt(snapshot, row, acme, 12, TODAY)).toMatchObject({ unitPrice: 50, priceSource: 'price_sheet' });
+  });
+
+  it('is the price the list itself gave the suggestion', async () => {
+    queueAll([jobPart(0), jobPart(1), jobPart(2)]);
+    const list = await getBuyList('co-1', { today: TODAY });
+    const steel = list.groups.flatMap((g) => g.rows).find((r) => r.partId === 'steel')!;
+    expect(priceBuyListRowAt(list.snapshot, steel, steel.vendor, steel.suggestedQuantity, TODAY)).toEqual(steel.price);
+  });
+
+  it('reads no sheet without a vendor — it falls back to the estimate', () => {
+    expect(priceBuyListRowAt(snapshot, row, null, 3, TODAY)).toMatchObject({ priceSource: 'estimate' });
   });
 });

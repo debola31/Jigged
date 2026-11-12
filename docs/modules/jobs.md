@@ -209,14 +209,16 @@ in the modal. Owned by [Quotes](quotes.md). This is the *only* path that offers 
 opt-in (`ConvertToJobModal`: if the chosen quantity crosses a break, the user may take the
 re-resolved tier price).
 
-**(b) New Job from PO (direct)** — the **Accept Purchase Order** modal (a modal, not a route) on
-the jobs list captures customer, PO #, due date, an optional PO PDF, and one-or-more
+**(b) New Job from Customer PO (direct)** — the **Accept customer PO** modal (a modal, not a
+route) on the jobs list captures customer, PO #, due date, an optional PO PDF, and one-or-more
 **existing** parts with quantity + agreed unit price. Choosing part + quantity **pre-fills the
 expected sell price** through the *same* `getTiersWithComputedPrices` + `resolveTier` path quote
 lines use (pure DB reads, no AI); overriding it shows a non-blocking "Differs from expected $X"
 hint with a one-tap Reset, and a part with no priced tier leaves the price blank.
 `createJobFromPurchaseOrder` then creates the job (`quote_id` null) and clones each **made**
-part's routing via the same `create_job_part_operations_from_routing` RPC.
+part's routing via the same `create_job_part_operations_from_routing` RPC. *(Labelled **New Job
+from PO** and **Accept Purchase Order** until 2026-11, when vendor POs arrived and "PO" alone
+stopped saying whose — [purchasing.md](purchasing.md).)*
 
 Every guard runs **before any write** (PO # rejected rather than coerced to NULL — no silent
 fallbacks; no duplicate parts; every **made** part must already have a routing — the
@@ -291,7 +293,7 @@ with a 25/50/100 selector.
 
 Toolbar: search (job number, customer name, customer PO, part number, packing-slip number via
 `searchJobsByIdentifier`), a **multi-select** Status control over lifecycle stages, an
-overdue-only toggle, a customer filter, and **New Job from PO**. The Status selection is persisted
+overdue-only toggle, a customer filter, and **New Job from Customer PO**. The Status selection is persisted
 **per company, device-locally**; the default selection is every open stage, which counts as
 "unfiltered" for the empty state. Empty selection legitimately shows no rows.
 
@@ -504,7 +506,8 @@ See **SUSPECTED CODE BUG** below: the detail page has not followed.
 
 Operations are snapshotted from the routing at job-part creation and stepped through on the job
 detail page. The **only** admin actions are **Mark Complete** (opens a quantity dialog defaulting
-to the remaining balance), **Mark Sent Out** / **Mark Received** for outside ops, and **Undo**.
+to the remaining balance), **Send to {vendor}** / **Receive** for outside ops (each a dialog with a
+quantity, [below](#outside-external-vendor-operations)), and **Undo**.
 *(This doc previously listed Start and Skip actions and an "only one in progress at a time" rule.
 Neither `startJobOperation` nor `skipJobOperation` exists, and nothing enforces exclusivity —
 `in_progress` is derived from partial completion quantity, not asserted.)*
@@ -596,8 +599,8 @@ heat-treat). It is a first-class routing step, not paperwork.
   on a part, and a `sent` op with no completions reset to `pending`. It cannot now: the outside arm
   reads shipments and receipts, and a quantity edit writes neither.
 
-**Surfaces:** the admin job-detail op card; the operator traveler + operation page (**Mark Sent
-Out** / **Mark Received** there too — the shop floor drives the send, not just the office —
+**Surfaces:** the admin job-detail op card; the operator traveler + operation page (**Send N to
+{vendor}** / **Receive N** there too — the shop floor drives the send, not just the office —
 plus the "Outside process" badge + vendor); the printed traveler (heavy black outline + bold text, border-only and
 low-ink after a shop-owner ink complaint, with `OUTSIDE — ship to {vendor}` in the Notes column,
 where in-house steps show setup·cycle).

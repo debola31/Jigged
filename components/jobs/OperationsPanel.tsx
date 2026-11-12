@@ -36,7 +36,7 @@ import { daysAtVendorBucket } from './outsideWorkMetrics';
 import { getOperationActuals } from '@/utils/operationIntervalsAccess';
 import type { OperationActuals } from '@/types/operationInterval';
 import { useSearchParams } from 'next/navigation';
-import { vendorPoPath } from '@/lib/purchasingRoutes';
+import { newVendorPoPath, vendorPoPath } from '@/lib/purchasingRoutes';
 import type { VendorPoJobLine } from '@/types/vendorPo';
 import OperationCard, { outsidePoLineForOperation, type OperationPoLink } from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
@@ -356,25 +356,30 @@ export default function OperationsPanel({
     };
   };
 
+  /**
+   * "Create PO" carries the step's VENDOR as well as the step: the form fills its outside line
+   * from that vendor's open steps, so a link with the step alone opened a blank form.
+   */
   const createPoHrefFor = (operation: JobOperation) =>
-    `${vendorPoPath(job.company_id, 'new')}?jobOperation=${encodeURIComponent(operation.id)}`;
+    newVendorPoPath(job.company_id, {
+      vendorId: operation.vendor_service?.vendor?.id ?? null,
+      jobOperationId: operation.id,
+    });
 
   /**
-   * The send dialog's view of the line. Due back prefills from the line's NEED-BY date. The job's
-   * line read carries `expectedOn`, which for an outside line is the earliest due-back among its
-   * slips still out, else the need-by — so with nothing of this step at the vendor it IS the
-   * need-by, exactly. With a batch already out it would be that batch's promise instead, so the
-   * field is left empty rather than prefilled with somebody else's date.
+   * The send dialog's view of the line. Due back prefills from the line's own NEED-BY date —
+   * whenever the step has an eligible line, a batch already out or not. Never from `expectedOn`:
+   * for an outside line that is the earliest due-back among its slips still out, which is an
+   * earlier batch's promise rather than a date anyone chose for this one.
    */
   const sendPoLineFor = (operation: JobOperation): SendToVendorPoLine | null | undefined => {
     const line = poLineFor(operation);
     if (!line) return line;
-    const nothingOut = (outsideByOp.get(operation.id)?.qty_at_vendor ?? 0) === 0;
     return {
       poNumber: line.poNumber,
       lineNumber: line.lineNumber,
       href: vendorPoPath(job.company_id, line.vendorPurchaseOrderId),
-      needByOn: nothingOut ? line.expectedOn : null,
+      needByOn: line.needByOn,
     };
   };
 

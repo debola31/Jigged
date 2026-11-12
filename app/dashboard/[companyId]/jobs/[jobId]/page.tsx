@@ -61,7 +61,6 @@ import {
   type JobPartInvoiceSummary,
 } from '@/utils/quickbooksAccess';
 import { listVendorPoLinesForJob } from '@/utils/vendorPoAccess';
-import { getPartsForSelectByIds } from '@/utils/partsAccess';
 import { useLoad } from '@/hooks/useLoad';
 import { todayLocalISODate } from '@/lib/localDate';
 
@@ -149,23 +148,8 @@ export default function JobDetailPage() {
   const vendorPoLines = poLinesError ? null : poLinesData;
   const poLinesPending = poLinesData === null && !poLinesError;
 
-  /**
-   * Which parts with no operations are BOUGHT, for the buying line that replaces "No operations on
-   * this part." under them. The job read carries the part's name only, so this asks for just those
-   * parts' source — usually none or one per job, and no read at all when every part has a routing.
-   * A failed read leaves the old sentence in place, which is today's behaviour.
-   */
-  const noOpPartKey = [
-    ...new Set((job?.job_parts ?? []).filter((p) => !p.job_operations?.length).map((p) => p.part_id)),
-  ]
-    .sort()
-    .join(',');
-  const { data: sourceByPart, error: sourceError } = useLoad(async (): Promise<Map<string, string>> => {
-    if (!noOpPartKey) return new Map();
-    const rows = await getPartsForSelectByIds(noOpPartKey.split(','));
-    return new Map(rows.map((r) => [r.id, r.source]));
-  }, [noOpPartKey]);
-  const sourcePending = sourceByPart === null && !sourceError;
+  // Which parts with no operations are BOUGHT — for the buying line that replaces "No operations
+  // on this part." under them — comes with the job read itself (`parts.source`): no second read.
 
 
   const fetchJob = useCallback(async () => {
@@ -718,9 +702,9 @@ export default function JobDetailPage() {
                       ? null
                       : noOperationsSlot({
                           jobPartId: part.id,
-                          partSource: sourceByPart?.get(part.part_id),
+                          partSource: part.parts?.source,
                           lines: vendorPoLines,
-                          pending: poLinesPending || sourcePending,
+                          pending: poLinesPending,
                         });
                     return (
                       <Box key={part.id}>
@@ -789,6 +773,8 @@ export default function JobDetailPage() {
                           // start; what it waits on is a PO. Receiving never moves its status.
                           <JobPartBuyingLine
                             companyId={companyId}
+                            jobId={job.id}
+                            partId={part.part_id}
                             jobPartId={part.id}
                             lines={vendorPoLines}
                             canBuy={

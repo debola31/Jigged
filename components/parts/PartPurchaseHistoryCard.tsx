@@ -1,14 +1,19 @@
 'use client';
 
 /**
- * What is coming for a bought part (plan §3.8 "Purchase history card", §3.10 "Where on-order
- * appears"): on order — sent, open PO lines — and on draft — lines on POs not sent yet — kept
- * apart and in the part's stock unit, each with its PO.
+ * What is coming for a bought part, and what has come (plan §3.8 "Purchase history card", §3.10
+ * "Where on-order appears"): on order — sent, open PO lines — and on draft — lines on POs not sent
+ * yet — kept apart and in the part's stock unit, each with its PO; then the part's received and
+ * closed lines, newest first.
  *
- * Read from `part_on_order` through `getOnOrderForParts`, the same numbers the buy list and the
- * job's Materials card show. A failed read says so with Try again — never "nothing on order",
- * which is the one answer a failure must not give. The last price paid per vendor is on each row of
- * the approved vendor list above ("Last PO price").
+ * TWO READS, BECAUSE THEY ANSWER TWO QUESTIONS. What is coming is `part_on_order` through
+ * `getOnOrderForParts` — the same numbers the buy list and the job's Materials card show, and
+ * COMPLETE: an old blanket PO still open is listed however long ago it was raised. What has come is
+ * `listVendorPoLinesForPart`, asked for the most recent received and closed lines; open and draft
+ * lines are the first list's, so nothing shows twice. Each read fails on its own, with its own Try
+ * again — never "nothing on order", nor an empty history, which are the answers a failure must not
+ * give. The last price paid per vendor is on each row of the approved vendor list above ("Last PO
+ * price").
  */
 import NextLink from 'next/link';
 import Alert from '@mui/material/Alert';
@@ -23,10 +28,14 @@ import AddIcon from '@mui/icons-material/Add';
 
 import { formatShortDate } from '@/lib/purchasing/priceDefault';
 import { formatUnitQuantity, unitLabel } from '@/lib/purchasing/purchaseUnits';
+import { vendorPoLineStateDisplay, type VendorPoLineStatus } from '@/lib/purchasing/vendorPoStatus';
 import { vendorPoPath } from '@/lib/purchasingRoutes';
-import type { PartOnOrder } from '@/types/vendorPo';
+import type { PartOnOrder, VendorPoPartLine, VendorPoPartLinesResult } from '@/types/vendorPo';
 
 import { newVendorPoHref } from './ApprovedVendorsCard';
+
+/** The line statuses of what HAS come: everything still owed is the on-order list's. */
+const PAST_STATUSES: readonly VendorPoLineStatus[] = ['received', 'closed'];
 
 export interface PartPurchaseHistoryCardProps {
   companyId: string;
@@ -41,6 +50,77 @@ export interface PartPurchaseHistoryCardProps {
   loading: boolean;
   error: unknown;
   onRetry: () => void;
+  /** The part's most recent PO lines, every status (`listVendorPoLinesForPart`); `null` until read. */
+  history: VendorPoPartLinesResult | null;
+  historyError: unknown;
+  onRetryHistory: () => void;
+}
+
+/** "PO-0040 · Acme Steel · 3 of 3 bar · Received · 10/1/26" — in the line's unit, as the PO reads. */
+function PastLine({ companyId, line }: { companyId: string; line: VendorPoPartLine }) {
+  const state = vendorPoLineStateDisplay(line.status, {
+    orderedQuantity: line.quantity,
+    receivedQuantity: line.receivedQuantity,
+  });
+  return (
+    <Box component="li" sx={{ mb: 0.5 }}>
+      <Typography variant="body2" component="span">
+        <MuiLink component={NextLink} href={vendorPoPath(companyId, line.vendorPurchaseOrderId)} underline="hover">
+          {line.poNumber}
+        </MuiLink>
+        {` · ${line.vendorName} · ${formatUnitQuantity(line.receivedQuantity)} of ${formatUnitQuantity(line.quantity)} ${unitLabel(line.unit)} · ${state.label} · ${formatShortDate(line.orderedOn)}`}
+      </Typography>
+    </Box>
+  );
+}
+
+function PastLines({
+  companyId,
+  history,
+  error,
+  onRetry,
+}: {
+  companyId: string;
+  history: VendorPoPartLinesResult | null;
+  error: unknown;
+  onRetry: () => void;
+}) {
+  if (error && !history) {
+    return (
+      <Alert
+        severity="error"
+        sx={{ mt: 2 }}
+        action={
+          <Button color="inherit" size="small" onClick={onRetry}>
+            Try again
+          </Button>
+        }
+      >
+        Couldn&apos;t load the orders already received.
+      </Alert>
+    );
+  }
+  // Still loading: the on-order list above is what the card is waiting on first.
+  if (!history) return null;
+  const past = history.rows.filter((l) => PAST_STATUSES.includes(l.status));
+  if (past.length === 0) return null;
+  return (
+    <Box component="section" aria-label="Received and closed" sx={{ mt: 2 }}>
+      <Typography variant="subtitle2" sx={{ fontWeight: 600, mb: 0.5 }}>
+        Received and closed
+      </Typography>
+      <Box component="ul" sx={{ m: 0, pl: 3 }}>
+        {past.map((line) => (
+          <PastLine key={line.lineId} companyId={companyId} line={line} />
+        ))}
+      </Box>
+      {history.truncated && (
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+          Only the most recent orders are shown.
+        </Typography>
+      )}
+    </Box>
+  );
 }
 
 export default function PartPurchaseHistoryCard({
@@ -53,6 +133,9 @@ export default function PartPurchaseHistoryCard({
   loading,
   error,
   onRetry,
+  history,
+  historyError,
+  onRetryHistory,
 }: PartPurchaseHistoryCardProps) {
   const unit = unitLabel(onOrder?.stockUnit ?? stockUnit ?? '');
   const quantity = (n: number) => `${formatUnitQuantity(n)}${unit ? ` ${unit}` : ''}`;
@@ -159,6 +242,7 @@ export default function PartPurchaseHistoryCard({
           Only purchase orders in Jigged count as on order.
         </Typography>
         {body}
+        <PastLines companyId={companyId} history={history} error={historyError} onRetry={onRetryHistory} />
       </CardContent>
     </Card>
   );

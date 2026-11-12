@@ -22,7 +22,9 @@ import { listVendorRfqs } from '@/utils/vendorRfqAccess';
 
 export interface VendorRfqsCardProps {
   companyId: string;
-  /** Matched against each RFQ's invited vendor names — what the RFQ list carries. */
+  /** The RFQs are found by invitation: this vendor's id. */
+  vendorId: string;
+  /** For the empty state's sentence only. */
   vendorName: string;
 }
 
@@ -32,19 +34,21 @@ const CARD_LIMIT = 10;
 /**
  * The RFQs this vendor was asked on, newest first, each a link (plan §3.13 "Elsewhere").
  *
- * `listVendorRfqs` is the hub's RFQ list and carries each RFQ's invited vendors BY NAME, so the
- * card keeps the RFQs naming this vendor. A shop has few RFQs, so one read of the list is cheap.
- * The name is the invitation's copy, taken when the vendor was invited: an RFQ sent before the
- * vendor was renamed carries the old name and is not listed here. (A vendor filter in the access
- * layer would close that gap.)
+ * Read through the hub's own `listVendorRfqs` with its `vendorId` filter — BY ID, through the
+ * invitations. It used to keep the hub list's RFQs whose invited names matched this vendor's, and
+ * an invitation's name is the copy taken when the vendor was invited: an RFQ sent before a rename
+ * dropped off this card. The total comes from the read, so "Showing 10 of 14" counts every RFQ.
  *
  * Loads on its own, so a failure costs this card a Retry and never the vendor page — and never
  * reads as "never asked".
  */
-export default function VendorRfqsCard({ companyId, vendorName }: VendorRfqsCardProps) {
-  const { data, loading, error, reload } = useLoad(() => listVendorRfqs(companyId, {}), [companyId]);
-  const rows = error || !data ? null : data.rows.filter((r) => r.vendorNames.includes(vendorName));
-  const shown = rows?.slice(0, CARD_LIMIT) ?? [];
+export default function VendorRfqsCard({ companyId, vendorId, vendorName }: VendorRfqsCardProps) {
+  const { data, loading, error, reload } = useLoad(
+    () => listVendorRfqs(companyId, { vendorId, limit: CARD_LIMIT }),
+    [companyId, vendorId],
+  );
+  const rows = error || !data ? null : data.rows;
+  const total = data?.total ?? 0;
 
   return (
     <Card sx={{ height: '100%' }}>
@@ -76,7 +80,7 @@ export default function VendorRfqsCard({ companyId, vendorName }: VendorRfqsCard
         ) : (
           <>
             <List dense disablePadding>
-              {shown.map((r) => {
+              {rows.map((r) => {
                 const status = VENDOR_RFQ_STATUS_CONFIG[r.status];
                 return (
                   <ListItem key={r.id} disableGutters sx={{ display: 'block', py: 0.75 }}>
@@ -95,9 +99,9 @@ export default function VendorRfqsCard({ companyId, vendorName }: VendorRfqsCard
                 );
               })}
             </List>
-            {rows.length > shown.length && (
+            {total > rows.length && (
               <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-                {`Showing ${shown.length} of ${rows.length}.`}
+                {`Showing ${rows.length} of ${total}.`}
               </Typography>
             )}
           </>

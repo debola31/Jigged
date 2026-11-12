@@ -71,11 +71,11 @@ describe('SendToVendorDialog — the PO line it ships against', () => {
   });
 
   it('offers "Create PO for this step" when the step is on no PO, and leaves Due back empty', () => {
-    draw({ poLine: null, createPoHref: '/dashboard/co1/purchasing/orders/new?jobOperation=op-1' });
+    draw({ poLine: null, createPoHref: '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1' });
     expect(screen.getByText(/not on a purchase order/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /create po for this step/i })).toHaveAttribute(
       'href',
-      '/dashboard/co1/purchasing/orders/new?jobOperation=op-1',
+      '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1',
     );
     expect(dueBack()).toHaveValue('');
   });

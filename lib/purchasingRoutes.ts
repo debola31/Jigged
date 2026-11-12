@@ -74,6 +74,44 @@ export function vendorPoPath(companyId: string, poId: string | 'new'): string {
   return `/dashboard/${companyId}/purchasing/orders/${poId}`;
 }
 
+/** What the new-PO form can be opened with — IDS ONLY; the form resolves everything else itself. */
+export interface NewVendorPoPrefill {
+  vendorId?: string | null;
+  partId?: string | null;
+  jobId?: string | null;
+  jobPartId?: string | null;
+  jobOperationId?: string | null;
+  workCenterId?: string | null;
+}
+
+/**
+ * The query key for each prefill id, in the order a link writes them. The new-PO page reads the
+ * SAME map, so a link and the page that opens it cannot disagree about a key's name.
+ */
+export const NEW_VENDOR_PO_PREFILL_KEYS = {
+  vendorId: 'vendor',
+  partId: 'part',
+  jobId: 'job',
+  jobPartId: 'jobPart',
+  jobOperationId: 'jobOperation',
+  workCenterId: 'workCenter',
+} as const satisfies Record<keyof NewVendorPoPrefill, string>;
+
+/**
+ * The new-PO form, prefilled: `/purchasing/orders/new?vendor=…&jobOperation=…`. An outside step's
+ * "Create PO" must carry its VENDOR as well as the step: the form's outside line is filled from that
+ * vendor's open steps, so a link without one opens a blank form.
+ */
+export function newVendorPoPath(companyId: string, prefill: NewVendorPoPrefill = {}): string {
+  const query = new URLSearchParams();
+  for (const [field, key] of Object.entries(NEW_VENDOR_PO_PREFILL_KEYS) as [keyof NewVendorPoPrefill, string][]) {
+    const id = prefill[field];
+    if (id) query.set(key, id);
+  }
+  const search = query.toString();
+  return search ? `${vendorPoPath(companyId, 'new')}?${search}` : vendorPoPath(companyId, 'new');
+}
+
 /** An RFQ's page — or `new` for the create form. */
 export function vendorRfqPath(companyId: string, rfqId: string | 'new'): string {
   return `/dashboard/${companyId}/purchasing/rfqs/${rfqId}`;

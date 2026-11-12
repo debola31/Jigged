@@ -74,8 +74,8 @@ vi.mock('@/components/inventory/MillCertField', () => ({
   ),
 }));
 vi.mock('@/components/inventory/CertAfterBatchPanel', () => ({
-  default: ({ lots, onDone }: { lots: Array<{ lotId: string }>; onDone: () => void }) => (
-    <div data-testid="cert-panel">
+  default: ({ lots, surface, onDone }: { lots: Array<{ lotId: string }>; surface?: string; onDone: () => void }) => (
+    <div data-testid="cert-panel" data-surface={surface}>
       {lots.map((l) => l.lotId).join(',')}
       <button type="button" onClick={onDone}>
         Done
@@ -312,6 +312,8 @@ describe('ReceiveVendorPoDialog — the write', () => {
     const panel = await screen.findByTestId('cert-panel');
     expect(panel).toHaveTextContent('lot-new');
     expect(capture).toHaveBeenCalledWith('lot certificate upload failed', expect.objectContaining({ surface: 'office_po_receipt' }));
+    // A cert retried from the panel is still one taken at a PO receipt, not the Storage bin form's.
+    expect(panel).toHaveAttribute('data-surface', 'office_po_receipt');
     const done = within(panel).getByRole('button', { name: 'Done' });
     expect(done).toBeEnabled();
     await user.click(done);

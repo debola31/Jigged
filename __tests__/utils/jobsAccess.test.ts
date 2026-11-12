@@ -54,6 +54,7 @@ import {
   createJobFromPurchaseOrder,
   getAllJobs,
   getCustomersForSelect,
+  getJobWithRelations,
   getReadyOperationsForJobs,
   reopenJob,
   searchJobsByIdentifier,
@@ -896,6 +897,31 @@ describe('jobsAccess', () => {
       await expect(
         updateJobDetails('j1', 'co-1', { due_date: '2026-07-01' }),
       ).rejects.toThrow(/don't have permission/);
+    });
+  });
+
+  describe('getJobWithRelations', () => {
+    /** The job page tells a bought part with no operations from a made one by this — no second read. */
+    it("reads each job part's part with its source, and sorts the parts", async () => {
+      mockQueryBuilder.data = {
+        id: 'job-1',
+        company_id: 'co-1',
+        job_parts: [
+          { id: 'jp-2', sequence: 2, part_id: 'p-bought', parts: { id: 'p-bought', part_name: 'PUMP-200', description: null, source: 'bought' }, job_operations: [] },
+          { id: 'jp-1', sequence: 1, part_id: 'p-made', parts: { id: 'p-made', part_name: 'BRKT-100', description: 'Bracket', source: 'made' }, job_operations: [] },
+        ],
+      };
+      const job = await getJobWithRelations('job-1', 'co-1');
+
+      const select = String((mockQueryBuilder.select as ReturnType<typeof vi.fn>).mock.calls[0][0]);
+      expect(select).toMatch(/parts\(id, part_name, description, source\)/);
+      expect(mockQueryBuilder.eq).toHaveBeenCalledWith('company_id', 'co-1');
+      expect(job?.job_parts?.map((p) => [p.id, p.parts?.source])).toEqual([
+        ['jp-1', 'made'],
+        ['jp-2', 'bought'],
+      ]);
+      // No operation was completed, so no member names were looked up.
+      expect(mockSupabase.from).toHaveBeenCalledTimes(1);
     });
   });
 

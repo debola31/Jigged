@@ -15,6 +15,7 @@ const m = vi.hoisted(() => ({
   savePartVendor: vi.fn(),
   archivePartVendor: vi.fn(),
   getOnOrderForParts: vi.fn(),
+  listVendorPoLinesForPart: vi.fn(),
   updatePartPreferredVendor: vi.fn(),
   getAllVendors: vi.fn(),
   capture: vi.fn(),
@@ -27,7 +28,10 @@ vi.mock('@/utils/partVendorsAccess', () => ({
   savePartVendor: (...a: unknown[]) => m.savePartVendor(...a),
   archivePartVendor: (...a: unknown[]) => m.archivePartVendor(...a),
 }));
-vi.mock('@/utils/vendorPoAccess', () => ({ getOnOrderForParts: (...a: unknown[]) => m.getOnOrderForParts(...a) }));
+vi.mock('@/utils/vendorPoAccess', () => ({
+  getOnOrderForParts: (...a: unknown[]) => m.getOnOrderForParts(...a),
+  listVendorPoLinesForPart: (...a: unknown[]) => m.listVendorPoLinesForPart(...a),
+}));
 vi.mock('@/utils/partsAccess', () => ({
   updatePartPreferredVendor: (...a: unknown[]) => m.updatePartPreferredVendor(...a),
 }));
@@ -41,7 +45,7 @@ vi.mock('@/components/parts/UseAsPartCostDialog', () => ({
 import BuyingTab from '@/components/parts/workspace/tabs/BuyingTab';
 import type { Part } from '@/types/part';
 import type { PartVendorList, PartVendorRow } from '@/types/partVendor';
-import type { PartOnOrder } from '@/types/vendorPo';
+import type { PartOnOrder, VendorPoPartLine } from '@/types/vendorPo';
 
 const part: Part = {
   id: 'part-bar',
@@ -155,6 +159,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   m.listPartVendors.mockResolvedValue(list());
   m.getOnOrderForParts.mockResolvedValue(new Map());
+  m.listVendorPoLinesForPart.mockResolvedValue({ rows: [], total: 0, truncated: false });
   m.savePartVendor.mockResolvedValue({ partVendorId: 'pv-1', created: false, revived: false, preferred: true });
   m.archivePartVendor.mockResolvedValue({ partVendorId: 'pv-2', archived: true, clearedPreferred: false });
   m.updatePartPreferredVendor.mockResolvedValue(undefined);
@@ -472,5 +477,77 @@ describe('BuyingTab — purchase orders for this part', () => {
     expect(await within(card).findByText(/Couldn't load what's on order/)).toBeInTheDocument();
     expect(within(card).queryByText(/Nothing on order/)).toBeNull();
     expect(within(card).getByRole('button', { name: /Try again/ })).toBeInTheDocument();
+  });
+
+  const pastLine = (over: Partial<VendorPoPartLine> = {}): VendorPoPartLine => ({
+    lineId: 'l-40',
+    vendorPurchaseOrderId: 'po-40',
+    poNumber: 'PO-0040',
+    poStatus: 'received',
+    vendorId: 'v-acme',
+    vendorName: 'Acme Steel',
+    orderedOn: '2026-10-01',
+    lineNumber: 1,
+    quantity: 3,
+    unit: 'bar',
+    receivedQuantity: 3,
+    openQuantity: 0,
+    status: 'received',
+    expectedOn: null,
+    isLate: false,
+    jobNumber: null,
+    createdAt: '2026-10-01T14:00:00Z',
+    ...over,
+  });
+
+  /** What has come, beside what is coming: the received lines and the ones closed short. */
+  it('lists the received and closed lines under what is still on order', async () => {
+    m.getOnOrderForParts.mockResolvedValue(new Map([['part-bar', onOrder]]));
+    m.listVendorPoLinesForPart.mockResolvedValue({
+      rows: [
+        pastLine(),
+        pastLine({ lineId: 'l-39', vendorPurchaseOrderId: 'po-39', poNumber: 'PO-0039', poStatus: 'closed', status: 'closed', receivedQuantity: 1, orderedOn: '2026-09-01' }),
+        pastLine({ lineId: 'l-38', vendorPurchaseOrderId: 'po-38', poNumber: 'PO-0038', receivedQuantity: 4 }),
+      ],
+      total: 3,
+      truncated: false,
+    });
+    renderTab();
+    const card = await screen.findByRole('region', { name: 'Purchase orders' });
+    // Still coming, from the on-order read.
+    expect(await within(card).findByRole('link', { name: 'PO-0042' })).toBeInTheDocument();
+
+    const past = await within(card).findByRole('region', { name: 'Received and closed' });
+    expect(within(past).getByRole('link', { name: 'PO-0040' })).toHaveAttribute('href', '/dashboard/c1/purchasing/orders/po-40');
+    expect(past).toHaveTextContent('PO-0040 · Acme Steel · 3 of 3 bar · Received · 10/1/26');
+    expect(past).toHaveTextContent('PO-0039 · Acme Steel · 1 of 3 bar · Closed short · 9/1/26');
+    expect(past).toHaveTextContent('PO-0038 · Acme Steel · 4 of 3 bar · Received +1');
+    // What is still owed is the on-order list's, complete: the history asks only for the rest.
+    expect(m.listVendorPoLinesForPart).toHaveBeenCalledWith('part-bar', {
+      today: expect.any(String),
+      limit: 10,
+      statuses: ['received', 'closed'],
+    });
+  });
+
+  it('shows the history even when nothing is on order, and says when older lines are not shown', async () => {
+    m.listVendorPoLinesForPart.mockResolvedValue({ rows: [pastLine()], total: 12, truncated: true });
+    renderTab();
+    const card = await screen.findByRole('region', { name: 'Purchase orders' });
+    expect(await within(card).findByText(/Nothing on order for this part/)).toBeInTheDocument();
+    expect(await within(card).findByRole('link', { name: 'PO-0040' })).toBeInTheDocument();
+    expect(within(card).getByText(/only the most recent orders are shown/i)).toBeInTheDocument();
+  });
+
+  it('a failed history load offers its own Try again, and leaves what is on order standing', async () => {
+    m.getOnOrderForParts.mockResolvedValue(new Map([['part-bar', onOrder]]));
+    m.listVendorPoLinesForPart.mockRejectedValueOnce(new Error("Failed to load the part's purchase orders."));
+    const user = userEvent.setup();
+    renderTab();
+    const card = await screen.findByRole('region', { name: 'Purchase orders' });
+    expect(await within(card).findByText(/Couldn't load the orders already received/)).toBeInTheDocument();
+    expect(within(card).getByText(/On order: 288 in/)).toBeInTheDocument();
+    await user.click(within(card).getByRole('button', { name: /Try again/ }));
+    await waitFor(() => expect(m.listVendorPoLinesForPart).toHaveBeenCalledTimes(2));
   });
 });

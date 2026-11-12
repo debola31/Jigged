@@ -33,13 +33,14 @@ const line = (over: Partial<VendorPoJobLine> = {}): VendorPoJobLine => ({
   receivedQuantity: 40,
   openQuantity: 60,
   status: 'partially_received',
+  needByOn: '2026-03-04',
   expectedOn: '2026-03-04',
   isLate: false,
   ...over,
 });
 
 const draw = (lines: VendorPoJobLine[] | null, over: Partial<Parameters<typeof JobPartBuyingLine>[0]> = {}) =>
-  render(<JobPartBuyingLine companyId="co1" jobPartId="jp-pump" lines={lines} canBuy {...over} />);
+  render(<JobPartBuyingLine companyId="co1" jobId="job-7" partId="pump" jobPartId="jp-pump" lines={lines} canBuy {...over} />);
 
 describe('JobPartBuyingLine', () => {
   it('reads the PO, the vendor, what has come in and when the rest is due', () => {
@@ -81,12 +82,13 @@ describe('JobPartBuyingLine', () => {
     expect(screen.queryByRole('link', { name: 'PO-1070' })).not.toBeInTheDocument();
   });
 
-  it('offers "Buy it" when the part is on no purchase order', () => {
+  /** The form starts a part line only when given the PART: a job part alone opened a blank form. */
+  it('offers "Buy it" when the part is on no purchase order, carrying the part, its job and the job part', () => {
     draw([line({ jobPartId: 'jp-other' })]);
     expect(screen.getByText(/not on a purchase order/i)).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /buy it/i })).toHaveAttribute(
       'href',
-      '/dashboard/co1/purchasing/orders/new?jobPart=jp-pump',
+      '/dashboard/co1/purchasing/orders/new?part=pump&job=job-7&jobPart=jp-pump',
     );
   });
 

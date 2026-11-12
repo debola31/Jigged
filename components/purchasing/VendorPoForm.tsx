@@ -823,6 +823,7 @@ export default function VendorPoForm(props: VendorPoFormProps) {
           expectedUpdatedAt: header.updatedAt,
         });
         posthog.capture('vendor po updated', {
+          surface: 'form',
           revision_bumped: result.revisionBumped,
           added_line_count: newLines.length,
           removed_line_count: removedIds.length,

@@ -4,12 +4,12 @@
  * The part page's Buying tab — bought parts only (plan §3.8, §3.13; criteria V1–V3, L4).
  *
  * Who the part is bought from and at what price (the approved vendor list with each vendor's price
- * sheet, the preferred star, "Use as part cost"), and what is on order for it.
+ * sheet, the preferred star, "Use as part cost"), what is on order for it, and what was bought.
  *
- * ONE REFRESH for the tab (interaction-standards §2, invariant 3): every write re-reads the list
- * and what is on order in place. A write that changes the PART ITSELF — the preferred vendor, or
- * its cost through "Use as part cost" — also calls the workspace's own refresh, so the Workspace
- * tab's identity and pricing are never left stale.
+ * ONE REFRESH for the tab (interaction-standards §2, invariant 3): every write re-reads the list,
+ * what is on order and the purchase history in place. A write that changes the PART ITSELF — the
+ * preferred vendor, or its cost through "Use as part cost" — also calls the workspace's own
+ * refresh, so the Workspace tab's identity and pricing are never left stale.
  *
  * An open price-sheet editor with changes reports itself under the key `buying`, so leaving the
  * tab asks first rather than throwing the edit away (invariant 2, the exit guard).
@@ -27,8 +27,14 @@ import LoadFailedState from '@/components/common/LoadFailedState';
 import { useLoad } from '@/hooks/useLoad';
 import { todayLocalISODate } from '@/lib/localDate';
 import { listPartVendors } from '@/utils/partVendorsAccess';
-import { getOnOrderForParts } from '@/utils/vendorPoAccess';
+import { getOnOrderForParts, listVendorPoLinesForPart } from '@/utils/vendorPoAccess';
 import type { Part } from '@/types/part';
+
+/**
+ * The purchase history: the part's most recent received and closed lines. What is still owed is
+ * `getOnOrderForParts`' list, which is complete, so it is not read twice.
+ */
+const PURCHASE_HISTORY = { limit: 10, statuses: ['received', 'closed'] as const };
 
 interface BuyingTabProps {
   part: Part;
@@ -50,16 +56,22 @@ export default function BuyingTab({ part, companyId, partId, refreshKey, onPartC
     () => getOnOrderForParts(companyId, [partId]).then((byPart) => byPart.get(partId) ?? null),
     [companyId, partId, refreshKey],
   );
+  const history = useLoad(
+    () => listVendorPoLinesForPart(partId, { today, ...PURCHASE_HISTORY }),
+    [partId, today, refreshKey],
+  );
   const { refresh: refreshVendors } = vendors;
   const { refresh: refreshOnOrder } = onOrder;
+  const { refresh: refreshHistory } = history;
 
   const refreshAfterWrite = useCallback(
     ({ partChanged }: { partChanged: boolean }) => {
       void refreshVendors();
       void refreshOnOrder();
+      void refreshHistory();
       if (partChanged) onPartChanged();
     },
-    [refreshVendors, refreshOnOrder, onPartChanged],
+    [refreshVendors, refreshOnOrder, refreshHistory, onPartChanged],
   );
   const reportDirty = useCallback((dirty: boolean) => onDirtyChange?.('buying', dirty), [onDirtyChange]);
 
@@ -111,6 +123,9 @@ export default function BuyingTab({ part, companyId, partId, refreshKey, onPartC
         loading={onOrder.loading}
         error={onOrder.error}
         onRetry={() => void onOrder.reload()}
+        history={history.data}
+        historyError={history.error}
+        onRetryHistory={() => void history.reload()}
       />
     </Box>
   );

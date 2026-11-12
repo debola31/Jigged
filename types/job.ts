@@ -292,6 +292,8 @@ export interface JobPartWithRelations extends JobPart {
     id: string;
     part_name: string;
     description: string | null;
+    /** `made` or `bought`: a bought part with no operations shows its purchasing line. */
+    source: string;
   } | null;
   job_operations?: JobOperation[];
 }

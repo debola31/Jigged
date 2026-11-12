@@ -300,16 +300,24 @@ export async function loadBuyListSnapshot(companyId: string): Promise<BuyListSna
   return { parts, demand, draftsByVendor, priceInputsByPart, truncatedSources };
 }
 
-function priceFor(
-  row: Pick<BuyListRow, 'suggestedQuantity' | 'purchaseUnit' | 'purchaseFactor'>,
+/**
+ * The default price for a buy-list row from `vendor`, at `quantity` — the suggestion's own, or one
+ * somebody TYPED on the list (a price break can move with it). `lib/purchasing/priceDefault` over
+ * the snapshot's own inputs for that part, so the list's price and a re-price for a typed quantity
+ * are one rule, and neither makes a request.
+ */
+export function priceBuyListRowAt(
+  snapshot: Pick<BuyListSnapshot, 'priceInputsByPart'>,
+  row: Pick<BuyListRow, 'partId' | 'purchaseUnit' | 'purchaseFactor'>,
   vendor: { vendorId: string; vendorName: string } | null,
-  inputs: BuyListPriceInputs | undefined,
+  quantity: number,
   today: string,
-): { price: PriceDefault; amount: number | null } {
-  const price = defaultPartLinePrice({
+): PriceDefault {
+  const inputs = snapshot.priceInputsByPart[row.partId];
+  return defaultPartLinePrice({
     vendorId: vendor?.vendorId ?? '',
     vendorName: vendor?.vendorName ?? '',
-    quantity: row.suggestedQuantity,
+    quantity,
     unit: row.purchaseUnit,
     stockFactor: row.purchaseFactor,
     today,
@@ -317,6 +325,15 @@ function priceFor(
     lastPurchases: inputs?.lastPurchases ?? [],
     costTiers: inputs?.costTiers ?? [],
   });
+}
+
+function priceFor(
+  snapshot: BuyListSnapshot,
+  row: Pick<BuyListRow, 'partId' | 'suggestedQuantity' | 'purchaseUnit' | 'purchaseFactor'>,
+  vendor: { vendorId: string; vendorName: string } | null,
+  today: string,
+): { price: PriceDefault; amount: number | null } {
+  const price = priceBuyListRowAt(snapshot, row, vendor, row.suggestedQuantity, today);
   return { price, amount: vendorPoLineAmount(row.suggestedQuantity, price.unitPrice) };
 }
 
@@ -340,8 +357,7 @@ export function buildBuyListFromSnapshot(
 
   const groups: BuyListPricedGroup[] = list.groups.map((group) => {
     const rows: BuyListPricedRow[] = group.rows.map((row) => {
-      const inputs = snapshot.priceInputsByPart[row.partId];
-      const own = priceFor(row, row.vendor, inputs, options.today);
+      const own = priceFor(snapshot, row, row.vendor, options.today);
       const part = partsById.get(row.partId);
       const vendorPrices: BuyListVendorPrice[] = [];
       if (part) {
@@ -354,7 +370,7 @@ export function buildBuyListFromSnapshot(
             vendorName: v.vendorName,
           }).row;
           if (!evaluated) continue;
-          const priced = priceFor(evaluated, v, inputs, options.today);
+          const priced = priceFor(snapshot, evaluated, v, options.today);
           vendorPrices.push({
             vendorId: v.vendorId,
             vendorName: v.vendorName,

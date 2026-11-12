@@ -18,6 +18,7 @@ vi.mock('@/components/billing/SubscriptionRequiredNotice', () => ({
 }));
 
 import NewVendorPoPage from '@/app/dashboard/[companyId]/purchasing/orders/new/page';
+import { newVendorPoPath } from '@/lib/purchasingRoutes';
 
 const V = '11111111-1111-4111-8111-111111111111';
 const P = '22222222-2222-4222-8222-222222222222';
@@ -46,5 +47,13 @@ describe('New purchase order page', () => {
       jobOperationId: OP,
       workCenterId: null,
     });
+  });
+
+  /** A link and the page that opens it read one key map, so neither can rename a key alone. */
+  it('opens prefilled from the link an operation card builds', () => {
+    const href = newVendorPoPath('test-company-id', { vendorId: V, jobOperationId: OP });
+    setSearchParams(href.split('?')[1]);
+    render(<NewVendorPoPage />);
+    expect(formProps.current?.prefill).toMatchObject({ vendorId: V, jobOperationId: OP, partId: null });
   });
 });

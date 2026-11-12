@@ -596,8 +596,48 @@ export interface VendorPoJobLine {
   receivedQuantity: number;
   openQuantity: number;
   status: VendorPoLineStatus;
+  /**
+   * The line's own need-by date. The send dialog prefills Due back from it: for an outside line
+   * `expectedOn` is the earliest due-back of its slips still out, which is a batch's promise, not
+   * the line's.
+   */
+  needByOn: string | null;
   expectedOn: string | null;
   isLate: boolean;
+}
+
+/**
+ * A part's line on a live vendor PO, in any status — the part page's purchase history. Quantities
+ * are in the line's purchase unit, as the PO reads.
+ */
+export interface VendorPoPartLine {
+  lineId: string;
+  vendorPurchaseOrderId: string;
+  poNumber: string;
+  poStatus: VendorPoStatus;
+  vendorId: string;
+  /** The PO's frozen copy of the vendor's name. */
+  vendorName: string;
+  /** The PO's order date. */
+  orderedOn: string;
+  lineNumber: number;
+  quantity: number;
+  unit: string;
+  receivedQuantity: number;
+  openQuantity: number;
+  status: VendorPoLineStatus;
+  expectedOn: string | null;
+  isLate: boolean;
+  jobNumber: string | null;
+  createdAt: string;
+}
+
+export interface VendorPoPartLinesResult {
+  /** Newest first. */
+  rows: VendorPoPartLine[];
+  /** Every live line the read matched (in the statuses asked for), however many `rows` holds. */
+  total: number;
+  truncated: boolean;
 }
 
 /** An outside step this vendor performs that is not finished — the PO form's outside-line picker. */

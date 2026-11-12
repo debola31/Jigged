@@ -403,6 +403,15 @@ describe('BuyList — ordering from a group', () => {
     );
     expect(createVendorPo).not.toHaveBeenCalled();
     expect(await screen.findByText(/added 1 line to draft PO-1040/i)).toBeInTheDocument();
+    // Counted as an update FROM THE BUY LIST, so it is never mistaken for a form edit.
+    expect(posthog.capture).toHaveBeenCalledWith('vendor po updated', {
+      surface: 'buy_list',
+      revision_bumped: false,
+      added_line_count: 1,
+      removed_line_count: 0,
+      changed_line_count: 0,
+      header_changed: false,
+    });
   });
 
   it('leaves out a row that was unticked', async () => {

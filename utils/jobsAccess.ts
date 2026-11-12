@@ -290,6 +290,9 @@ export async function searchJobsByIdentifier(
 /**
  * Get a single job with all relations: job_parts (each with their part,
  * operations, and materials), customer, source quote.
+ *
+ * The part carries its `source` (made / bought), so the job page can tell a bought part with no
+ * operations — whose line under it is the purchasing one — without a second parts read.
  */
 export async function getJobWithRelations(
   jobId: string,
@@ -317,7 +320,7 @@ export async function getJobWithRelations(
       quotes!jobs_quote_id_fkey(id, quote_number),
       job_parts(
         *,
-        parts(id, part_name, description),
+        parts(id, part_name, description, source),
         job_operations(
           *,
           work_center:work_centers!left(id, name, labor_rate),

@@ -213,9 +213,11 @@ The DB refuses the write; the UI has to explain it. That path lives in
   `AdminGuard` and the Stripe routes call `_verify_company_admin`, so offering it to
   anyone else ends in a 403. Operators get wording pointing at the office rather than
   a page they cannot reach.
-- `SubscriptionRequiredNotice` says it up front on the five create routes, as an
+- `SubscriptionRequiredNotice` says it up front on every create route, as an
   explanation rather than a disabled control — see
-  [interaction-standards §4](../interaction-standards.md).
+  [interaction-standards §4](../interaction-standards.md), whose
+  `grep -l SubscriptionRequiredNotice app/` is the list. **Withdrawn:** "the five create
+  routes" — a count nothing checks; purchasing's PO and RFQ forms made it seven.
 - **The wording comes from `subscription_status`, not from entitlement.**
   [`lib/billingCopy.ts`](../../lib/billingCopy.ts) maps the billing row to
   `never_started | ended | paused`, because `read_only` deliberately collapses

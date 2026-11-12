@@ -7,7 +7,7 @@ import MuiLink from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 
-import { vendorPoPath } from '@/lib/purchasingRoutes';
+import { newVendorPoPath, vendorPoPath } from '@/lib/purchasingRoutes';
 import { formatShortDate } from '@/lib/purchasing/priceDefault';
 import { formatUnitQuantity, unitLabel } from '@/lib/purchasing/purchaseUnits';
 import { VENDOR_PO_OVERDUE } from '@/lib/purchasing/vendorPoStatus';
@@ -15,6 +15,12 @@ import type { VendorPoJobLine } from '@/types/vendorPo';
 
 export interface JobPartBuyingLineProps {
   companyId: string;
+  /**
+   * The job, the part and the job part "Buy it" puts on the new PO's line. All three: the form
+   * starts a part line only when it is given the part, so a job part alone opened a blank form.
+   */
+  jobId: string;
+  partId: string;
   jobPartId: string;
   /**
    * The job's vendor PO lines (`listVendorPoLinesForJob`), every kind — this keeps only the part
@@ -76,7 +82,15 @@ function BuyingRow({ line, companyId }: { line: VendorPoJobLine; companyId: stri
  * A FAILED READ IS NOT "NOT ON A PURCHASE ORDER." Saying so would offer "Buy it" for a part that is
  * already on a PO, which is how a shop orders it twice.
  */
-export default function JobPartBuyingLine({ companyId, jobPartId, lines, canBuy, onRetry }: JobPartBuyingLineProps) {
+export default function JobPartBuyingLine({
+  companyId,
+  jobId,
+  partId,
+  jobPartId,
+  lines,
+  canBuy,
+  onRetry,
+}: JobPartBuyingLineProps) {
   if (lines === null) {
     return (
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, pl: 1, flexWrap: 'wrap' }}>
@@ -103,7 +117,7 @@ export default function JobPartBuyingLine({ companyId, jobPartId, lines, canBuy,
             {' · '}
             <MuiLink
               component={NextLink}
-              href={`${vendorPoPath(companyId, 'new')}?jobPart=${encodeURIComponent(jobPartId)}`}
+              href={newVendorPoPath(companyId, { partId, jobId, jobPartId })}
               sx={{ fontWeight: 500 }}
             >
               Buy it
@@ -133,11 +147,11 @@ export default function JobPartBuyingLine({ companyId, jobPartId, lines, canBuy,
  */
 export function noOperationsSlot(args: {
   jobPartId: string;
-  /** `parts.source`, when known. */
+  /** `parts.source`, from the job read; absent when the part could not be read. */
   partSource: string | null | undefined;
   /** The job's vendor PO lines; `null` when unknown. */
   lines: readonly VendorPoJobLine[] | null;
-  /** The PO lines or the part's source are still loading. */
+  /** The PO lines are still loading. */
   pending: boolean;
 }): 'buying' | 'plain' | 'pending' {
   if ((args.lines ?? []).some((l) => l.lineKind === 'part' && l.jobPartId === args.jobPartId)) return 'buying';

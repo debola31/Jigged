@@ -45,18 +45,11 @@ import LoadFailedState from '@/components/common/LoadFailedState';
 import { useLoad } from '@/hooks/useLoad';
 import { todayLocalISODate } from '@/lib/localDate';
 import { vendorPoLineAmount } from '@/lib/purchasing/amount';
-import { defaultPartLinePrice, type PriceDefault } from '@/lib/purchasing/priceDefault';
 import { isValidQuantityValue } from '@/lib/quantityInput';
 import { vendorPoPath } from '@/lib/purchasingRoutes';
-import { buildBuyListFromSnapshot, loadBuyListSnapshot } from '@/utils/buyListAccess';
+import { buildBuyListFromSnapshot, loadBuyListSnapshot, priceBuyListRowAt } from '@/utils/buyListAccess';
 import { createVendorPo, updateVendorPo } from '@/utils/vendorPoAccess';
-import type {
-  BuyListPricedGroup,
-  BuyListPricedRow,
-  BuyListSnapshot,
-  BuyListSource,
-  BuyListVendorChoice,
-} from '@/types/buyList';
+import type { BuyListPricedGroup, BuyListPricedRow, BuyListSource, BuyListVendorChoice } from '@/types/buyList';
 import type { VendorPoNewLineInput } from '@/types/vendorPo';
 import BuyListVendorGroup, { ANOTHER_VENDOR, type BuyListRowView } from './BuyListVendorGroup';
 import BuyListVendorPicker from './BuyListVendorPicker';
@@ -76,27 +69,6 @@ const SOURCE_WORDS: Record<BuyListSource, string> = {
 type OrderNotice = { kind: 'created' | 'added'; poId: string; poNumber: string; vendorName: string; lineCount: number };
 
 const groupKey = (group: Pick<BuyListPricedGroup, 'vendorId'>) => group.vendorId ?? 'none';
-
-/**
- * The default price at a quantity somebody TYPED — a price break can move with it. The same
- * default (`lib/purchasing/priceDefault.ts`) and the same inputs the list priced the suggestion
- * with, read from the snapshot: no request.
- */
-function priceAtQuantity(snapshot: BuyListSnapshot, row: BuyListPricedRow, quantity: number, today: string): PriceDefault {
-  const inputs = snapshot.priceInputsByPart[row.partId];
-  const vendor = row.vendor;
-  return defaultPartLinePrice({
-    vendorId: vendor?.vendorId ?? '',
-    vendorName: vendor?.vendorName ?? '',
-    quantity,
-    unit: row.purchaseUnit,
-    stockFactor: row.purchaseFactor,
-    today,
-    sheet: vendor ? (inputs?.sheetsByVendor[vendor.vendorId] ?? null) : null,
-    lastPurchases: inputs?.lastPurchases ?? [],
-    costTiers: inputs?.costTiers ?? [],
-  });
-}
 
 /**
  * A row as a new PO line. The description and the vendor part number are left to the RPC, which
@@ -169,10 +141,12 @@ export function BuyList({ companyId }: { companyId: string }) {
     const quantityText = edited ?? String(row.suggestedQuantity);
     const parsed = quantityText.trim() === '' ? null : Number(quantityText);
     const quantity = parsed !== null && isValidQuantityValue(parsed) ? parsed : null;
+    // A TYPED quantity is re-priced (a price break can move with it) by the list's own rule, from
+    // the snapshot's inputs: no request.
     const price =
       !snapshot || quantity === null || quantity === row.suggestedQuantity
         ? row.price
-        : priceAtQuantity(snapshot, row, quantity, today);
+        : priceBuyListRowAt(snapshot, row, row.vendor, quantity, today);
     return {
       row,
       quantityText,
@@ -229,6 +203,7 @@ export function BuyList({ companyId }: { companyId: string }) {
         // A draft already exists for this vendor: add to it rather than leave two drafts to merge.
         const saved = await updateVendorPo(group.draft.vendorPurchaseOrderId, { today, lines });
         posthog.capture('vendor po updated', {
+          surface: 'buy_list',
           revision_bumped: saved.revisionBumped,
           added_line_count: lines.length,
           removed_line_count: 0,

@@ -52,9 +52,10 @@ export interface ReceiveFromVendorSubmit {
 
 /**
  * A slip's vendor PO line: its link column, and the join every slip read carries
- * (`vendor_purchase_order_line`, with its PO) — `null` when the slip is on no PO. The join is
- * optional here so a narrower slip type still passes: `getOpenOutsideShipments` returns the joined
- * rows under a type that omits it.
+ * (`vendor_purchase_order_line`, with its PO) — `null` when the slip is on no PO, or when the join
+ * no longer names the linked line. Both callers hand it a full slip read (`getOpenOutsideShipments`
+ * and the drawer's `listOutsideShipmentsForCompany`); the join is optional only because it is
+ * optional on `OutsideShipmentWithRelations` itself.
  */
 export function receivePoLineFor(
   slip: Pick<OutsideShipmentWithRelations, 'vendor_purchase_order_line_id' | 'vendor_purchase_order_line'>,

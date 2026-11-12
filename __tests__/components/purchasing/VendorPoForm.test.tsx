@@ -365,6 +365,26 @@ describe('VendorPoForm — prefilled from another screen', () => {
     expect(createVendorPo.mock.calls[0][0]).toMatchObject({ vendorId: 'v1', lines: [expect.objectContaining({ jobOperationId: 'op30' })] });
     expect(capture).toHaveBeenCalledWith('vendor po created', expect.objectContaining({ surface: 'operation', outside_line_count: 1 }));
   });
+
+  /** The step comes from the vendor's open steps, so without the vendor there is nothing to fill it from. */
+  it('fills nothing for a step until it knows the vendor', async () => {
+    render(<VendorPoForm mode="create" companyId="test-company-id" prefill={{ jobOperationId: 'op30' }} />);
+    expect(within(formLine(1)).getByLabelText('Quantity')).toHaveValue('');
+    expect(listOpenOutsideOpsForVendor).not.toHaveBeenCalled();
+  });
+
+  it('starts a part line for a bought job part (the job page’s "Buy it"), keeping its job and job part', async () => {
+    const user = userEvent.setup();
+    render(<VendorPoForm mode="create" companyId="test-company-id" prefill={{ partId: 'p1', jobId: 'j1', jobPartId: 'jp1' }} />);
+    await waitFor(() => expect(within(formLine(1)).getByLabelText('Part')).toHaveValue('p1'));
+    await pickVendor(user);
+    await waitFor(() => expect(within(formLine(1)).getByLabelText('Unit price')).toHaveValue('120'));
+    await user.click(saveButton());
+    await waitFor(() => expect(createVendorPo).toHaveBeenCalled());
+    expect(createVendorPo.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ lineKind: 'part', partId: 'p1', jobId: 'j1', jobPartId: 'jp1' }),
+    ]);
+  });
 });
 
 describe('VendorPoForm — approved vendors (L4)', () => {
@@ -425,6 +445,7 @@ describe('VendorPoForm — editing', () => {
     });
     expect(onSaved).toHaveBeenCalled();
     expect(capture).toHaveBeenCalledWith('vendor po updated', {
+      surface: 'form',
       revision_bumped: false,
       added_line_count: 0,
       removed_line_count: 0,

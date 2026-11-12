@@ -25,7 +25,7 @@ import {
   VENDOR_PO_OVERDUE,
   vendorPoStatusDisplay,
 } from '@/lib/purchasing/vendorPoStatus';
-import { purchasingHubPath, vendorPoPath } from '@/lib/purchasingRoutes';
+import { newVendorPoPath, purchasingHubPath, vendorPoPath } from '@/lib/purchasingRoutes';
 import { listVendorPosForVendor } from '@/utils/vendorPoAccess';
 
 export interface VendorPurchaseOrdersCardProps {
@@ -64,7 +64,7 @@ export default function VendorPurchaseOrdersCard({ companyId, vendorId, vendorNa
             size="small"
             startIcon={<AddIcon />}
             component={NextLink}
-            href={`${vendorPoPath(companyId, 'new')}?vendor=${encodeURIComponent(vendorId)}`}
+            href={newVendorPoPath(companyId, { vendorId })}
           >
             New PO
           </Button>

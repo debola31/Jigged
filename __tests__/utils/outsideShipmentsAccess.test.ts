@@ -56,6 +56,7 @@ import {
   compareOutsideShipmentOrder,
   receiveOutsideShipment,
   createOutsideShipment,
+  getOpenOutsideShipments,
   getOutsideShipmentById,
   getOutsideShipmentsForJob,
   getOutsideShipmentsForOperation,
@@ -417,6 +418,29 @@ describe('the vendor PO line a slip ships against (purchasing, criterion O4)', (
   it('a slip on no PO reads null', () => {
     expect(outsideShipmentPoNumber({ vendor_purchase_order_line: null })).toBeNull();
     expect(outsideShipmentPoNumber({})).toBeNull();
+  });
+
+  /** The receive dialog names a slip's PO line from these rows, so the join must survive the filter. */
+  it('the open slips keep the full slip read — the PO line included — with what each still owes', async () => {
+    const join = { id: 'line-2', line_number: 2, vendor_purchase_order_id: 'po-1', vendor_purchase_order: { id: 'po-1', po_number: 'PO-1042' } };
+    const forOp = buildQueryStub({
+      data: [
+        {
+          id: 'ship-2', slip_number: 'VPS-0141-2', quantity: 50, shipped_at: '2026-11-04T10:00:00Z', created_at: '2026-11-04T10:00:00Z',
+          closed_at: null, voided_at: null, vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: join,
+          receipts: [{ quantity_good: 20, voided_at: null }, { quantity_good: 5, voided_at: '2026-11-05T00:00:00Z' }],
+        },
+        {
+          id: 'ship-1', slip_number: 'VPS-0141-1', quantity: 10, shipped_at: '2026-11-01T10:00:00Z', created_at: '2026-11-01T10:00:00Z',
+          closed_at: '2026-11-03T00:00:00Z', voided_at: null, vendor_purchase_order_line_id: null, vendor_purchase_order_line: null, receipts: [],
+        },
+      ],
+    });
+    queueBuilders([forOp]);
+    const open = await getOpenOutsideShipments('op-1');
+    expect(open).toHaveLength(1);
+    expect(open[0]).toMatchObject({ id: 'ship-2', outstanding: 30, vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: join });
+    expect(String(forOp.select.mock.calls[0][0])).toContain('vendor_purchase_order:vendor_purchase_orders(id, po_number)');
   });
 
   it('the send takes NO PO argument: create_outside_shipment links the single open line itself', async () => {

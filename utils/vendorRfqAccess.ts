@@ -68,25 +68,66 @@ const numOrNull = (v: number | null | undefined): number | null => (v === null |
 const LIST_COLUMNS =
   'id, rfq_number, title, status, needed_by_on, respond_by_on, closed_at, line_count, awarded_line_count, invited_count, sent_count, declined_count, responded_count, created_at, updated_at';
 
-/** The RFQ list (the hub's RFQs tab): live RFQs, newest first, with who was asked. */
+/** The list's own order — `created_at` descending, then `id` — for chunks merged in memory. */
+function newestFirst(
+  a: { created_at: string | null; id: string | null },
+  b: { created_at: string | null; id: string | null },
+): number {
+  const [ca, cb] = [a.created_at ?? '', b.created_at ?? ''];
+  if (ca !== cb) return ca < cb ? 1 : -1;
+  const [ia, ib] = [a.id ?? '', b.id ?? ''];
+  return ia === ib ? 0 : ia < ib ? -1 : 1;
+}
+
+/** The RFQs a vendor was invited on, by id: the first step of the list's vendor filter. */
+async function rfqIdsInvitingVendor(companyId: string, vendorId: string, op: string): Promise<string[]> {
+  const { data, error } = await getSupabase()
+    .from('vendor_rfq_invitations')
+    .select('vendor_rfq_id')
+    .eq('company_id', companyId)
+    .eq('vendor_id', vendorId);
+  if (error) throw purchasingReadFailure(error, op, ENTITY);
+  return [...new Set((data ?? []).map((r) => r.vendor_rfq_id))];
+}
+
+/**
+ * The RFQ list (the hub's RFQs tab, the vendor page's RFQs card): live RFQs, newest first, with
+ * who was asked.
+ *
+ * `vendorId` narrows it to the RFQs that vendor was invited on, BY ID, in two steps — the
+ * invitations first, then the list over those ids — so `vendorNames` still names everyone asked
+ * on each RFQ. More ids than one `.in()` holds are read a chunk at a time; each chunk's newest
+ * `limit` together hold the newest `limit` overall, and the counts add.
+ */
 export async function listVendorRfqs(companyId: string, filters: VendorRfqListFilters = {}): Promise<VendorRfqListResult> {
   const limit = Math.max(1, Math.min(filters.limit ?? 200, 1000));
   const op = 'load the RFQs';
-  let q = getSupabase()
-    .from('vendor_rfq_status')
-    .select(LIST_COLUMNS, { count: 'exact' })
-    .eq('company_id', companyId)
-    .is('deleted_at', null);
-  if (filters.statuses?.length) q = q.in('status', [...filters.statuses]);
   const search = textOrNull(filters.search);
-  if (search) q = q.or(`rfq_number.ilike.${orIlikeValue(search)},title.ilike.${orIlikeValue(search)}`);
+  const page = (ids: readonly string[] | null) => {
+    let q = getSupabase()
+      .from('vendor_rfq_status')
+      .select(LIST_COLUMNS, { count: 'exact' })
+      .eq('company_id', companyId)
+      .is('deleted_at', null);
+    if (ids) q = q.in('id', [...ids]);
+    if (filters.statuses?.length) q = q.in('status', [...filters.statuses]);
+    if (search) q = q.or(`rfq_number.ilike.${orIlikeValue(search)},title.ilike.${orIlikeValue(search)}`);
+    return q.order('created_at', { ascending: false }).order('id', { ascending: true }).limit(limit);
+  };
 
-  const { data, error, count } = await q
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: true })
-    .limit(limit);
-  if (error) throw purchasingReadFailure(error, op, ENTITY);
-  const rows = data ?? [];
+  const vendorRfqIds = filters.vendorId ? await rfqIdsInvitingVendor(companyId, filters.vendorId, op) : null;
+  if (vendorRfqIds && vendorRfqIds.length === 0) return { rows: [], total: 0, truncated: false };
+
+  const results = await Promise.all(vendorRfqIds ? chunkIds(vendorRfqIds).map((chunk) => page(chunk)) : [page(null)]);
+  let count: number | null = 0;
+  const fetched: NonNullable<(typeof results)[number]['data']> = [];
+  for (const res of results) {
+    if (res.error) throw purchasingReadFailure(res.error, op, ENTITY);
+    fetched.push(...(res.data ?? []));
+    count = count === null || res.count === null ? null : count + res.count;
+  }
+  // One page arrives in order; merged chunks are put back into it.
+  const rows = results.length === 1 ? fetched : fetched.sort(newestFirst).slice(0, limit);
 
   const names = new Map<string, string[]>();
   const rfqIds = rows.map((r) => present(r.id, 'an RFQ'));

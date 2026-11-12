@@ -2,7 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  NEW_VENDOR_PO_PREFILL_KEYS,
   PURCHASING_PAGE_TITLES,
+  newVendorPoPath,
   purchasingHubPath,
   purchasingPageTitle,
   vendorPoPath,
@@ -98,8 +100,39 @@ describe('purchasing paths (P8, M1)', () => {
         .replace(/\?.*$/, '')
         .replace(/^orders\/(?!new$)[^/]+$/, 'orders/[poId]')
         .replace(/^rfqs\/(?!new$)[^/]+$/, 'rfqs/[rfqId]');
-    for (const path of [purchasingHubPath('c1', 'orders'), vendorPoPath('c1', 'x'), vendorPoPath('c1', 'new'), vendorRfqPath('c1', 'y'), vendorRfqPath('c1', 'new')]) {
+    for (const path of [purchasingHubPath('c1', 'orders'), vendorPoPath('c1', 'x'), vendorPoPath('c1', 'new'), newVendorPoPath('c1', { vendorId: 'v1' }), vendorRfqPath('c1', 'y'), vendorRfqPath('c1', 'new')]) {
       expect(pattern(path) in PURCHASING_PAGE_TITLES, path).toBe(true);
     }
+  });
+});
+
+describe('newVendorPoPath — the new-PO form, prefilled by ids', () => {
+  /** An outside step's "Create PO": the form fills the line from THAT VENDOR's open steps. */
+  it('carries the vendor and the step together', () => {
+    expect(newVendorPoPath('c1', { vendorId: 'v1', jobOperationId: 'op-1' })).toBe(
+      '/dashboard/c1/purchasing/orders/new?vendor=v1&jobOperation=op-1',
+    );
+  });
+
+  it('writes every key the page reads, in one order, and leaves out what is blank', () => {
+    expect(
+      newVendorPoPath('c1', { workCenterId: 'wc', jobOperationId: 'op', jobPartId: 'jp', jobId: 'j', partId: 'p', vendorId: 'v' }),
+    ).toBe('/dashboard/c1/purchasing/orders/new?vendor=v&part=p&job=j&jobPart=jp&jobOperation=op&workCenter=wc');
+    expect(newVendorPoPath('c1', { vendorId: null, partId: 'p', jobId: '' })).toBe('/dashboard/c1/purchasing/orders/new?part=p');
+  });
+
+  it('is the bare form with nothing to prefill', () => {
+    expect(newVendorPoPath('c1')).toBe(vendorPoPath('c1', 'new'));
+  });
+
+  it('names the keys the new-PO page reads', () => {
+    expect(NEW_VENDOR_PO_PREFILL_KEYS).toEqual({
+      vendorId: 'vendor',
+      partId: 'part',
+      jobId: 'job',
+      jobPartId: 'jobPart',
+      jobOperationId: 'jobOperation',
+      workCenterId: 'workCenter',
+    });
   });
 });

@@ -419,10 +419,14 @@ export async function getOutsideShipmentsForOperation(
   return (data ?? []) as unknown as OutsideShipmentWithRelations[];
 }
 
-/** Slips with something still at the vendor, OLDEST FIRST (FIFO — chase order). */
+/**
+ * Slips with something still at the vendor, OLDEST FIRST (FIFO — chase order). Each is the full
+ * slip read of `getOutsideShipmentsForOperation` — its receipts and the vendor PO line it ships
+ * against (`PO_LINE_EMBED`) — plus what it still owes, so the receive dialog can name the line.
+ */
 export async function getOpenOutsideShipments(
   jobOperationId: string,
-): Promise<(OutsideShipment & { outstanding: number })[]> {
+): Promise<(OutsideShipmentWithRelations & { outstanding: number })[]> {
   const all = await getOutsideShipmentsForOperation(jobOperationId);
   return all
     .filter((s) => !s.voided_at && !s.closed_at)

@@ -47,7 +47,7 @@ import { formatUnitPrice } from '@/lib/money';
 import { formatShortDate } from '@/lib/purchasing/priceDefault';
 import { formatUnitQuantity, unitLabel } from '@/lib/purchasing/purchaseUnits';
 import { PART_VENDOR_STATUS_CONFIG } from '@/lib/purchasing/vendorPoStatus';
-import { vendorPoPath } from '@/lib/purchasingRoutes';
+import { newVendorPoPath, vendorPoPath } from '@/lib/purchasingRoutes';
 import { updatePartPreferredVendor } from '@/utils/partsAccess';
 import { archivePartVendor, savePartVendor } from '@/utils/partVendorsAccess';
 import type { PartVendorList, PartVendorRow } from '@/types/partVendor';
@@ -72,10 +72,7 @@ export interface ApprovedVendorsCardProps {
 
 /** `/purchasing/orders/new?vendor=…&part=…` — the PO form's id-only prefill. */
 export function newVendorPoHref(companyId: string, partId: string, vendorId: string | null): string {
-  const query = new URLSearchParams();
-  if (vendorId) query.set('vendor', vendorId);
-  query.set('part', partId);
-  return `${vendorPoPath(companyId, 'new')}?${query.toString()}`;
+  return newVendorPoPath(companyId, { vendorId, partId });
 }
 
 function sheetFacts(row: PartVendorRow): string[] {

@@ -92,6 +92,7 @@ const line: VendorPoJobLine = {
   receivedQuantity: 0,
   openQuantity: 100,
   status: 'open',
+  needByOn: '2026-03-09',
   expectedOn: '2026-03-09',
   isLate: false,
 };
@@ -138,8 +139,11 @@ describe('OperationsPanel — outside steps on a vendor PO', () => {
     );
   });
 
-  /** With a batch already out, `expectedOn` is that batch's promise — not the line's need-by. */
-  it('leaves Due back empty when part of the step is already at the vendor', async () => {
+  /**
+   * With a batch already out, `expectedOn` is THAT batch's promise. Due back still comes from the
+   * line's own need-by — never blank, and never somebody else's date.
+   */
+  it("prefills Due back from the line's need-by even with a batch already at the vendor", async () => {
     const user = userEvent.setup();
     vi.mocked(getOutsideSummariesForPart).mockResolvedValue([
       ledger({ qty_sent: 50, qty_at_vendor: 50, qty_to_send: 50, open_slip_count: 1 }),
@@ -148,19 +152,30 @@ describe('OperationsPanel — outside steps on a vendor PO', () => {
 
     await user.click(await screen.findByRole('button', { name: /send to profinish/i }));
     const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByLabelText(/due back/i)).toHaveValue('2026-03-09');
+  });
+
+  it('leaves Due back empty when the line has no need-by date', async () => {
+    const user = userEvent.setup();
+    draw([{ ...line, needByOn: null, expectedOn: null }]);
+
+    await user.click(await screen.findByRole('button', { name: /send to profinish/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('link', { name: /PO-1042 line 2/i })).toBeInTheDocument();
     expect(within(dialog).getByLabelText(/due back/i)).toHaveValue('');
   });
 
-  it('offers "Create PO" for a step on no PO, and reports the send as off-PO', async () => {
+  /** The form fills its outside line from the VENDOR's open steps: a link without one opened blank. */
+  it('offers "Create PO" for a step on no PO, carrying the vendor and the step, and reports the send as off-PO', async () => {
     const user = userEvent.setup();
     draw([]);
 
-    expect(await screen.findByRole('link', { name: /create po/i })).toHaveAttribute(
-      'href',
-      '/dashboard/co1/purchasing/orders/new?jobOperation=op-1',
-    );
+    const createPo = '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1';
+    expect(await screen.findByRole('link', { name: /create po/i })).toHaveAttribute('href', createPo);
     await user.click(await screen.findByRole('button', { name: /send to profinish/i }));
-    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: /send & print slip/i }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByRole('link', { name: /create po for this step/i })).toHaveAttribute('href', createPo);
+    await user.click(within(dialog).getByRole('button', { name: /send & print slip/i }));
     await waitFor(() =>
       expect(posthog.capture).toHaveBeenCalledWith(
         'outside shipment created',

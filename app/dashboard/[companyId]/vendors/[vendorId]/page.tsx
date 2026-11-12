@@ -991,7 +991,7 @@ export default function VendorDetailPage() {
           <VendorPurchaseOrdersCard companyId={companyId} vendorId={vendorId} vendorName={vendor.name} />
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
-          <VendorRfqsCard companyId={companyId} vendorName={vendor.name} />
+          <VendorRfqsCard companyId={companyId} vendorId={vendorId} vendorName={vendor.name} />
         </Grid>
         <Grid size={{ xs: 12, md: 6 }}>
           {/* Keyed by vendor: the card holds the picked value, seeded once from the vendor read. */}

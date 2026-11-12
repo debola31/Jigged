@@ -41,6 +41,8 @@ export interface VendorRfqListFilters {
   statuses?: readonly VendorRfqStatus[];
   /** RFQ number or title, contains. */
   search?: string | null;
+  /** Only the RFQs this vendor was invited on — by id, so a renamed vendor still finds its own. */
+  vendorId?: string | null;
   limit?: number;
 }
 

@@ -86,6 +86,8 @@ import {
   type VendorPoListRow,
   type VendorPoNewLineInput,
   type VendorPoOutsideSlip,
+  type VendorPoPartLine,
+  type VendorPoPartLinesResult,
   type VendorPoPriceDefaultInputs,
   type VendorPoQuickBooksInfo,
   type VendorPoReceipt,
@@ -1326,10 +1328,91 @@ export async function listVendorPoLinesForJob(jobId: string, options: { today: s
       receivedQuantity: line.receivedQuantity,
       openQuantity: line.openQuantity,
       status: line.status,
+      needByOn: line.needByOn,
       expectedOn: line.expectedOn,
       isLate: line.isLate,
     };
   });
+}
+
+/** How many of a part's PO lines `listVendorPoLinesForPart` returns when not told. */
+const PART_LINES_DEFAULT_LIMIT = 25;
+
+/**
+ * A part's lines on live (unarchived) vendor POs, in EVERY status — draft, open, partly received,
+ * received and closed short — newest first: the part page's purchase history. Part lines only: an
+ * outside-service line names the part it processes, but it buys a service, not the part.
+ * `statuses` narrows it (the part page asks for received and closed only, because what is still
+ * owed is already listed, complete, from `getOnOrderForParts`), so `limit` counts what is shown.
+ *
+ * The PO's own status, order date and vendor name come from `vendor_purchase_order_status` in a
+ * second read (the line view carries neither), one per `.in()` chunk of POs. THROWS on a failed
+ * read: an empty history would say "never bought", which a failure must not.
+ */
+export async function listVendorPoLinesForPart(
+  partId: string,
+  options: { today: string; limit?: number; statuses?: readonly VendorPoLineStatus[] },
+): Promise<VendorPoPartLinesResult> {
+  const op = "load the part's purchase orders";
+  const limit = Math.max(1, Math.min(options.limit ?? PART_LINES_DEFAULT_LIMIT, 200));
+  let q = getSupabase()
+    .from('vendor_purchase_order_line_status')
+    .select(LINE_COLUMNS, { count: 'exact' })
+    .eq('part_id', partId)
+    .eq('line_kind', 'part')
+    .eq('is_archived', false);
+  if (options.statuses?.length) q = q.in('status', [...options.statuses]);
+  const { data, error, count } = await q
+    .order('created_at', { ascending: false })
+    .order('line_number', { ascending: true })
+    .order('id', { ascending: true })
+    .limit(limit);
+  if (error) throw purchasingReadFailure(error, op, ENTITY);
+  const rows = data ?? [];
+  const total = count ?? rows.length;
+  if (rows.length === 0) return { rows: [], total, truncated: false };
+
+  const poIds = [...new Set(rows.map((r) => present(r.vendor_purchase_order_id, 'a part PO line')))];
+  const pos = new Map<string, { status: VendorPoStatus; vendorName: string; orderedOn: string }>();
+  for (const chunk of chunkIds(poIds)) {
+    const res = await getSupabase()
+      .from('vendor_purchase_order_status')
+      .select('id, status, vendor_name, ordered_on')
+      .in('id', chunk);
+    if (res.error) throw purchasingReadFailure(res.error, op, ENTITY);
+    for (const p of res.data ?? []) {
+      pos.set(present(p.id, 'a part PO'), {
+        status: poStatus(p.status, 'a part PO'),
+        vendorName: present(p.vendor_name, 'a part PO'),
+        orderedOn: present(p.ordered_on, 'a part PO'),
+      });
+    }
+  }
+
+  const lines = rows.map((r): VendorPoPartLine => {
+    const line = toLine(r, options.today, new Map());
+    const po = present(pos.get(line.vendorPurchaseOrderId), 'the PO of a part line');
+    return {
+      lineId: line.id,
+      vendorPurchaseOrderId: line.vendorPurchaseOrderId,
+      poNumber: present(r.po_number, 'a part PO line'),
+      poStatus: po.status,
+      vendorId: present(r.vendor_id, 'a part PO line'),
+      vendorName: po.vendorName,
+      orderedOn: po.orderedOn,
+      lineNumber: line.lineNumber,
+      quantity: line.quantity,
+      unit: line.unit,
+      receivedQuantity: line.receivedQuantity,
+      openQuantity: line.openQuantity,
+      status: line.status,
+      expectedOn: line.expectedOn,
+      isLate: line.isLate,
+      jobNumber: line.jobNumber,
+      createdAt: line.createdAt,
+    };
+  });
+  return { rows: lines, total, truncated: total > lines.length };
 }
 
 const OUTSIDE_OP_SELECT = `id, job_id, job_part_id, sequence, operation_name, status, external_unit_price_snapshot,

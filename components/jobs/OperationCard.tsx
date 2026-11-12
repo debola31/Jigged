@@ -109,7 +109,7 @@ interface OperationCardProps {
    * because "Create PO" on a failed read is how a step ends up on two POs.
    */
   purchaseOrder?: OperationPoLink | null;
-  /** The new-PO form, prefilled with this step. */
+  /** The new-PO form, prefilled with this step and its vendor (`newVendorPoPath`). */
   createPoHref?: string;
 }
 

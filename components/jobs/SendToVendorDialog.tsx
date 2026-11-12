@@ -52,7 +52,7 @@ interface SendToVendorDialogProps {
    * `undefined` while that is unknown: the dialog then says nothing about POs at all.
    */
   poLine?: SendToVendorPoLine | null;
-  /** The new-PO form, prefilled with this step. */
+  /** The new-PO form, prefilled with this step and its vendor (`newVendorPoPath`). */
   createPoHref?: string;
   busy?: boolean;
   onClose: () => void;

@@ -70,22 +70,24 @@ Route names are relative to `/dashboard/{companyId}` or `/operator/{companyId}`.
 ### Admin / office — computer, mouse
 
 There is **no page called Inventory** — `/inventory` is a 307 redirect to `/parts`. The owner's
-inventory work lives under three nouns: **Parts** (what we have), the **part detail → Inventory
-tab** (where every stock write happens), and **Storage** (where it lives). All three are core for
-every tenant: the `inventory_locations` flag that used to gate Storage was retired Aug 2026.
+inventory work lives under two nouns: **Parts** (what we have) and **Storage** (where it lives),
+whose **Inventory** list opens a part's side rail, where that part's stock writes happen. Both are
+core for every tenant: the `inventory_locations` flag that used to gate Storage was retired Aug
+2026. ⚠ *A third noun, the part page's Storage tab, was withdrawn 2026-09-09 ([§3](#ui-surfaces));
+the rows below that pointed at it now say where each action went.*
 
 | I want to… | Where | How |
 |---|---|---|
-| Decide we stock a part at all | `/parts/{id}` → workspace | Primary unit, reorder point. ⚠ *This row used to say the tab appears only once `Stocked` is on. There is no such flag since `is_stocked` was dropped ([#778]) — every part is stockable, so the **Storage** tab is always there.* |
+| Decide we stock a part at all | `/parts/{id}` → workspace | Primary unit, reorder point. ⚠ *This row used to say the tab appears only once `Stocked` is on. There is no such flag since `is_stocked` was dropped ([#778]) — every part is stockable — and since 2026-09-09 the part page has no Storage tab at all: a part's stock is on Storage → **Inventory**.* |
 | See what we have | `/inventory/locations` (**Storage**) | Parts carries no quantities: it is the item master. ⚠ **There is no shop-wide shortage lens any more** — it was the Parts stock filter, removed with `is_stocked`, and Storage has not grown a replacement. `JobPartMaterialsCard`'s *"N short"* chip is now plain text for that reason. |
 | Get a stock list in | `/parts` → `Import` | On-hand, unit and reorder point from CSV. An existing location-tracked part's quantity is **skipped**, and the skip is reported. |
 | **See what to buy** | Purchasing → **To buy** | Parts at or under their reorder point, or short for open jobs, net of what is on order, grouped by vendor → *Create draft PO*. It only proposes. Built 2026-11 — [purchasing.md](purchasing.md#the-buy-list). |
 | **Receive a delivery against a PO** | Purchasing → the PO → `Receive` | Office only, against a sent PO: a quantity per line in either unit, a place, a heat; the cert after the write. Built 2026-11 — [purchasing.md](purchasing.md#receive-a-partial-delivery-with-a-heat-and-a-mill-cert). |
-| **Add / remove / adjust stock** | `/parts/{id}` → Storage tab | The four buttons. Besides receiving against a PO (the row above) **this is how stock gets in**. |
-| **Move stock between places** | Same tab → `Move` | Source picker lists only places that hold some. |
-| **Tag a removal to a job** | Same tab → `Remove` → job picker | Restored 2026-07-28 (#59). |
-| See where one part lives | `/parts/{id}` → Storage tab | Per-location balances with full paths. |
-| **Read a part's ledger** | Same tab → history table | Date, type, qty, job, place, notes (editable), **who did it**, and any movement photo. |
+| **Add / remove / adjust stock** | Storage → **Inventory** → the part → its side rail | The four verbs on each place it is in, and `Add at another location…`. Besides receiving against a PO (the row above) **this is how stock gets in**. |
+| **Move stock between places** | Same rail → a place → `Move` | From the place you opened to another. |
+| **Tag a removal to a job** | Same rail → `Remove` → job picker | Restored 2026-07-28 (#59). |
+| See where one part lives | Storage → **Inventory** → the part | The side rail: per-location balances with full paths, and a total. |
+| **Read a part's ledger** | `/parts/{id}` → **Activity** | The part's movements in its feed — type, quantity, date, notes — each with `Correct the heat or notes`, the ledger's only mutable columns (§5.8). |
 | Add a location, and say how it is divided | Storage | `Add storage` → name it **and** shape it on one screen, written in one `create_location_tree` call. Levels are optional: no levels is one location (the yard). **Was two steps until 2026-08-10** — name a bare location, then find `Divide it up…` inside its detail drawer — which is how a shop ended up with named furniture and nothing in it. |
 | **Change a unit's layout** | Storage → pick a unit → `Change layout` | Opens on the unit's REAL subtree and writes a **diff** — creates, renames, re-parents, removes — through one `apply_location_layout` call. Anything it removes that holds stock has to be re-placed first, and anything it divides up moves its stock down. **Was an append until 2026-08-15** ([§5.13](#513-change-layout-changes-the-layout--2026-08-15)): the same dialog, seeded with five default rows and told to number PAST what was already there, so asking a five-row cabinet for three rows gave you eight. |
 | **Reorganise a place** | Storage → pick it in the list, or a cell in the grid | `Rename`, `Duplicate`, `Add one inside`, `Delete` (empty subtrees only). ~~`Move into…` (re-parent)~~ **removed 2026-08-10** — see [§5.12](#512-two-nouns-parts-is-what-we-have-storage-is-where-it-lives--2026-07-30). |
@@ -95,11 +97,11 @@ every tenant: the `inventory_locations` flag that used to gate Storage was retir
 | **Move stock at a place** | Storage → click a cell → drawer → `Add` · `Remove` · `Move` | **A quantity per row, several parts at a time.** Fixes the *place* and picks the *parts* — the inverse of the part page, and the information you actually have standing at a cabinet. [`PlaceStockActionForm`](../../components/inventory/locations/place/PlaceStockActionForm.tsx), **new 2026-08-10**: before it, Storage could not put anything into a bin at all. |
 | Audit ONE place | Storage → click a cell → drawer → `Adjust` | [`PlaceAdjustForm`](../../components/inventory/locations/place/PlaceAdjustForm.tsx): everything at that place under **recorded · counted · changed**, variance as you type. **A blank is not a zero** — untouched rows keep their balance, and a typed 0 is an assertion that the bin is empty. |
 | Audit a whole cabinet | Storage → pick a unit → `Bulk Adjust` | [`UnitAdjustDrawer`](../../components/inventory/locations/place/UnitAdjustDrawer.tsx) — every bin under the unit in one drawer, a row per **(part, place)**, recorded · counted · changed. Was `Count or put away`, then `Adjust`, then a page; see §5.12. |
-| **Count one part at one place** | `/parts/{id}` → Storage tab → the icon on a balance row | Offered on **every** row including zeros. |
-| **Count one part everywhere** | Same tab → `Count all N places` | One sheet, one row per place. Appears once the part is in more than one place. |
+| **Count one part at one place** | Storage → **Inventory** → the part → a place → `Adjust` | `Adjust` IS the count — recorded · counted · changed for that one part. ⚠ *This was a count icon on the part page's Storage tab, gone 2026-09-09.* |
+| **Count one part everywhere** | *No entry since 2026-09-09* | `Count all N places` went with the part page's Storage tab, and nothing links to its sheet (`/inventory/count?part=…`) now; `Adjust` each place in the side rail. |
 | Put stray parts away | Place worksheet, at any bin | Tick rows → `Send the ticked parts to…` → `Put N away`. Moves each part's **whole** balance. The tool is unchanged; the pile it was built to empty is gone (§5.14). |
 | **"Where is my o-ring?" — and take five off the shelf** | Storage → **Inventory**, search, click the row | The row opens [`PartPlacesDrawer`](../../components/inventory/locations/place/PartPlacesDrawer.tsx) — every place the part is, with quantities and a total — and each row **expands into the four verbs scoped to that part at that place**, so the job finishes where the answer was. `Open bin` is inside the expanded section for when you want the whole shelf; the title links to the part's own page. **Withdrawn 2026-09-09:** a `StorageSearch` box on the board matching *"places and parts in one box, grouped"* — wrong once Inventory existed, because it put a parts answer on a tab that cannot show parts, and made two searches that both found them. The Places box filters the unit list; parts are found on Inventory. |
-| Count the whole shop | **Storage**, or a part's Storage tab → `/inventory/count` | One door, and now the worksheet's **only** browsing entry: Storage stopped navigating there entirely 2026-08-10. The page keeps its place-scoped mode for a part's own balance row (`?location=…&part=…`). |
+| Count the whole shop | *No entry since 2026-09-09* — a cabinet at a time, Storage → a unit → `Bulk Adjust` | The `/inventory/count` worksheet still exists, but nothing links to it: Storage stopped navigating there 2026-08-10, and its last door, the part page's Storage tab, went 2026-09-09. |
 | **Add a part the bin read didn't return** | Place worksheet → `Found something not listed?` | The "system says zero, I'm holding twelve" case. |
 | Check a job has material | `/jobs/{id}` | `JobPartMaterialsCard`. Top-level BOM only; an **On order** column since 2026-11 (sent POs, drafts muted). |
 

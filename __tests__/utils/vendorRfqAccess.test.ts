@@ -62,6 +62,68 @@ describe('listVendorRfqs', () => {
   });
 });
 
+describe('listVendorRfqs — one vendor’s RFQs', () => {
+  const statusRow = (id: string, createdAt: string) => ({
+    id, rfq_number: `RFQ-${id}`, title: null, status: 'sent', needed_by_on: null, respond_by_on: null, closed_at: null,
+    line_count: 1, awarded_line_count: 0, invited_count: 2, sent_count: 2, declined_count: 0, responded_count: 0,
+    created_at: createdAt, updated_at: createdAt,
+  });
+
+  /** By id, through the invitations: an invitation's NAME is the copy taken when it was sent. */
+  it('finds them by the vendor’s invitations, and still names everyone asked on each', async () => {
+    stub.queue('vendor_rfq_invitations', { data: [{ vendor_rfq_id: 'rfq-1' }, { vendor_rfq_id: 'rfq-2' }, { vendor_rfq_id: 'rfq-1' }] });
+    stub.queue('vendor_rfq_status', { data: [statusRow('rfq-2', '2026-11-08T00:00:00+00:00'), statusRow('rfq-1', '2026-11-01T00:00:00+00:00')], count: 2 });
+    stub.queue('vendor_rfq_invitations', {
+      data: [
+        { vendor_rfq_id: 'rfq-1', vendor_name: 'Acme (old name)' },
+        { vendor_rfq_id: 'rfq-1', vendor_name: 'Beta' },
+        { vendor_rfq_id: 'rfq-2', vendor_name: 'Acme Steel' },
+      ],
+    });
+    const result = await listVendorRfqs('co-1', { vendorId: 'v-acme', limit: 10 });
+
+    expect(stub.callsOf('vendor_rfq_invitations', 'eq')).toEqual([
+      ['company_id', 'co-1'],
+      ['vendor_id', 'v-acme'],
+    ]);
+    expect(stub.callsOf('vendor_rfq_status', 'in')).toEqual([['id', ['rfq-1', 'rfq-2']]]);
+    expect(stub.callsOf('vendor_rfq_status', 'is')).toEqual([['deleted_at', null]]);
+    expect(stub.callsOf('vendor_rfq_status', 'limit')).toEqual([[10]]);
+    expect(result.rows.map((r) => [r.id, r.vendorNames])).toEqual([
+      ['rfq-2', ['Acme Steel']],
+      ['rfq-1', ['Acme (old name)', 'Beta']],
+    ]);
+    expect(result).toMatchObject({ total: 2, truncated: false });
+  });
+
+  it('is empty, without reading the list, for a vendor never invited', async () => {
+    stub.queue('vendor_rfq_invitations', { data: [] });
+    await expect(listVendorRfqs('co-1', { vendorId: 'v-new' })).resolves.toEqual({ rows: [], total: 0, truncated: false });
+    expect(stub.tables).toEqual(['vendor_rfq_invitations']);
+  });
+
+  it('reads more ids than one request holds a chunk at a time, newest first, the counts added', async () => {
+    const ids = Array.from({ length: 130 }, (_, i) => `rfq-${String(i).padStart(3, '0')}`);
+    stub.queue('vendor_rfq_invitations', { data: ids.map((id) => ({ vendor_rfq_id: id })) });
+    stub.queue(
+      'vendor_rfq_status',
+      { data: [statusRow('rfq-005', '2026-11-05T00:00:00+00:00'), statusRow('rfq-001', '2026-11-01T00:00:00+00:00')], count: 120 },
+      { data: [statusRow('rfq-129', '2026-11-09T00:00:00+00:00'), statusRow('rfq-120', '2026-11-03T00:00:00+00:00')], count: 10 },
+    );
+    const result = await listVendorRfqs('co-1', { vendorId: 'v-acme', limit: 3 });
+
+    const chunks = stub.callsOf('vendor_rfq_status', 'in').map(([, value]) => (value as string[]).length);
+    expect(chunks).toEqual([120, 10]);
+    expect(result.rows.map((r) => r.id)).toEqual(['rfq-129', 'rfq-005', 'rfq-120']);
+    expect(result).toMatchObject({ total: 130, truncated: true });
+  });
+
+  it('throws when the invitations cannot be read', async () => {
+    stub.queue('vendor_rfq_invitations', { error: { code: '08006', message: 'connection failure' } });
+    await expect(listVendorRfqs('co-1', { vendorId: 'v-acme' })).rejects.toThrow('Failed to load the RFQs.');
+  });
+});
+
 describe('getVendorRfq', () => {
   function queueDetail() {
     stub.queue('vendor_rfqs', {

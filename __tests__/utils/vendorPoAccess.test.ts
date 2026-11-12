@@ -35,6 +35,7 @@ import {
   getVendorPoArchiveImpact,
   listOpenOutsideOpsForVendor,
   listVendorPoLinesForJob,
+  listVendorPoLinesForPart,
   listVendorPoReceipts,
   listVendorPos,
   listVendorPosForVendor,
@@ -972,6 +973,72 @@ describe('listVendorPoLinesForJob', () => {
       ['is_archived', false],
     ]);
     expect(lines[0]).toMatchObject({ poNumber: 'PO-0042', vendorName: 'Acme Steel', poStatus: 'partially_received', jobPartId: 'jp-1', receivedQuantity: 2, quantity: 3 });
+  });
+
+  /** The send dialog prefills Due back from it; `expectedOn` is a slip's promise once one is out. */
+  it("carries the line's own need-by date beside its expected date", async () => {
+    stub.queue('vendor_purchase_order_line_status', {
+      data: [lineRow({ job_id: 'job-1', line_kind: 'outside_service', need_by_on: '2026-11-20', expected_on: '2026-11-12', is_archived: false })],
+    });
+    stub.queue('vendor_purchase_order_status', { data: [{ id: 'po-1', status: 'sent', vendor_name: 'Plater Co' }] });
+    const [line] = await listVendorPoLinesForJob('job-1', { today: TODAY });
+    expect(line).toMatchObject({ needByOn: '2026-11-20', expectedOn: '2026-11-12' });
+  });
+});
+
+describe('listVendorPoLinesForPart', () => {
+  it("lists the part's lines on LIVE POs in every status, newest first, with each PO's vendor and date", async () => {
+    stub.queue('vendor_purchase_order_line_status', {
+      data: [
+        lineRow({ id: 'line-9', vendor_purchase_order_id: 'po-9', po_number: 'PO-0049', status: 'received', received_quantity: 3, open_quantity: 0, is_archived: false, job_number: 'J-1042' }),
+        lineRow({ id: 'line-1', status: 'open', is_archived: false }),
+      ],
+      count: 2,
+    });
+    stub.queue('vendor_purchase_order_status', {
+      data: [
+        { id: 'po-9', status: 'received', vendor_name: 'Acme Steel', ordered_on: '2026-11-05' },
+        { id: 'po-1', status: 'sent', vendor_name: 'Beta Metals', ordered_on: '2026-10-01' },
+      ],
+    });
+    const result = await listVendorPoLinesForPart('part-bar', { today: TODAY });
+
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'eq')).toEqual([
+      ['part_id', 'part-bar'],
+      ['line_kind', 'part'],
+      ['is_archived', false],
+    ]);
+    // Every status unless asked: no status filter at all.
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'in')).toEqual([]);
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'order')[0]).toEqual(['created_at', { ascending: false }]);
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'limit')).toEqual([[25]]);
+    expect(stub.callsOf('vendor_purchase_order_status', 'in')).toEqual([['id', ['po-9', 'po-1']]]);
+    expect(result.rows.map((l) => [l.poNumber, l.status, l.vendorName, l.orderedOn])).toEqual([
+      ['PO-0049', 'received', 'Acme Steel', '2026-11-05'],
+      ['PO-0042', 'open', 'Beta Metals', '2026-10-01'],
+    ]);
+    expect(result.rows[0]).toMatchObject({ lineId: 'line-9', quantity: 3, unit: 'bar', receivedQuantity: 3, jobNumber: 'J-1042', poStatus: 'received' });
+    expect(result).toMatchObject({ total: 2, truncated: false });
+  });
+
+  it('narrows to the statuses asked for, and says when there are more than the limit', async () => {
+    stub.queue('vendor_purchase_order_line_status', { data: [lineRow({ status: 'closed', is_archived: false })], count: 7 });
+    stub.queue('vendor_purchase_order_status', { data: [{ id: 'po-1', status: 'closed', vendor_name: 'Acme Steel', ordered_on: '2026-09-01' }] });
+    const result = await listVendorPoLinesForPart('part-bar', { today: TODAY, limit: 1, statuses: ['received', 'closed'] });
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'in')).toEqual([['status', ['received', 'closed']]]);
+    expect(stub.callsOf('vendor_purchase_order_line_status', 'limit')).toEqual([[1]]);
+    expect(result).toMatchObject({ total: 7, truncated: true });
+  });
+
+  it('reads no POs when the part has no lines', async () => {
+    stub.queue('vendor_purchase_order_line_status', { data: [], count: 0 });
+    await expect(listVendorPoLinesForPart('part-bar', { today: TODAY })).resolves.toEqual({ rows: [], total: 0, truncated: false });
+    expect(stub.tables).toEqual(['vendor_purchase_order_line_status']);
+  });
+
+  it('THROWS on a failed read: an empty history would say "never bought"', async () => {
+    stub.queue('vendor_purchase_order_line_status', { error: { code: '08006', message: 'connection failure' } });
+    await expect(listVendorPoLinesForPart('part-bar', { today: TODAY })).rejects.toThrow("Failed to load the part's purchase orders.");
   });
 });
 

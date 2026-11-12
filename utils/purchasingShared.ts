@@ -31,7 +31,6 @@ import {
   type PurchaseUnitBasis,
   type UnitConversionRow,
 } from '@/lib/purchasing/purchaseUnits';
-import { resolveUnitAlias } from '@/lib/unitPresets';
 import { ensurePartUnitConversion } from '@/utils/partsAccess';
 import type { AddressSnapshot, ContactSnapshot } from '@/types/documentSnapshot';
 
@@ -171,34 +170,27 @@ export function parseContactSnapshot(value: unknown, what: string): ContactSnaps
 // ------------------------------------------------------------------------------------------------
 
 /**
- * The TypeScript twin of SQL `unit_name_key` (migration 20261110043700): `UNIT_ALIASES` applied
- * as the database applies it (case-sensitive, so `L` and `mL` survive), then lower-cased. Two unit
- * names are the same unit exactly when their keys are equal.
+ * The TypeScript twin of SQL `unit_name_key` — ONE copy, in lib/purchasing/purchaseUnits.ts,
+ * re-exported here for the access layer's callers (the MCP tools among them).
  */
-export function unitNameKey(unit: string | null | undefined): string {
-  return resolveUnitAlias((unit ?? '').trim()).toLowerCase();
-}
+export { unitNameKey } from '@/lib/purchasing/purchaseUnits';
 
 /**
- * `resolvePurchaseUnit`, after spelling `unit` the way the part does when the DATABASE would call
- * them the same unit (`unitNameKey`): "Bar" on a part with a "bar" conversion is that conversion,
- * as `part_unit_factor` finds it. Every unit this access layer resolves goes through here, so a
- * sheet or a line stored as "Bar" is never mistaken for an incomparable unit.
+ * How a unit relates to a part's stock unit, the way the DATABASE compares unit names
+ * (`unit_name_key`): "Bar" on a part with a "bar" conversion is that conversion, as
+ * `part_unit_factor` finds it. Every unit this access layer resolves goes through here, so a sheet
+ * or a line stored as "Bar" is never mistaken for an incomparable unit.
+ *
+ * It is `resolvePurchaseUnit`, which the PO form calls directly: that compares names as the
+ * database does itself now, so the access layer and the form cannot read one unit two ways. (This
+ * used to respell the unit first, from before `resolvePurchaseUnit` compared names in any case.)
  */
 export function resolvePartUnit(
   unit: string | null | undefined,
   stockUnit: string | null | undefined,
   conversions: readonly UnitConversionRow[],
 ): PurchaseUnitBasis {
-  const typed = (unit ?? '').trim();
-  const key = unitNameKey(typed);
-  const spelled =
-    typed === ''
-      ? typed
-      : stockUnit && unitNameKey(stockUnit) === key
-        ? stockUnit
-        : (conversions.find((c) => unitNameKey(c.from_unit) === key)?.from_unit ?? typed);
-  return resolvePurchaseUnit(spelled, stockUnit, conversions);
+  return resolvePurchaseUnit(unit, stockUnit, conversions);
 }
 
 /** One unit a write is about to name for a part. */

@@ -17,6 +17,7 @@ import type { FreightTerms, Shipment, ShippingMethod } from '@/types/shipment';
 import {
   getOutsideShipmentsForJob,
   listOutsideShipmentsForCompany,
+  outsideShipmentPoNumber,
   outstandingOn,
   roundQty,
 } from '@/utils/outsideShipmentsAccess';
@@ -247,6 +248,10 @@ export const outsideShipmentOutput = z.object({
   expected_back: z.string().nullable().describe('The date the vendor committed to (YYYY-MM-DD), if any.'),
   carrier: z.string().nullable(),
   notes: z.string().nullable(),
+  po_number: z
+    .string()
+    .nullable()
+    .describe('The purchase order to a vendor this slip ships against (an outside-service line on it), if any. Never a customer PO.'),
   url: urlOutput.describe('The job\'s page in Jigged.'),
 });
 
@@ -265,7 +270,7 @@ export const listOutsideShipments = defineCompanyTool({
     'routing step, quantities sent, received and outstanding, the date sent and the date the ' +
     'vendor committed to return it. Voided sends are left out, and so are cancelled jobs\' sends ' +
     'unless that job is named. Newest send first. Without a job filter it reads the company\'s ' +
-    '1,000 most recent sends.',
+    '1,000 most recent sends. A send on a purchase order to a vendor names that PO.',
   access: 'read',
   input: {
     open_only: z.boolean().optional().describe('Only sends with pieces still at the vendor. Defaults to true.'),
@@ -317,6 +322,7 @@ export const listOutsideShipments = defineCompanyTool({
             expected_back: s.due_back_on,
             carrier: s.carrier,
             notes: s.notes,
+            po_number: outsideShipmentPoNumber(s),
             url: companyLink(env, `/jobs/${s.job_id}`),
           };
         }),

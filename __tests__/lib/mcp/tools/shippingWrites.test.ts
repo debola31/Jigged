@@ -51,6 +51,12 @@ vi.mock('@/utils/outsideShipmentsAccess', async (importOriginal) => ({
   voidOutsideShipment: (...a: unknown[]) => mockVoidOutside(...a),
 }));
 
+const mockJobPoLines = vi.fn();
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/vendorPoAccess')>()),
+  listVendorPoLinesForJob: (...a: unknown[]) => mockJobPoLines(...a),
+}));
+
 /** What each table answers, and every query asked of it. */
 const db = vi.hoisted(() => ({
   job: null as Record<string, unknown> | null,
@@ -514,6 +520,47 @@ function slip(overrides: Partial<OutsideShipmentWithRelations> = {}): OutsideShi
     job: { id: 'job-1', job_number: 'J-0141' },
     job_operation: { id: 'op-20', operation_name: 'Anodize', sequence: 20 },
     job_part: { id: JP1, quantity: 10, part: { id: 'p-1', part_name: 'BRKT-100' } },
+    vendor_purchase_order_line_id: null,
+    vendor_purchase_order_line: null,
+    ...overrides,
+  };
+}
+
+/** The slip as read back by id when it ships against line 2 of PO-1042 (linked by the send itself). */
+const LINKED = {
+  vendor_purchase_order_line_id: 'pol-2',
+  vendor_purchase_order_line: {
+    id: 'pol-2',
+    line_number: 2,
+    vendor_purchase_order_id: 'po-1',
+    vendor_purchase_order: { id: 'po-1', po_number: 'PO-1042' },
+  },
+};
+
+/** That line on the job, as the job page's "Vendor POs" row reads it. */
+function jobPoLine(overrides: Record<string, unknown> = {}) {
+  return {
+    lineId: 'pol-2',
+    vendorPurchaseOrderId: 'po-1',
+    poNumber: 'PO-1042',
+    poStatus: 'partially_received',
+    vendorId: 'v-1',
+    vendorName: 'Valley Plating',
+    lineNumber: 2,
+    lineKind: 'outside_service',
+    partId: 'p-1',
+    partName: 'BRKT-100',
+    description: 'Anodize — BRKT-100 — Job J-0141, Op 20',
+    jobPartId: JP1,
+    jobOperationId: 'op-20',
+    operationLabel: 'Op 20 Anodize',
+    quantity: 10,
+    unit: 'each',
+    receivedQuantity: 10,
+    openQuantity: 0,
+    status: 'received',
+    expectedOn: '2026-11-20',
+    isLate: false,
     ...overrides,
   };
 }
@@ -610,6 +657,32 @@ describe('send_outside', () => {
       notes: null,
     });
     expect(res.data.warnings).toEqual(['No address on file for Valley Plating. The slip prints without a ship-to block.']);
+    expect(res.data.vendor_po_line).toBeNull();
+    expect(res.data.po_number).toBeNull();
+  });
+
+  it('reports the PO line the send linked itself to, read back from the slip, with no input for it', async () => {
+    db.job = liveJob();
+    db.jobParts = routing();
+    mockOutsideSummaries.mockResolvedValue([opSummary()]);
+    mockShipTo.mockResolvedValue({ address: { id: 'va-1', label: '5 Dock Rd' }, choices: [{ id: 'va-1', label: '5 Dock Rd' }], requiresChoice: false });
+    mockCreateOutside.mockResolvedValue({ shipmentId: 'os-1', slipNumber: 'VPS-0141-1' });
+    mockOutsideById.mockResolvedValue(slip(LINKED));
+
+    const res = await sendOutside.run({ job_number: 'J-0141' }, env);
+    if (!res.ok) throw new Error(res.message);
+    // The send is unchanged: the database links the slip to the step's one open PO line.
+    expect(mockCreateOutside).toHaveBeenCalledWith({ jobOperationId: 'op-20', quantity: 10, dueBackOn: null, vendorAddressId: 'va-1', notes: 'Type II black' });
+    expect(mockOutsideById).toHaveBeenCalledWith('os-1');
+    expect(res.data.po_number).toBe('PO-1042');
+    expect(res.data.vendor_po_line).toEqual({
+      vendor_po_id: 'po-1',
+      po_number: 'PO-1042',
+      line_number: 2,
+      url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1',
+    });
+    expect(Object.keys(sendOutside.input)).not.toContain('vendor_po_line_id');
+    expect(() => z.object(sendOutside.output).parse(res.data)).not.toThrow();
   });
 
   it('refuses what the operation card would not offer', async () => {
@@ -693,6 +766,34 @@ describe('receive_outside', () => {
     });
     expect(() => z.object(receiveOutside.output).parse(res.data)).not.toThrow();
     expectNobodyNamed(res.data);
+    expect(res.data.vendor_po_line).toBeNull();
+    expect(mockJobPoLines).not.toHaveBeenCalled();
+  });
+
+  it("reports how the slip's PO line stands after the receipt — the slip stays the only record of what came back", async () => {
+    db.outside = { id: 'os-1', slip_number: 'VPS-0141-1', voided_at: null };
+    db.job = liveJob();
+    mockOutsideById
+      .mockResolvedValueOnce(slip({ ...LINKED, receipts: [receipt()] }))
+      .mockResolvedValueOnce(slip({ ...LINKED, receipts: [receipt(), receipt({ id: 'r-2', quantity_good: 6 })] }));
+    mockJobPoLines.mockResolvedValue([jobPoLine({ lineId: 'other', lineNumber: 1 }), jobPoLine()]);
+
+    const res = await receiveOutside.run({ slip_number: 'VPS-0141-1' }, env);
+    if (!res.ok) throw new Error(res.message);
+    expect(mockReceiveShipment).toHaveBeenCalledWith('os-1', { quantityGood: 6, closeShipment: false });
+    expect(mockJobPoLines).toHaveBeenCalledWith('job-1', { today: '2026-11-09' });
+    expect(res.data.po_number).toBe('PO-1042');
+    expect(res.data.vendor_po_line).toEqual({
+      vendor_po_id: 'po-1',
+      po_number: 'PO-1042',
+      line_number: 2,
+      quantity: 10,
+      received_quantity: 10,
+      open_quantity: 0,
+      status: 'received',
+      url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1',
+    });
+    expect(() => z.object(receiveOutside.output).parse(res.data)).not.toThrow();
   });
 
   it('closes short only when something is written off', async () => {

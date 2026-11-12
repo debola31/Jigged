@@ -275,6 +275,8 @@ function outside(overrides: Partial<OutsideShipmentWithRelations>): OutsideShipm
     job: { id: 'job-1', job_number: 'J-1001' },
     job_operation: { id: 'op-1', operation_name: 'Anodize', sequence: 3 },
     job_part: { id: 'jp-1', quantity: 10, part: { id: 'p-1', part_name: 'BRKT-100' } },
+    vendor_purchase_order_line_id: null,
+    vendor_purchase_order_line: null,
     ...overrides,
   };
 }
@@ -309,6 +311,7 @@ describe('list_outside_shipments', () => {
       expected_back: '2026-11-08',
       carrier: null,
       notes: 'Type II black, mask the bore',
+      po_number: null,
       url: 'https://jigged.app/dashboard/co-1/jobs/job-1',
     });
     expect(() => z.object(listOutsideShipments.output).parse(res.data)).not.toThrow();
@@ -359,5 +362,26 @@ describe('list_outside_shipments', () => {
       ok: false,
       message: 'There is no job J-404 in Acme Machining.',
     });
+  });
+
+  it('names the purchase order to a vendor a slip ships against, by join (the slip PDF\'s "PO:")', async () => {
+    mockOutsideList.mockResolvedValue([
+      outside({
+        vendor_purchase_order_line_id: 'pol-2',
+        vendor_purchase_order_line: {
+          id: 'pol-2',
+          line_number: 2,
+          vendor_purchase_order_id: 'po-1',
+          vendor_purchase_order: { id: 'po-1', po_number: 'PO-1042' },
+        },
+      }),
+      outside({ id: 'os-2' }),
+    ]);
+    const res = await listOutsideShipments.run({}, env);
+    if (!res.ok) throw new Error(res.message);
+    expect(res.data.outside_shipments.map((s) => [s.outside_shipment_id, s.po_number])).toEqual([
+      ['os-1', 'PO-1042'],
+      ['os-2', null],
+    ]);
   });
 });

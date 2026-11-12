@@ -36,6 +36,16 @@
     "routings": "The manufacturing plan for a part: the ordered set of operations that make it.",
     "routing_operations": "One step in a part's standing routing: its sequence, the work centre that runs it, and standard times.",
     "inventory_transactions": "Stock movements against a part: material taken in, issued to jobs, and adjusted after a count.",
-    "material_lots": "One mill heat of one raw material, created when the material is received. Answers traceability questions -- which heats a part has held, when they came in, and which vendor supplied them. Only parts with lot_tracked = true have lots at all, and most do not."
+    "material_lots": "One mill heat of one raw material, created when the material is received. Answers traceability questions -- which heats a part has held, when they came in, and which vendor supplied them. Only parts with lot_tracked = true have lots at all, and most do not.",
+    "vendor_purchase_orders": "Purchase orders the shop sends TO VENDORS to buy material, parts and outside work: the PO number, the supplier, the order and need-by dates. Not the customer's PO.",
+    "vendor_purchase_order_status": "Each purchase order to a vendor with its status (draft, sent, partly received, received, closed), when the rest is expected, whether it is overdue, its total and the open value still to arrive.",
+    "vendor_purchase_order_lines": "The lines on a purchase order to a vendor: which part, outside service or charge was ordered, how many, at what price, and for which job.",
+    "vendor_purchase_order_line_status": "How far each line of a purchase order to a vendor has got: ordered, received, still to come, when it is expected, and which lines are overdue.",
+    "vendor_purchase_order_receipts": "Deliveries received from vendors against purchase orders: what arrived and when, how much, where it was put away, the vendor's packing slip and the heat.",
+    "part_on_order": "What is on order for each part: the quantity still coming from vendors on sent purchase orders, what sits on drafts not sent yet, and when it is expected.",
+    "part_vendor_last_purchase": "The Last PO price: for each part and vendor, the unit price on the most recent purchase order -- what we last paid for it, as ordered.",
+    "part_vendors": "A part's approved vendors: which suppliers may supply it (approved, conditional, do not use), their part numbers, purchase units, lead times, minimum orders and price-sheet dates.",
+    "part_vendor_price_breaks": "Vendor price sheets: each supplier's quoted unit price for a part at each quantity break.",
+    "vendor_rfq_status": "Requests for quote sent to vendors: their status (draft, sent, quoted, awarded, closed) and how many vendors were invited, answered or declined."
   }
 }

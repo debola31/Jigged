@@ -36,7 +36,7 @@ import { getJobPartShipmentSummaries } from '@/utils/shipmentsAccess';
 
 /**
  * The job write tools. Each one calls the access function the job page (or the jobs list's
- * Accept Purchase Order modal) calls, with the arguments that UI passes, and refuses up front
+ * Accept customer PO modal) calls, with the arguments that UI passes, and refuses up front
  * what that UI would not let a person submit:
  *
  *   create_job              AcceptPurchaseOrderModal  -> createJobFromPurchaseOrder
@@ -133,8 +133,8 @@ function pickPart(
 // ─── create_job ──────────────────────────────────────────────────────────────────────────────
 
 /**
- * The earliest date that is "today" anywhere on Earth right now (UTC-12). The Accept Purchase
- * Order modal refuses a due date before the person's own today, read from their browser; this
+ * The earliest date that is "today" anywhere on Earth right now (UTC-12). The Accept customer PO
+ * modal refuses a due date before the person's own today, read from their browser; this
  * server has no browser clock and runs in UTC, which is already tomorrow for the Americas every
  * evening. Comparing against the furthest-behind zone accepts every shop's today and still
  * catches the wrong-year entry the check exists for. `toISOString()` is the UTC date of the
@@ -219,14 +219,15 @@ async function findPartForJob(
 
 export const createJob = defineCompanyTool({
   name: 'create_job',
-  title: 'Create a job from a customer PO',
+  title: "Create a job from a customer's PO",
   description:
-    'Creates a job directly from a customer purchase order, with no quote: the customer, the ' +
-    'PO number, a due date (today or later), and one or more existing parts, each with a ' +
-    'whole-number quantity and the agreed unit price. Each made part\'s routing is copied onto ' +
-    'the job as its steps, so a made part needs a routing first; a bought part goes on with no ' +
-    'steps, ready to ship. Bill-to, ship-to and contact start from the customer\'s defaults. ' +
-    'Returns the new job as get_job does. The PO\'s PDF is attached in Jigged.',
+    "Creates a job directly from a customer's purchase order (the order a customer sends the shop), " +
+    "with no quote: the customer, the customer's PO number, a due date (today or later), and one or " +
+    "more existing parts, each with a whole-number quantity and the agreed unit price. Each made " +
+    "part's routing is copied onto the job as its steps, so a made part needs a routing first; a " +
+    'bought part goes on with no steps, ready to ship. Bill-to, ship-to and contact start from the ' +
+    "customer's defaults. The customer's PO document can be attached on the job's page in Jigged. " +
+    'Buying from a vendor is a different record: create_vendor_po. Returns the new job as get_job does.',
   access: 'write',
   idempotent: false,
   input: {

@@ -12,15 +12,23 @@ import {
   paginate,
   urlOutput,
 } from '@/lib/mcp/tools/shared';
+import {
+  PART_VENDOR_STATUSES,
+  VENDOR_PO_DEFAULT_LIST_STATUSES,
+  VENDOR_PO_STATUSES,
+} from '@/lib/purchasing/vendorPoStatus';
+import { vendorPoPath } from '@/lib/purchasingRoutes';
 import { getSupabase } from '@/lib/supabase';
 import type { VendorWithPrimaryContact } from '@/types/vendor';
 import type { VendorContactRole } from '@/types/vendorContact';
 import type { VendorService } from '@/types/vendorService';
+import { listVendorParts } from '@/utils/partVendorsAccess';
 import { getAddressesForVendor } from '@/utils/vendorAddressesAccess';
 import { getContactsForVendor } from '@/utils/vendorContactsAccess';
 import { getVendorServicesForCompany, getVendorServicesForVendor } from '@/utils/vendorServicesAccess';
-import { getAllVendorsWithPrimaryContact, getPartsByPreferredVendor } from '@/utils/vendorsAccess';
+import { getAllVendorsWithPrimaryContact } from '@/utils/vendorsAccess';
 import { escapeIlikePattern } from '@/utils/searchFilter';
+import { listVendorPosForVendor } from '@/utils/vendorPoAccess';
 
 const CONTACT_ROLES = [
   'sales',
@@ -32,8 +40,26 @@ const CONTACT_ROLES = [
   'other',
 ] as const satisfies readonly VendorContactRole[];
 
-/** How many of the parts that name a vendor preferred get_vendor lists. */
-const PREFERRED_PARTS_CAP = MAX_PAGE;
+/** How many of the parts a vendor supplies get_vendor lists. */
+const PARTS_SUPPLIED_CAP = MAX_PAGE;
+
+/** How many of the vendor's open purchase orders get_vendor lists. */
+const OPEN_VENDOR_POS_CAP = MAX_PAGE;
+
+/** Today in UTC: Jigged's server clock judges "overdue" on a purchase order. */
+const todayUtc = (): string => new Date().toISOString().slice(0, 10);
+
+const openVendorPoOutput = z.object({
+  vendor_po_id: z.string(),
+  po_number: z.string().describe('A purchase order to this vendor, e.g. PO-1042. Not a customer PO.'),
+  status: z.enum(VENDOR_PO_STATUSES).describe('`draft` (not sent yet), `sent` or `partially_received`.'),
+  ordered_on: z.string(),
+  next_expected_on: z.string().nullable(),
+  overdue: z.boolean().describe("Still owed something past its expected date, judged on Jigged's server clock (UTC)."),
+  total: z.number().describe('At the PO prices.'),
+  open_value: z.number().describe('Open value (at PO price): what is still to arrive. Not money owed.'),
+  url: urlOutput,
+});
 
 const serviceOutput = z.object({
   service_id: z.string(),
@@ -125,10 +151,39 @@ const vendorDetail = {
     }),
   ),
   services: z.array(serviceOutput.extend({ description: z.string().nullable() })),
-  preferred_parts: z
-    .array(z.object({ part_id: z.string(), part_name: z.string(), unit: z.string().nullable(), url: urlOutput }))
-    .describe(`Parts that name this vendor their preferred supplier, by name; at most ${PREFERRED_PARTS_CAP}.`),
-  preferred_parts_total: z.number().describe('How many parts name this vendor preferred, across all of them.'),
+  parts_supplied: z
+    .array(
+      z.object({
+        part_vendor_id: z.string().describe("This vendor's entry on the part's approved vendor list."),
+        part_id: z.string(),
+        part_name: z.string(),
+        description: z.string().nullable(),
+        source: z.string().describe('`made` or `bought`.'),
+        status: z
+          .enum(PART_VENDOR_STATUSES)
+          .describe('How the vendor stands on this part: `approved`, `conditional` (usable, with a caution) or `disapproved` (Do not use).'),
+        preferred: z.boolean().describe("This vendor is the part's preferred vendor."),
+        vendor_part_number: z.string().nullable().describe("The vendor's own number for the part."),
+        purchase_unit: z.string().describe('The unit this vendor sells it in.'),
+        lead_time_days: z.number().nullable(),
+        minimum_order_quantity: z.number().nullable().describe('In purchase units.'),
+        quoted_on: z.string().nullable(),
+        valid_until: z.string().nullable().describe("The price sheet's valid-until date."),
+        expired: z
+          .boolean()
+          .describe("The price sheet is past its valid-until date (Jigged's server clock, UTC): shown, never used as a price."),
+        url: urlOutput,
+      }),
+    )
+    .describe(
+      "Parts supplied: every live part with this vendor on its approved vendor list, preferred or not, by part name; " +
+        `at most ${PARTS_SUPPLIED_CAP}. The prices are on get_part_vendors.`,
+    ),
+  parts_supplied_total: z.number().describe('How many parts this vendor supplies, across all of them.'),
+  open_vendor_pos: z
+    .array(openVendorPoOutput)
+    .describe(`Purchase orders to this vendor still open — draft, sent or partly received — newest first; at most ${OPEN_VENDOR_POS_CAP}.`),
+  open_vendor_pos_total: z.number().describe('How many open purchase orders to this vendor there are, across all of them.'),
   created_at: z.string(),
   url: urlOutput,
 };
@@ -180,8 +235,8 @@ export const getVendor = defineCompanyTool({
   title: 'Get a vendor',
   description:
     'Returns one vendor in full: its contacts, addresses, the outside services it performs with ' +
-    'their prices, and the parts that name it their preferred supplier. Find a vendor by id or ' +
-    'by exact name.',
+    'their prices, the parts it supplies (every part with it on its approved vendor list, and how ' +
+    'it stands on each), and the purchase orders to it still open. Find a vendor by id or by exact name.',
   access: 'read',
   input: {
     vendor_id: z.guid().optional().describe('The vendor, by id.'),
@@ -192,11 +247,19 @@ export const getVendor = defineCompanyTool({
     const found = await findVendor(args, env);
     if ('message' in found) return { ok: false, message: found.message };
     const { vendor } = found;
-    const [contacts, addresses, services, parts] = await Promise.all([
+    const today = todayUtc();
+    const [contacts, addresses, services, parts, openPos] = await Promise.all([
       getContactsForVendor(vendor.id),
       getAddressesForVendor(vendor.id),
       getVendorServicesForVendor(vendor.id),
-      getPartsByPreferredVendor(vendor.id),
+      // The vendor page's Parts supplied card: the approved-vendor list, preferred or not, by name.
+      listVendorParts(vendor.id, { today }),
+      // The vendor page's Purchase orders card: its live POs still open, newest first.
+      listVendorPosForVendor(vendor.id, {
+        today,
+        limit: OPEN_VENDOR_POS_CAP,
+        statuses: [...VENDOR_PO_DEFAULT_LIST_STATUSES],
+      }),
     ]);
     return {
       ok: true,
@@ -225,13 +288,36 @@ export const getVendor = defineCompanyTool({
           is_default: a.is_default,
         })),
         services: services.map((s) => ({ ...serviceOf(s), description: s.description })),
-        preferred_parts: parts.slice(0, PREFERRED_PARTS_CAP).map((p) => ({
-          part_id: p.id,
-          part_name: p.part_name,
-          unit: p.primary_unit,
-          url: companyLink(env, `/parts/${p.id}`),
+        parts_supplied: parts.slice(0, PARTS_SUPPLIED_CAP).map((p) => ({
+          part_vendor_id: p.partVendorId,
+          part_id: p.partId,
+          part_name: p.partName,
+          description: p.description,
+          source: p.partSource,
+          status: p.status,
+          preferred: p.isPreferred,
+          vendor_part_number: p.vendorPartNumber,
+          purchase_unit: p.purchaseUnit,
+          lead_time_days: p.leadTimeDays,
+          minimum_order_quantity: p.minimumOrderQuantity,
+          quoted_on: p.quotedOn,
+          valid_until: p.validUntil,
+          expired: p.isExpired,
+          url: companyLink(env, `/parts/${p.partId}`),
         })),
-        preferred_parts_total: parts.length,
+        parts_supplied_total: parts.length,
+        open_vendor_pos: openPos.rows.map((po) => ({
+          vendor_po_id: po.id,
+          po_number: po.poNumber,
+          status: po.status,
+          ordered_on: po.orderedOn,
+          next_expected_on: po.nextExpectedOn,
+          overdue: po.isLate,
+          total: po.orderedAmount,
+          open_value: po.openAmount,
+          url: env.link(vendorPoPath(env.company.id, po.id)),
+        })),
+        open_vendor_pos_total: openPos.total,
         created_at: vendor.created_at,
         url: companyLink(env, `/vendors/${vendor.id}`),
       },

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 
 import type { CompanyToolEnv } from '@/lib/mcp/defineTool';
 import { getJob, getJobMaterialCheck, listJobs } from '@/lib/mcp/tools/jobs';
@@ -20,6 +21,12 @@ vi.mock('@/utils/jobsAccess', () => ({
 const mockMaterial = vi.fn();
 vi.mock('@/utils/materialCheckAccess', () => ({
   getJobPartMaterialCheck: (...a: unknown[]) => mockMaterial(...a),
+}));
+
+const mockJobPoLines = vi.fn();
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/vendorPoAccess')>()),
+  listVendorPoLinesForJob: (...a: unknown[]) => mockJobPoLines(...a),
 }));
 
 let lookup: { id: string; deleted_at: string | null } | null = null;
@@ -138,6 +145,7 @@ describe('get_job', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     lookup = { id: 'job-1', deleted_at: null };
+    mockJobPoLines.mockResolvedValue([]);
   });
 
   const full = job({
@@ -199,6 +207,61 @@ describe('get_job', () => {
     expect(text).not.toContain('Dana Operator');
     expect(text).not.toContain('user-operator');
     expect(text).not.toMatch(/completed_by|sent_by/);
+  });
+
+  it("lists the job's lines on purchase orders to vendors, as its Vendor POs row does; customer_po_number stays the customer's", async () => {
+    mockGetJob.mockResolvedValue(full);
+    mockJobPoLines.mockResolvedValue([
+      {
+        lineId: 'pol-3',
+        vendorPurchaseOrderId: 'po-1',
+        poNumber: 'PO-1042',
+        poStatus: 'partially_received',
+        vendorId: 'v-1',
+        vendorName: 'Valley Plating',
+        lineNumber: 3,
+        lineKind: 'outside_service',
+        partId: 'part-1',
+        partName: 'BRKT-100',
+        description: 'Anodize — BRKT-100 — Job J-1001, Op 2',
+        jobPartId: 'jp-1',
+        jobOperationId: 'op-2',
+        operationLabel: 'Op 2 Anodize',
+        quantity: 10,
+        unit: 'each',
+        receivedQuantity: 4,
+        openQuantity: 6,
+        status: 'partially_received',
+        expectedOn: '2026-11-15',
+        isLate: true,
+      },
+    ]);
+    const res = await getJob.run({ job_id: 'job-1' }, env);
+    if (!res.ok) throw new Error('expected the job');
+    expect(mockJobPoLines).toHaveBeenCalledWith('job-1', { today: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+    expect(res.data.customer_po_number).toBe('PO-9');
+    expect(res.data.vendor_po_lines).toEqual([
+      {
+        vendor_po_id: 'po-1',
+        po_number: 'PO-1042',
+        po_status: 'partially_received',
+        vendor: { vendor_id: 'v-1', name: 'Valley Plating', url: 'https://jigged.app/dashboard/co-1/vendors/v-1' },
+        line_number: 3,
+        kind: 'outside_service',
+        item: 'Anodize — BRKT-100 — Job J-1001, Op 2',
+        job_part_id: 'jp-1',
+        operation: 'Op 2 Anodize',
+        quantity: 10,
+        unit: 'each',
+        received_quantity: 4,
+        open_quantity: 6,
+        status: 'partially_received',
+        expected_on: '2026-11-15',
+        overdue: true,
+        url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1',
+      },
+    ]);
+    expect(() => z.object(getJob.output).parse(res.data)).not.toThrow();
   });
 
   it('finds a job by number', async () => {
@@ -274,6 +337,9 @@ describe('get_job_material_check', () => {
         shortBy: 15,
         status: 'short',
         basis: { kind: 'same', unit: 'in' },
+        onOrder: 288,
+        onDraft: 0,
+        onOrderRefs: [{ vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', stockQuantity: 288, expectedOn: '2026-11-18', isDraft: false }],
       },
     ]);
     const res = await getJobMaterialCheck.run({ job_id: 'job-1' }, env);
@@ -286,5 +352,14 @@ describe('get_job_material_check', () => {
       orderQuantity: 10,
     });
     expect(res.data.parts[0].materials[0]).toMatchObject({ part_name: '6061 bar', short_by: 15, status: 'short' });
+    // What is coming rides alongside; "short by" is untouched by it (stock on a PO is not on the shelf).
+    expect(res.data.parts[0].materials[0]).toMatchObject({
+      on_order: 288,
+      on_draft: 0,
+      on_order_pos: [
+        { vendor_po_id: 'po-1', po_number: 'PO-1042', quantity: 288, expected_on: '2026-11-18', draft: false, url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1' },
+      ],
+    });
+    expect(() => z.object(getJobMaterialCheck.output).parse(res.data)).not.toThrow();
   });
 });

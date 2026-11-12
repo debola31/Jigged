@@ -328,6 +328,105 @@ what anyone was paid.
 
 ---
 
+## On order
+
+**Definition.** What is still to arrive from vendors on SENT purchase orders, per part, in the part's
+stock unit: `part_on_order.on_order_quantity`. Drafts are not on order: `on_draft_quantity` is
+reported apart, never added in.
+
+```sql
+SELECT p.part_name, oo.on_order_quantity, oo.stock_unit, oo.next_expected_on, oo.on_draft_quantity
+FROM part_on_order oo
+JOIN parts p ON p.id = oo.part_id
+WHERE oo.company_id = $1
+  AND oo.on_order_quantity > 0
+ORDER BY oo.next_expected_on
+```
+
+**Notes.** A part with nothing coming has no row: LEFT JOIN from `parts` and COALESCE to 0, a real
+zero. Never sum PO lines yourself; the view converts each with its own frozen factor and nets what
+has arrived. Mention `unit_mismatch_line_count` when it is not zero. Only POs in Jigged count.
+
+---
+
+## Open PO
+
+**Definition.** A purchase order to a vendor whose `status` on `vendor_purchase_order_status` is
+`draft`, `sent` or `partially_received`: the purchase order list's default. A draft has not been
+sent, so for what vendors owe, count `sent` and `partially_received` and give drafts apart.
+
+```sql
+SELECT COUNT(*) FILTER (WHERE status <> 'draft') AS open_with_vendors,
+       COUNT(*) FILTER (WHERE status = 'draft') AS drafts_not_sent
+FROM vendor_purchase_order_status
+WHERE company_id = $1
+  AND status IN ('draft', 'sent', 'partially_received')
+```
+
+**Notes.** "PO" alone is the customer's PO (`jobs.customer_po_number`); a question about a vendor,
+buying or receiving means these. Read `status`, never `issued_at` or `closed_at`: a PO whose lines
+have all arrived reads `received` though nobody closed it.
+
+---
+
+## Late PO
+
+**Definition.** A purchase order to a vendor still owed something past its expected date: the app's
+*Overdue*. Call the function; never write the rule out.
+
+```sql
+SELECT po_number, vendor_name, next_expected_on, open_amount
+FROM vendor_purchase_order_status
+WHERE company_id = $1
+  AND public.is_vendor_purchase_order_late(status, next_expected_on, $2)
+ORDER BY next_expected_on
+```
+
+**Notes.** A draft is never late, nor is anything received or closed, and one expected today is not
+late yet. For late lines, call it on `vendor_purchase_order_line_status` with `expected_on`.
+
+---
+
+## Last PO price
+
+**Definition.** For a part and a vendor, the unit price on the newest priced line of a SENT purchase
+order: `part_vendor_last_purchase`. For a part alone, the newest across its vendors.
+
+```sql
+SELECT p.part_name, v.name AS vendor, lp.po_number, lp.ordered_on, lp.unit_price, lp.unit,
+       lp.unit_price_per_stock_unit, lp.stock_unit
+FROM part_vendor_last_purchase lp
+JOIN parts p ON p.id = lp.part_id
+JOIN vendors v ON v.id = lp.vendor_id
+WHERE lp.company_id = $1
+ORDER BY p.part_name, lp.ordered_on DESC
+```
+
+**Notes.** It is the PO's price, not the vendor's bill, which Jigged never sees: call it the last PO
+price. Compare vendors on `unit_price_per_stock_unit`, since one may sell by the bar and another by
+the foot.
+
+---
+
+## Open value (at PO price)
+
+**Definition.** What is still to arrive on purchase orders to vendors, valued at their PO prices: the
+sum of `vendor_purchase_order_status.open_amount`.
+
+```sql
+SELECT COALESCE(SUM(open_amount), 0) AS open_value,
+       COALESCE(BOOL_OR(has_unpriced_lines), false) AS some_lines_unpriced
+FROM vendor_purchase_order_status
+WHERE company_id = $1
+  AND status IN ('sent', 'partially_received')
+```
+
+**Notes.** NOT money owed or accounts payable: Jigged never sees the bill. Drafts, received and closed
+POs, and freight that never arrives add nothing. When `some_lines_unpriced` is true, write "+ TBC"
+after the amount, as the app does. The full value ordered is `ordered_amount`.
+
+---
+
 ## When the data is not there
 
 **Rule.** When the data a question needs is not in the permitted objects, say plainly that Jigged does

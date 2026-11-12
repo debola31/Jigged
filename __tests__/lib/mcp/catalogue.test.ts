@@ -1,7 +1,13 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
 import { registerJiggedTools } from '@/lib/mcp/server';
+import { PURCHASING_VIEWS, purchasingHubPath, vendorPoPath, vendorRfqPath } from '@/lib/purchasingRoutes';
+
+import { resolvesToPage } from './tools/purchasingTestKit';
 
 /**
  * The whole catalogue, as an assistant sees it at tools/list. These are the rules both
@@ -12,7 +18,11 @@ import { registerJiggedTools } from '@/lib/mcp/server';
  *     openWorldHint to be present; Claude prompts on destructive ones);
  *   - a description that says what the tool does rather than steering the assistant;
  *   - no output field that names a person against shop-floor work (the surveillance guardrail,
- *     docs/modules/operator-view.md).
+ *     docs/modules/operator-view.md);
+ *   - purchasing (plan §3.12, M1): "PO" alone is the CUSTOMER's PO in Jigged, so no tool name
+ *     carries a bare `purchase_order`, every vendor PO tool says "to a vendor", and nobody who
+ *     ordered, approved, closed, voided, pushed or awarded anything is named;
+ *   - every link a tool builds lands on a real page of the app.
  */
 
 interface Registered {
@@ -68,6 +78,10 @@ const PERSON_FIELDS = [
   /^user_id$/,
   /^user_name$/,
   /_by_name$/,
+  // Purchasing's actor columns (vendor POs, receipts, RFQs, the QuickBooks links). A blanket
+  // /_by$/ would trip on `short_by` (get_job_material_check), which is a quantity.
+  /^(ordered|approved|requested|closed|voided|pushed|reopened|awarded|mapped|linked|chosen)_by/,
+  /^buyer/,
 ];
 
 /** Phrases that steer the assistant rather than describe the tool. */
@@ -110,5 +124,36 @@ describe('the MCP tool catalogue', () => {
       const input = z.toJSONSchema(tool.config.inputSchema as z.ZodType);
       expect(propertyNames(input).has('company_id'), tool.name).toBe(true);
     }
+  });
+
+  it("names no tool with a bare purchase_order: \"PO\" alone is the customer's PO", () => {
+    for (const tool of tools) expect(tool.name, tool.name).not.toMatch(/purchase_order/);
+  });
+
+  it('says "to a vendor" in every vendor PO tool, so none can be read as the customer\'s PO', () => {
+    const vendorPoTools = tools.filter((t) => t.name.includes('vendor_po'));
+    expect(vendorPoTools.length).toBeGreaterThanOrEqual(12);
+    for (const tool of vendorPoTools) expect(tool.config.description, tool.name).toMatch(/to a vendor/);
+  });
+
+  it('every link a tool builds lands on a page of the app', () => {
+    // The literal paths handed to companyLink (a `${…}` stands for an id), plus every purchasing
+    // path, which the tools build only through lib/purchasingRoutes.
+    const dir = join(process.cwd(), 'lib/mcp/tools');
+    const paths = new Set<string>(['/dashboard/co-1']);
+    for (const file of readdirSync(dir).filter((f) => f.endsWith('.ts'))) {
+      const source = readFileSync(join(dir, file), 'utf8');
+      for (const match of source.matchAll(/companyLink\(\s*env\s*,\s*(`[^`]*`|'[^']*')\s*\)/g)) {
+        const literal = match[1].slice(1, -1);
+        if (literal.startsWith('${')) continue; // a whole path from a variable: that tool's test resolves it
+        paths.add(`/dashboard/co-1${literal.replace(/\$\{[^}]*\}/g, 'x')}`);
+      }
+    }
+    paths.add(vendorPoPath('co-1', 'x'));
+    paths.add(vendorRfqPath('co-1', 'x'));
+    for (const view of PURCHASING_VIEWS) paths.add(purchasingHubPath('co-1', view));
+
+    expect(paths.size).toBeGreaterThan(10);
+    expect([...paths].filter((p) => !resolvesToPage(`https://jigged.app${p}`))).toEqual([]);
   });
 });

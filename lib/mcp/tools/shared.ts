@@ -14,6 +14,10 @@ import type { CompanyToolEnv } from '@/lib/mcp/defineTool';
  *     the-stock. The surveillance guardrail (docs/modules/operator-view.md) covers assistants too.
  *   - Money the app shows admins only (the dashboard's totals, inventory cost) is returned to
  *     admins only. Prices on a quote or job are not: a salesperson sees those in the app.
+ *     Neither are PURCHASING prices — a purchase order to a vendor's prices, totals and open
+ *     value, price sheets, the Last PO price, the To buy list's prices and what "Use as part cost"
+ *     would set — which every office user sees (purchasing decision 3, plan §3.12). Inventory cost
+ *     and stock value stay admin-only.
  *   - Text a person typed (notes, instructions, descriptions) is data, returned as written.
  *   - Archived records never appear in a list; the access functions filter `deleted_at`.
  */

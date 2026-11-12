@@ -308,6 +308,12 @@ export interface VendorPoOutsideSlip {
   outstandingQuantity: number;
 }
 
+/**
+ * A live slip that ships against no PO line — what "Link a slip…" offers an outside line: one of
+ * that line's step's slips to the PO's vendor (`listUnlinkedOutsideSlips`). Never voided.
+ */
+export type VendorPoUnlinkedSlip = Omit<VendorPoOutsideSlip, 'vendorPurchaseOrderLineId'>;
+
 /** The QuickBooks link, read from Jigged's own table. Never a QuickBooks call. */
 export interface VendorPoQuickBooksInfo {
   state: VendorPoQuickBooksState;

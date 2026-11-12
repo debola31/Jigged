@@ -46,6 +46,7 @@ import { escapeIlikePattern } from '@/utils/searchFilter';
 import {
   chunkIds,
   firstRow,
+  isPurchasingRefusal,
   one,
   parseAddressSnapshot,
   parseContactSnapshot,
@@ -100,6 +101,7 @@ import {
   type VendorPoShipToKind,
   type VendorPoStateResult,
   type VendorPoSummary,
+  type VendorPoUnlinkedSlip,
   type VendorPoVoidReceiptResult,
 } from '@/types/vendorPo';
 
@@ -462,7 +464,8 @@ const SLIP_COLUMNS =
 const slipsQuery = () => getSupabase().from('outside_shipments').select(SLIP_COLUMNS);
 type SlipRow = QueryData<ReturnType<typeof slipsQuery>>[number];
 
-function toSlip(row: SlipRow): VendorPoOutsideSlip {
+/** A slip and what came back on it, linked or not. */
+function toSlipFigures(row: SlipRow): VendorPoUnlinkedSlip {
   const received = (row.outside_shipment_receipts ?? [])
     .filter((r) => !r.voided_at)
     .reduce((n, r) => n + Number(r.quantity_good), 0);
@@ -470,7 +473,6 @@ function toSlip(row: SlipRow): VendorPoOutsideSlip {
   return {
     id: row.id,
     slipNumber: row.slip_number,
-    vendorPurchaseOrderLineId: present(row.vendor_purchase_order_line_id, 'a linked slip'),
     jobId: row.job_id,
     jobOperationId: row.job_operation_id,
     quantity,
@@ -480,6 +482,13 @@ function toSlip(row: SlipRow): VendorPoOutsideSlip {
     voidedAt: row.voided_at,
     receivedQuantity: received,
     outstandingQuantity: row.voided_at || row.closed_at ? 0 : Math.max(0, quantity - received),
+  };
+}
+
+function toSlip(row: SlipRow): VendorPoOutsideSlip {
+  return {
+    ...toSlipFigures(row),
+    vendorPurchaseOrderLineId: present(row.vendor_purchase_order_line_id, 'a linked slip'),
   };
 }
 
@@ -1074,6 +1083,26 @@ export function closeVendorPoLines(
   return setLineState(poId, lineIds, 'close', reason);
 }
 
+/**
+ * True when `closeVendorPoLines` was refused because line `lineNumber` has nothing left to receive —
+ * it is received in full (`set_vendor_purchase_order_line_state`: "Line 2 has nothing left to
+ * receive."). For a caller closing a line AFTER a receipt, that is the line done, not a failure.
+ *
+ * Told apart by its P0001 SENTENCE, read through the error plumbing: `purchasingRpcFailure` keeps the
+ * code (`isPurchasingRefusal`) and the sentence as the message. The code alone is not enough — every
+ * refusal these RPCs raise is a P0001 ("PO-1042 is closed. Reopen it first.") — so the whole sentence
+ * is matched, for this line's number, never a fragment of it. The wording is the RPC's own
+ * (`RAISE EXCEPTION 'Line % has nothing left to receive.'` in 20261110043800); change one and change
+ * the other. A sentence that drifts fails safe: the close reads as not done, as it did before.
+ */
+export function isNothingLeftToReceiveRefusal(error: unknown, lineNumber: number): boolean {
+  return (
+    isPurchasingRefusal(error) &&
+    error instanceof Error &&
+    error.message === `Line ${lineNumber} has nothing left to receive.`
+  );
+}
+
 /** Reopen lines (a batch), or the whole PO with `'all'`. */
 export function reopenVendorPoLines(poId: string, lineIds: string[] | 'all'): Promise<VendorPoStateResult> {
   return setLineState(poId, lineIds, 'reopen', null);
@@ -1138,6 +1167,33 @@ export async function relinkOutsideShipment(
   });
   if (error) throw purchasingRpcFailure(error, 'link the slip to the purchase order', 'slip');
   return parsePurchasingResult(relinkResultSchema, data, 'link the slip to the purchase order');
+}
+
+/**
+ * The slips "Link a slip…" offers an outside line (the PO page): its step's LIVE slips to the PO's
+ * vendor that ship against no line — the same set the line's insert links by itself (plan §3.6), for
+ * the slip that missed it or was unlinked by hand. A slip on another line is not offered: it is
+ * unlinked on its own PO first, where the person can see what leaving costs that line.
+ *
+ * Company-scoped, and scoped to one step — the line's own — so the job is the line's job. Voided
+ * slips are left out (the relink refuses them, and they count for nothing); a short-closed slip is
+ * live and offered, since what came back on it is real. Oldest first, as slips are chased.
+ */
+export async function listUnlinkedOutsideSlips(
+  companyId: string,
+  jobOperationId: string,
+  vendorId: string,
+): Promise<VendorPoUnlinkedSlip[]> {
+  const { data, error } = await slipsQuery()
+    .eq('company_id', companyId)
+    .eq('job_operation_id', jobOperationId)
+    .eq('vendor_id', vendorId)
+    .is('voided_at', null)
+    .is('vendor_purchase_order_line_id', null)
+    .order('shipped_at', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) throw purchasingReadFailure(error, 'load the slips to link', 'slip');
+  return (data ?? []).map(toSlipFigures);
 }
 
 /**

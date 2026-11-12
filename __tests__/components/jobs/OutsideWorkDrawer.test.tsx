@@ -17,8 +17,12 @@ vi.mock('@/utils/outsideShipmentsAccess', async (importOriginal) => ({
   listOutsideShipmentsForCompany: vi.fn(),
   receiveOutsideShipment: vi.fn(),
 }));
-vi.mock('@/utils/vendorPoAccess', () => ({ closeVendorPoLines: vi.fn() }));
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/vendorPoAccess')>();
+  return { closeVendorPoLines: vi.fn(), isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal };
+});
 
+import { toFriendlyError } from '@/lib/supabaseErrors';
 import OutsideWorkDrawer from '@/components/jobs/OutsideWorkDrawer';
 import { listOutsideShipmentsForCompany, receiveOutsideShipment } from '@/utils/outsideShipmentsAccess';
 import { closeVendorPoLines } from '@/utils/vendorPoAccess';
@@ -123,6 +127,51 @@ describe('OutsideWorkDrawer — the vendor PO on each slip', () => {
     draw();
     await receiveShort(true);
     expect(await screen.findByText(/receipt was recorded, but PO-1042 line 2 could not be closed/i)).toBeInTheDocument();
+  });
+
+  /**
+   * The drawer reads slips only, so it cannot tell that a receipt completes the line — the database
+   * can, and refuses the close ("Line 2 has nothing left to receive."). That line is DONE: no
+   * warning, and the drawer moves on as after any receipt.
+   */
+  it('counts "nothing left to receive" as done — a receipt that completes the line warns of nothing', async () => {
+    vi.mocked(closeVendorPoLines).mockRejectedValue(
+      toFriendlyError({ code: 'P0001', message: 'Line 2 has nothing left to receive.', details: null, hint: null }),
+    );
+    draw();
+    await receiveShort(true);
+    await waitFor(() => expect(closeVendorPoLines).toHaveBeenCalledTimes(1));
+    // The list re-reads, as after any receipt; nothing is left on screen about the line.
+    await waitFor(() => expect(listOutsideShipmentsForCompany).toHaveBeenCalledTimes(2));
+    expect(screen.queryByText(/could not be closed/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/nothing left to receive/i)).not.toBeInTheDocument();
+  });
+
+  /**
+   * The E2E journey's run-tagged names squeezed "service · PO" to no width and pushed Receive out of
+   * the drawer. jsdom has no layout engine, so this pins the DECLARATIONS that prevent it — the text
+   * gives way (min-width 0, one line, an ellipsis) and the button never shrinks — and that the full
+   * text stays reachable when the ellipsis cuts it.
+   */
+  it('cuts a long service and PO to one line, keeps the full text in a title, and keeps Receive whole', async () => {
+    const service = 'E2E Anodize Type II Class 2 Black Hardcoat MIL-A-8625 LZ8K4Q2Y1ABC';
+    vi.mocked(listOutsideShipmentsForCompany).mockResolvedValue([
+      slip({ service_name: service, job: { id: 'j1', job_number: 'E2E-OUT-LZ8K4Q2Y1ABC' } }),
+    ]);
+    draw();
+
+    const full = `${service} · PO-1042`;
+    const text = await screen.findByText(full);
+    expect(text).toHaveAttribute('title', full);
+    // Read straight from the computed style: jest-dom's toHaveStyle drops text-overflow and
+    // white-space when it normalises the expected object.
+    const style = getComputedStyle(text);
+    expect(parseFloat(style.minWidth)).toBe(0);
+    expect([style.overflow, style.textOverflow, style.whiteSpace]).toEqual(['hidden', 'ellipsis', 'nowrap']);
+
+    const receive = screen.getByRole('button', { name: /^receive$/i });
+    expect(receive).toBeVisible();
+    expect(getComputedStyle(receive).flexShrink).toBe('0');
   });
 
   it('says why a refused receipt was refused, rather than doing nothing', async () => {

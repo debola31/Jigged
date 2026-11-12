@@ -79,8 +79,10 @@ interface SendToVendorDialogProps {
  * THE PO LINE IS NAMED, NOT PICKED. `create_outside_shipment` links the slip
  * itself to the step's one open outside line (a draft counts), and the PO writers
  * allow only one per step and vendor — so a picker would offer one choice. The
- * dialog says which line, read-only, with a link; correcting a link is the PO
- * page's job. A step on no PO gets a "Create PO for this step" link instead.
+ * dialog says which line, read-only, as a link to that PO's page — which is where
+ * a link is corrected once the slip exists: under the line's slips, "Unlink" and
+ * "Link a slip…" (`OutsideLineSlips`). A step on no PO gets a "Create PO for this
+ * step" link instead.
  *
  * Missing address WARNS and does not block: the slip prints "(No address on
  * file)" and the parts still need to go out today.

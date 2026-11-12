@@ -8,7 +8,12 @@
  *            + bought job parts still to ship
  *   position = on hand (once) + on order + on draft − demand
  *   listed   ⇔ position ≤ reorder point, or position < 0 when there is none
- *   suggest  = max(gap, minimum order) rounded up to whole purchase units, at least one
+ *   suggest  = with a reorder point, the fewest whole purchase units that lift the position
+ *              strictly ABOVE it; without one, enough to cover −position, rounded up to whole
+ *              purchase units. Either way at least the minimum order, and at least one.
+ *
+ * The reorder half is "above", not "to": a part AT its point is listed, so an order that only
+ * reached the point brought the part straight back asking for one more (the E2E journey found it).
  *
  * The arithmetic is pinned by `__tests__/fixtures/buyListCases.json`; the cases below it are the
  * ported 87df208 behaviours and the presentation rules (grouping, sorting, the buckets).
@@ -413,10 +418,96 @@ describe('the counts the page reports (B3)', () => {
 });
 
 describe('suggestPurchaseQuantity (B2)', () => {
-  it('is the gap in whole purchase units, at least one, or the minimum order', () => {
-    expect(suggestPurchaseQuantity({ shortfall: 400, purchaseFactor: 144, minimumOrderQuantity: null })).toBe(3);
-    expect(suggestPurchaseQuantity({ shortfall: 0, purchaseFactor: 144, minimumOrderQuantity: null })).toBe(1);
-    expect(suggestPurchaseQuantity({ shortfall: 5, purchaseFactor: 1, minimumOrderQuantity: 25 })).toBe(25);
-    expect(suggestPurchaseQuantity({ shortfall: 1, purchaseFactor: 1, minimumOrderQuantity: 2.5 })).toBe(3);
+  it('covers a job shortage in whole purchase units, at least one, or the minimum order', () => {
+    const jobs = (shortfall: number, purchaseFactor: number, minimumOrderQuantity: number | null) =>
+      suggestPurchaseQuantity({ shortfall, purchaseFactor, minimumOrderQuantity, aboveReorderPoint: false });
+    expect(jobs(400, 144, null)).toBe(3);
+    // Exactly enough is enough: a part with no reorder point is listed only below zero.
+    expect(jobs(288, 144, null)).toBe(2);
+    expect(jobs(0, 144, null)).toBe(1);
+    expect(jobs(5, 1, 25)).toBe(25);
+    expect(jobs(1, 1, 2.5)).toBe(3);
+  });
+
+  it('lifts a position strictly above its reorder point — one unit more when the gap is whole units', () => {
+    const reorder = (shortfall: number, purchaseFactor: number, minimumOrderQuantity: number | null = null) =>
+      suggestPurchaseQuantity({ shortfall, purchaseFactor, minimumOrderQuantity, aboveReorderPoint: true });
+    expect(reorder(7, 1)).toBe(8);
+    expect(reorder(0, 1)).toBe(1); // AT the point
+    expect(reorder(0, 144)).toBe(1);
+    expect(reorder(288, 144)).toBe(3); // 2 bars would land on the point
+    expect(reorder(400, 144)).toBe(3); // 432 in already clears 400
+    expect(reorder(1.1, 0.1)).toBe(12); // float noise never hides the landing
+    expect(reorder(2, 1, 25)).toBe(25); // the minimum order still wins
+    expect(reorder(2, 1, 2)).toBe(3);
+  });
+});
+
+/**
+ * THE BUG THE E2E JOURNEY FOUND. The old rule suggested exactly the gap to the reorder point, so
+ * ordering what it suggested landed the position ON the point — which is listed — and the part came
+ * straight back asking for one more. Ordering the suggestion must take a part off the list, and the
+ * suggestion must still be the least that does (unless the vendor's minimum order says otherwise).
+ */
+describe('order the suggestion, it doesn\'t come back (B2)', () => {
+  const each = vendor({ vendorId: 'acme' });
+  const bars = vendor({ vendorId: 'acme', purchaseUnit: 'bar', purchaseFactor: 144 });
+  const tenths = vendor({ vendorId: 'acme', purchaseUnit: 'tenth', purchaseFactor: 0.1 });
+  const moq = vendor({ vendorId: 'acme', minimumOrderQuantity: 25 });
+
+  const shapes: Array<[string, BuyListPart, BuyListDemand[]]> = [
+    ['under its reorder point', part({ partId: 'p', onHand: 3, reorderPoint: 10, preferredVendorId: 'acme', vendors: [each] }), []],
+    ['at its reorder point', part({ partId: 'p', onHand: 10, reorderPoint: 10, preferredVendorId: 'acme', vendors: [each] }), []],
+    ['a reorder point of 0 with nothing on hand', part({ partId: 'p', onHand: 0, reorderPoint: 0, preferredVendorId: 'acme', vendors: [each] }), []],
+    [
+      'a gap of exactly two bars',
+      part({ partId: 'p', stockUnit: 'inches', onHand: 0, reorderPoint: 288, preferredVendorId: 'acme', vendors: [bars] }),
+      [],
+    ],
+    [
+      'a gap that is not whole bars',
+      part({ partId: 'p', stockUnit: 'inches', onHand: 100, reorderPoint: 500, preferredVendorId: 'acme', vendors: [bars] }),
+      [],
+    ],
+    [
+      'a fractional purchase unit',
+      part({ partId: 'p', stockUnit: 'pounds', onHand: 0, reorderPoint: 1.1, preferredVendorId: 'acme', vendors: [tenths] }),
+      [],
+    ],
+    [
+      'a job shortage under a reorder point (both)',
+      part({ partId: 'p', onHand: 40, reorderPoint: 10, preferredVendorId: 'acme', vendors: [each] }),
+      [material('p', 'j1', 50)],
+    ],
+    ['already partly on order and on draft', part({ partId: 'p', onHand: 30, onOrder: 10, onDraft: 5, reorderPoint: 50 }), []],
+    ['a minimum order larger than the gap', part({ partId: 'p', onHand: 8, reorderPoint: 10, preferredVendorId: 'acme', vendors: [moq] }), []],
+    ['no reorder point: a job shortage only', part({ partId: 'p', onHand: 15 }), [material('p', 'j1', 10), material('p', 'j2', 10)]],
+    [
+      'no reorder point: a shortage of exactly two bars',
+      part({ partId: 'p', stockUnit: 'inches', onHand: 0, preferredVendorId: 'acme', vendors: [bars] }),
+      [material('p', 'j1', 288)],
+    ],
+  ];
+
+  it.each(shapes)('%s', (_name, p, demand) => {
+    const before = evaluateBuyListPart(p, demand);
+    expect(before.listed).toBe(true);
+    const row = before.row!;
+
+    // Draft exactly what the list suggested, as "Create draft PO" does, and read the list again.
+    const after = evaluateBuyListPart({ ...p, onDraft: p.onDraft + row.suggestedStockQuantity }, demand);
+    expect(after.listed).toBe(false);
+    expect(after.row).toBeNull();
+
+    // And it is the LEAST that does: one purchase unit fewer would leave the part listed — unless the
+    // vendor's minimum order is what set the quantity.
+    const minimum = row.minimumOrderQuantity ?? 0;
+    if (row.suggestedQuantity > Math.max(1, Math.ceil(minimum))) {
+      const fewer = evaluateBuyListPart(
+        { ...p, onDraft: p.onDraft + row.suggestedStockQuantity - row.purchaseFactor },
+        demand,
+      );
+      expect(fewer.listed).toBe(true);
+    }
   });
 });

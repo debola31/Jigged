@@ -394,7 +394,9 @@ export default function OperationsPanel({
           slip_number: s.slip_number,
           shipped_at: s.shipped_at,
           outstanding: s.outstanding,
-          poLine: receivePoLineFor(s),
+          // The job's own PO lines say what the slip's line still expects, so a receipt that
+          // completes it skips the close instead of being refused one.
+          poLine: receivePoLineFor(s, vendorPoLines),
         })),
       );
       setReceiveOp(op);
@@ -473,13 +475,17 @@ export default function OperationsPanel({
       });
       // After the receipt, and never instead of it: a failure here leaves the receipt standing and
       // says so, rather than inviting a second receipt of the same pieces.
-      const poLineError = await closePoLineAfterReceipt(v.closePoLine);
+      const lineClose = await closePoLineAfterReceipt(v.closePoLine, v.quantityGood);
       setReceiveOp(null);
-      if (poLineError) {
-        showSnackbar(poLineError, 'warning');
-      } else if (v.closePoLine) {
+      if (lineClose?.kind === 'failed') {
+        showSnackbar(lineClose.message, 'warning');
+      } else if (lineClose && v.closePoLine) {
+        // Received in full is the same "nothing more expected" the box asked for — said as what
+        // the PO page will show for the line, not as a close that never happened.
         showSnackbar(
-          `Recorded ${v.quantityGood} back from the vendor. ${v.closePoLine.poNumber} line ${v.closePoLine.lineNumber} is closed.`,
+          `Recorded ${v.quantityGood} back from the vendor. ${v.closePoLine.poNumber} line ${v.closePoLine.lineNumber} ${
+            lineClose.kind === 'received' ? 'is received in full' : 'is closed'
+          }.`,
           'success',
         );
       } else {

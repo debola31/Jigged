@@ -16,9 +16,16 @@
  *              so without this a job waiting on a part nobody ordered would read "nothing to buy")
  *   position = on hand + on order + on draft − demand        (drafts netted: never drafted twice)
  *   listed   ⇔ position ≤ reorder point, or position < 0 when the part has no reorder point
- *   suggest  = max(reorder point − position (or −position), minimum order), rounded up to whole
- *              purchase units, and at least one purchase unit
+ *   suggest  = with a reorder point: the fewest whole purchase units that lift the position
+ *              strictly ABOVE it; without one: enough to cover −position, rounded up to whole
+ *              purchase units. Either way at least the minimum order, and at least one unit.
  * Pinned by `__tests__/fixtures/buyListCases.json`.
+ *
+ * ABOVE THE REORDER POINT, NOT TO IT. A part AT its point is listed (it has reached the level the
+ * shop said to reorder at), so a suggestion that only reached the point — 7 for a part 7 under it —
+ * landed the position on it, and the part came straight back asking for one more. Ordering what the
+ * list suggests has to take the part off the list. A job shortage with no reorder point has no such
+ * trap: it is listed only below zero, so covering it exactly is enough.
  *
  * Grouping: the preferred vendor unless it is marked Do not use or archived, else the only
  * Approved vendor, else "No vendor chosen". "Buy from" overrides it per part.
@@ -155,9 +162,12 @@ export interface BuyListRow {
   /** The vendor's unit could not be related to the stock unit, so the stock unit is used. */
   purchaseUnitFallback: boolean;
   minimumOrderQuantity: number | null;
-  /** The gap to close, in stock units. */
+  /** The gap to close, in stock units: to the reorder point when there is one, else to zero. */
   shortfall: number;
-  /** Whole purchase units, at least one. */
+  /**
+   * Whole purchase units, at least one and at least the minimum order. With a reorder point, the
+   * fewest that lift the position strictly above it — so ordering this takes the part off the list.
+   */
   suggestedQuantity: number;
   suggestedStockQuantity: number;
 }
@@ -225,18 +235,33 @@ function compareDue(a: string | null, b: string | null): number {
 }
 
 /**
- * Whole purchase units for a shortfall: max(gap, minimum order) rounded up, at least one.
- * `shortfall` is in stock units; the minimum order is in purchase units.
+ * Whole purchase units to suggest for a gap, and never fewer than the minimum order (itself rounded
+ * up to a whole unit) or one unit. `shortfall` is in stock units; the minimum order is in purchase
+ * units.
+ *
+ * - `aboveReorderPoint`: the gap runs TO a reorder point, and the order must lift the position
+ *   strictly above it — the fewest whole units whose stock quantity EXCEEDS the gap. When the gap
+ *   is a whole number of units (or nothing: a part sitting at its point), that is one unit more
+ *   than it, because exactly the gap lands on the point and the part is listed again.
+ * - Otherwise the gap is a job shortage, and covering it exactly is enough: rounded up.
  */
 export function suggestPurchaseQuantity(args: {
   shortfall: number;
   purchaseFactor: number;
   minimumOrderQuantity: number | null;
+  aboveReorderPoint: boolean;
 }): number {
-  const fromGap = wholePurchaseUnits(Math.max(0, args.shortfall), args.purchaseFactor);
+  const gap = Math.max(0, args.shortfall);
+  const covering = wholePurchaseUnits(gap, args.purchaseFactor);
+  let fromGap = Number.isFinite(covering) ? covering : 0;
+  // `toStockQuantity` rounds the product to the stock places the gap is rounded to, so "lands on
+  // the point" is an exact comparison here — float noise (11 × 0.1) cannot hide it.
+  if (args.aboveReorderPoint && Number.isFinite(covering) && toStockQuantity(covering, args.purchaseFactor) <= gap) {
+    fromGap = covering + 1;
+  }
   const minimum = args.minimumOrderQuantity;
   const fromMinimum = minimum !== null && minimum > 0 ? wholePurchaseUnits(minimum, 1) : 0;
-  return Math.max(1, Number.isFinite(fromGap) ? fromGap : 0, fromMinimum);
+  return Math.max(1, fromGap, fromMinimum);
 }
 
 function isUsableVendor(v: BuyListVendorOption): boolean {
@@ -418,7 +443,12 @@ export function evaluateBuyListPart(
   const purchaseFactor = vendorUnitUsable && vendorFactor !== null ? vendorFactor : 1;
   // A minimum is in the vendor's unit; it cannot be honoured in a unit it does not relate to.
   const minimumOrderQuantity = vendorUnitUsable ? (vendor?.minimumOrderQuantity ?? null) : null;
-  const suggestedQuantity = suggestPurchaseQuantity({ shortfall, purchaseFactor, minimumOrderQuantity });
+  const suggestedQuantity = suggestPurchaseQuantity({
+    shortfall,
+    purchaseFactor,
+    minimumOrderQuantity,
+    aboveReorderPoint: reorderPoint !== null,
+  });
 
   const contributing = needs.filter((j) => j.need > TOLERANCE);
   let jobLink: BuyListRow['jobLink'] = null;

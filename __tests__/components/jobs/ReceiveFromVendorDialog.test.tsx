@@ -1,10 +1,15 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
-vi.mock('@/utils/vendorPoAccess', () => ({ closeVendorPoLines: vi.fn() }));
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
+  // The REAL refusal check, so a refusal is recognised here exactly as the app recognises it.
+  const actual = await importOriginal<typeof import('@/utils/vendorPoAccess')>();
+  return { closeVendorPoLines: vi.fn(), isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal };
+});
 
 import ReceiveFromVendorDialog, {
   closePoLineAfterReceipt,
@@ -13,6 +18,9 @@ import ReceiveFromVendorDialog, {
   type ReceivePoLine,
 } from '@/components/jobs/ReceiveFromVendorDialog';
 import { closeVendorPoLines } from '@/utils/vendorPoAccess';
+
+/** A refusal as the access layer throws it: `purchasingRpcFailure` → `toFriendlyError` of a P0001. */
+const refusal = (message: string) => toFriendlyError({ code: 'P0001', message, details: null, hint: null });
 
 const slip = (outstanding: number) => ({
   id: 's1',
@@ -121,13 +129,29 @@ describe('receivePoLineFor — the PO line a slip read names', () => {
     vendor_purchase_order: { id: 'po-1042', po_number: 'PO-1042' },
   };
 
-  it('reads the line and its PO off the join', () => {
+  it('reads the line and its PO off the join — what the line still expects is unknown from a slip alone', () => {
     expect(receivePoLineFor({ vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: join })).toEqual({
       vendorPurchaseOrderId: 'po-1042',
       poNumber: 'PO-1042',
       lineId: 'line-2',
       lineNumber: 2,
+      remainingQuantity: null,
     });
+  });
+
+  /** The job page reads its PO lines anyway; they say how much the line still expects. */
+  it("says what the line still expects when the caller has read the job's PO lines", () => {
+    const slip = { vendor_purchase_order_line_id: 'line-2', vendor_purchase_order_line: join };
+    const lines = [
+      { lineId: 'line-9', quantity: 5, receivedQuantity: 0 },
+      { lineId: 'line-2', quantity: 50, receivedQuantity: 48 },
+    ];
+    expect(receivePoLineFor(slip, lines)?.remainingQuantity).toBe(2);
+    // Over-received is nothing left, never a negative.
+    expect(receivePoLineFor(slip, [{ lineId: 'line-2', quantity: 50, receivedQuantity: 60 }])?.remainingQuantity).toBe(0);
+    // A read that does not hold the line knows nothing about it.
+    expect(receivePoLineFor(slip, [lines[0]])?.remainingQuantity).toBeNull();
+    expect(receivePoLineFor(slip, null)?.remainingQuantity).toBeNull();
   });
 
   it('is null for a slip on no PO', () => {
@@ -147,6 +171,7 @@ describe('ReceiveFromVendorDialog — the vendor PO line behind the slip', () =>
     poNumber: 'PO-1042',
     lineId: 'line-2',
     lineNumber: 2,
+    remainingQuantity: 50,
   };
   const linked = (over: Partial<OpenSlipOption> = {}): OpenSlipOption => ({ ...slip(50), poLine: PO_LINE, ...over });
 
@@ -244,26 +269,75 @@ describe('closePoLineAfterReceipt', () => {
     poNumber: 'PO-1042',
     lineId: 'line-2',
     lineNumber: 2,
+    remainingQuantity: 50,
   };
+  const closed = {} as Awaited<ReturnType<typeof closeVendorPoLines>>;
 
-  it('closes the one line, after the receipt, and reports nothing on success', async () => {
-    vi.mocked(closeVendorPoLines).mockResolvedValueOnce({} as Awaited<ReturnType<typeof closeVendorPoLines>>);
-    await expect(closePoLineAfterReceipt(PO_LINE)).resolves.toBeNull();
+  beforeEach(() => vi.mocked(closeVendorPoLines).mockReset());
+
+  it('closes the one line, after the receipt, and says it closed', async () => {
+    vi.mocked(closeVendorPoLines).mockResolvedValueOnce(closed);
+    await expect(closePoLineAfterReceipt(PO_LINE, 48)).resolves.toEqual({ kind: 'closed' });
     expect(closeVendorPoLines).toHaveBeenCalledWith('po-1042', ['line-2'], expect.any(String));
   });
 
   it('does nothing when no line was ticked', async () => {
-    vi.mocked(closeVendorPoLines).mockClear();
-    await expect(closePoLineAfterReceipt(null)).resolves.toBeNull();
+    await expect(closePoLineAfterReceipt(null, 48)).resolves.toBeNull();
     expect(closeVendorPoLines).not.toHaveBeenCalled();
   });
 
   /** The receipt already landed; the message must not invite recording it again. */
   it('says the receipt stands when the line could not be closed', async () => {
-    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(new Error('That record is not available.'));
-    const message = await closePoLineAfterReceipt(PO_LINE);
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('That record is not available.'));
+    const outcome = await closePoLineAfterReceipt(PO_LINE, 48);
+    expect(outcome?.kind).toBe('failed');
+    const message = outcome?.kind === 'failed' ? outcome.message : '';
     expect(message).toMatch(/receipt was recorded/i);
     expect(message).toMatch(/PO-1042 line 2/);
     expect(message).toMatch(/That record is not available\./);
+  });
+
+  /**
+   * THE E2E FINDING. A receipt that brings the line up to what it ordered leaves nothing on it to
+   * close — the database refuses a close there ("Line 2 has nothing left to receive."), and the
+   * person was told the line "could not be closed: … Close it on the PO" about a line that is done.
+   * "Nothing more expected" is exactly what a line received in full means, so it counts as done.
+   */
+  it('skips the close when this receipt leaves nothing on the line — received in full is done', async () => {
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 2 }, 2)).resolves.toEqual({ kind: 'received' });
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 2 }, 3)).resolves.toEqual({ kind: 'received' });
+    // A write-off with nothing back, on a line that already had everything.
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 0 }, 0)).resolves.toEqual({ kind: 'received' });
+    expect(closeVendorPoLines).not.toHaveBeenCalled();
+  });
+
+  it('still closes a line this receipt leaves short', async () => {
+    vi.mocked(closeVendorPoLines).mockResolvedValueOnce(closed);
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 2 }, 1.5)).resolves.toEqual({ kind: 'closed' });
+    expect(closeVendorPoLines).toHaveBeenCalledTimes(1);
+  });
+
+  /** The drawer reads slips only, and any screen can be a receipt behind: the database decides. */
+  it('counts the "nothing left to receive" refusal as done when the screen could not tell', async () => {
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('Line 2 has nothing left to receive.'));
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: null }, 48)).resolves.toEqual({ kind: 'received' });
+
+    // The line had less left than this screen knew (another receipt landed meanwhile).
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('Line 2 has nothing left to receive.'));
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 50 }, 48)).resolves.toEqual({ kind: 'received' });
+  });
+
+  it('counts only that refusal, for this line: anything else still says the line did not close', async () => {
+    const unknown = { ...PO_LINE, remainingQuantity: null };
+    for (const err of [
+      refusal('Line 3 has nothing left to receive.'), // another line's
+      refusal('Line 2 is already closed.'),
+      refusal('PO-1042 is closed. Reopen it first.'),
+      new Error('Line 2 has nothing left to receive.'), // the words, without the refusal code
+    ]) {
+      vi.mocked(closeVendorPoLines).mockRejectedValueOnce(err);
+      const outcome = await closePoLineAfterReceipt(unknown, 48);
+      expect(outcome?.kind, err.message).toBe('failed');
+    }
   });
 });

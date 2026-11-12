@@ -22,7 +22,8 @@ import { formatVendorPoAmount, formatVendorPoUnitPrice } from '@/lib/purchasing/
 import { formatUnitQuantity, unitLabel } from '@/lib/purchasing/purchaseUnits';
 import { VENDOR_PO_OVERDUE, vendorPoLineStateDisplay } from '@/lib/purchasing/vendorPoStatus';
 import { isClosableLine } from '@/components/purchasing/CloseVendorPoLinesDialog';
-import type { VendorPoDetail, VendorPoLine, VendorPoOutsideSlip } from '@/types/vendorPo';
+import OutsideLineSlips from '@/components/purchasing/OutsideLineSlips';
+import type { VendorPoDetail, VendorPoLine } from '@/types/vendorPo';
 
 export interface VendorPoLinesTableProps {
   companyId: string;
@@ -35,6 +36,8 @@ export interface VendorPoLinesTableProps {
   onReopenLine: (line: VendorPoLine) => void;
   onOpenSlip: (slipId: string) => void;
   onReceiveOutside: (line: VendorPoLine) => void;
+  /** An outside line's slip was unlinked or linked by hand, with the sentence to show. */
+  onSlipLinkChanged: (message: string) => void;
 }
 
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
@@ -97,32 +100,15 @@ function PromisedOnField({ line, onSave }: { line: VendorPoLine; onSave: VendorP
   );
 }
 
-function SlipRow({ slip, onOpen }: { slip: VendorPoOutsideSlip; onOpen: (id: string) => void }) {
-  const shipped = formatDateOnly(slip.shippedAt.slice(0, 10));
-  const parts = [`${formatUnitQuantity(slip.quantity)} sent ${shipped}`, `${formatUnitQuantity(slip.receivedQuantity)} back`];
-  if (slip.voidedAt) parts.push('voided');
-  else if (slip.closedAt) parts.push('closed');
-  else if (slip.dueBackOn) parts.push(`due ${formatDateOnly(slip.dueBackOn)}`);
-  return (
-    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
-      <MuiLink component="button" type="button" onClick={() => onOpen(slip.id)} sx={{ fontWeight: 600 }}>
-        {slip.slipNumber}
-      </MuiLink>
-      <Typography variant="caption" color="text.secondary">
-        {parts.join(' · ')}
-      </Typography>
-    </Box>
-  );
-}
-
 /**
  * The PO's lines with their progress, all of it DERIVED in SQL (vendor_purchase_order_line_status):
  * Ordered (with the stock equivalent the line froze), Received, Open, Due, and the PO price
  * (plan §3.13 "Lines table"). A part line counts progress in stock units, so it is exact.
  *
- * Outside lines are received on their vendor packing slips, which are listed under the line — a
- * slip opens its own preview, where Void lives — and "Sent · back · at vendor" comes from those
- * slips, never from a receipt on the PO.
+ * Outside lines are received on their vendor packing slips, which are listed under the line
+ * ([`OutsideLineSlips`]) — a slip opens its own preview, where Void lives; "Sent · back · at vendor"
+ * comes from those slips, never from a receipt on the PO; and the slips the line counts are
+ * corrected by hand there (Unlink, Link a slip…), under the same gate as every other line action.
  */
 export default function VendorPoLinesTable({
   companyId,
@@ -133,6 +119,7 @@ export default function VendorPoLinesTable({
   onReopenLine,
   onOpenSlip,
   onReceiveOutside,
+  onSlipLinkChanged,
 }: VendorPoLinesTableProps) {
   const poClosed = po.header.closedAt !== null;
   const slipsFor = (lineId: string) => po.outsideSlips.filter((s) => s.vendorPurchaseOrderLineId === lineId);
@@ -210,22 +197,14 @@ export default function VendorPoLinesTable({
                     )}
                   </Stack>
                   {isOutside && (
-                    <Box sx={{ mt: 1 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
-                        Sent {formatUnitQuantity(line.sentQuantity ?? 0)} · back {formatUnitQuantity(line.receivedQuantity)} · at
-                        vendor {formatUnitQuantity(line.atVendorQuantity ?? 0)}
-                      </Typography>
-                      <Stack spacing={0.25} sx={{ mt: 0.5 }}>
-                        {slipsFor(line.id).map((slip) => (
-                          <SlipRow key={slip.id} slip={slip} onOpen={onOpenSlip} />
-                        ))}
-                        {slipsFor(line.id).length === 0 && (
-                          <Typography variant="caption" color="text.secondary">
-                            No slips yet — sending from the job links them here.
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Box>
+                    <OutsideLineSlips
+                      po={po}
+                      line={line}
+                      slips={slipsFor(line.id)}
+                      canCorrect={!readOnly && !poClosed}
+                      onOpenSlip={onOpenSlip}
+                      onChanged={onSlipLinkChanged}
+                    />
                   )}
                 </TableCell>
                 <TableCell align="right" sx={{ whiteSpace: 'nowrap' }}>

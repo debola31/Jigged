@@ -17,8 +17,9 @@ import {
   outsideReceiptCaption,
   outsideReceiptConsequence,
 } from '@/components/operations/operationMath';
-import { closeVendorPoLines } from '@/utils/vendorPoAccess';
+import { closeVendorPoLines, isNothingLeftToReceiveRefusal } from '@/utils/vendorPoAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import type { VendorPoJobLine } from '@/types/vendorPo';
 
 /** The vendor PO line a slip ships against (by join on the slip — see outsideShipmentsAccess). */
 export interface ReceivePoLine {
@@ -26,6 +27,12 @@ export interface ReceivePoLine {
   poNumber: string;
   lineId: string;
   lineNumber: number;
+  /**
+   * What the line still expected BEFORE this receipt, in pieces — known where the caller has read
+   * the line itself (the PO page; the job page's own read of its PO lines), `null` where it has not
+   * (the outside-work drawer reads slips only). A receipt that covers it leaves nothing to close.
+   */
+  remainingQuantity: number | null;
 }
 
 export interface OpenSlipOption {
@@ -56,14 +63,27 @@ export interface ReceiveFromVendorSubmit {
  * no longer names the linked line. Both callers hand it a full slip read (`getOpenOutsideShipments`
  * and the drawer's `listOutsideShipmentsForCompany`); the join is optional only because it is
  * optional on `OutsideShipmentWithRelations` itself.
+ *
+ * `lines` is the caller's own read of the job's vendor PO lines, when it has one (the operation
+ * card's panel does; the drawer does not): it says how much the line still expects, which is what
+ * lets a receipt that completes the line skip its close. A slip alone cannot say — a line can
+ * have several slips.
  */
 export function receivePoLineFor(
   slip: Pick<OutsideShipmentWithRelations, 'vendor_purchase_order_line_id' | 'vendor_purchase_order_line'>,
+  lines?: readonly Pick<VendorPoJobLine, 'lineId' | 'quantity' | 'receivedQuantity'>[] | null,
 ): ReceivePoLine | null {
   const line = slip.vendor_purchase_order_line;
   const po = line?.vendor_purchase_order;
   if (!slip.vendor_purchase_order_line_id || !line || !po || line.id !== slip.vendor_purchase_order_line_id) return null;
-  return { vendorPurchaseOrderId: po.id, poNumber: po.po_number, lineId: line.id, lineNumber: line.line_number };
+  const known = lines?.find((l) => l.lineId === line.id);
+  return {
+    vendorPurchaseOrderId: po.id,
+    poNumber: po.po_number,
+    lineId: line.id,
+    lineNumber: line.line_number,
+    remainingQuantity: known ? Math.max(0, known.quantity - known.receivedQuantity) : null,
+  };
 }
 
 /** "VPS-0141-2 · PO-1042" — the slip, and the PO it ships against when there is one. */
@@ -71,34 +91,69 @@ function slipLabel(s: OpenSlipOption): string {
   return s.poLine ? `${s.slip_number} · ${s.poLine.poNumber}` : s.slip_number;
 }
 
+/** What became of "Also close PO-1042 line 2" once the receipt had landed. */
+export type PoLineCloseOutcome =
+  /** The line is closed: nothing more is expected on it. */
+  | { kind: 'closed' }
+  /**
+   * The receipt left nothing on the line to close — it is received in full. That is the end the box
+   * asked for ("nothing more expected"), reached by the pieces rather than by a close: done.
+   */
+  | { kind: 'received' }
+  /** The line is still open; the sentence says so, and that the receipt stands. */
+  | { kind: 'failed'; message: string };
+
+/** Float noise in a difference of two quantities must not leave "0.0000000001 still to come". */
+const QUANTITY_TOLERANCE = 1e-9;
+
 /**
  * Close a slip's vendor PO line once its receipt has landed — the "Also close PO-1042 line 2" box.
  *
  * AFTER the receipt, never before or instead: the receipt is the movement and must stand whatever
  * happens here. So a failure is not thrown — it comes back as a sentence saying the receipt was
  * recorded and the line was not, for the caller to show. Retrying the receipt would record the
- * pieces twice. One shared step for every surface that offers the box (the operation card's panel
- * and the outside-work drawer), so they cannot drift.
+ * pieces twice. One shared step for every surface that offers the box (the operation card's panel,
+ * the outside-work drawer and the PO page), so they cannot drift.
  *
- * Returns `null` when there was nothing to close or it closed.
+ * A RECEIPT THAT COMPLETES THE LINE IS DONE, NOT A FAILURE. The database refuses to close a line
+ * with nothing left to receive ("Line 2 has nothing left to receive."), so the person who received
+ * the last pieces and ticked the box was told the line "could not be closed … Close it on the PO" —
+ * about a line already finished. Two layers, so that never happens:
+ *   1. when the caller knows what the line still expected (`remainingQuantity`) and this receipt
+ *      covers it, no close is sent at all;
+ *   2. when it could not know (the drawer), or the line had less left than the screen knew (a
+ *      receipt landed elsewhere meanwhile), that one refusal — for this line — counts as done too.
+ * The RPC's refusal is unchanged: closing a received line really is meaningless.
+ *
+ * Returns `null` when no line was ticked.
  *
  * NOT CAPTURED as `vendor po lines closed`, deliberately: that event is the PO page's Close dialog,
  * and its `had_receipts` is a fact about the whole line, which the outside-work drawer cannot see
  * (it holds one slip). The movement itself is already captured, as `outside shipment received`
  * with `short_closed`.
  */
-export async function closePoLineAfterReceipt(target: ReceivePoLine | null): Promise<string | null> {
+export async function closePoLineAfterReceipt(
+  target: ReceivePoLine | null,
+  quantityReceived: number,
+): Promise<PoLineCloseOutcome | null> {
   if (!target) return null;
+  if (target.remainingQuantity !== null && quantityReceived + QUANTITY_TOLERANCE >= target.remainingQuantity) {
+    return { kind: 'received' };
+  }
   try {
     await closeVendorPoLines(
       target.vendorPurchaseOrderId,
       [target.lineId],
       'Closed when the parts came back: nothing more expected from the vendor.',
     );
-    return null;
+    return { kind: 'closed' };
   } catch (err) {
+    if (isNothingLeftToReceiveRefusal(err, target.lineNumber)) return { kind: 'received' };
     const why = err instanceof Error && err.message ? err.message : 'Something went wrong.';
-    return `The receipt was recorded, but ${target.poNumber} line ${target.lineNumber} could not be closed: ${why} Close it on the PO.`;
+    return {
+      kind: 'failed',
+      message: `The receipt was recorded, but ${target.poNumber} line ${target.lineNumber} could not be closed: ${why} Close it on the PO.`,
+    };
   }
 }
 

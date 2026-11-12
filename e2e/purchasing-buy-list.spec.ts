@@ -22,9 +22,10 @@ import {
  *
  * The list only proposes: the job's Materials card points to it, a typed quantity is ordered as
  * typed, "Create draft PO" makes one draft and the rows it covers drop off after a reload (on draft
- * is netted), the next part goes onto THAT draft ("Add to draft"), and once the draft is marked
- * sent the job's Materials card shows the order in its On order column and the bought part's line
- * names the PO.
+ * is netted), the next part goes onto THAT draft ("Add to draft") at the quantity the list
+ * suggested — which lifts it above its reorder point, so it drops off too rather than coming back
+ * for one more — and once the draft is marked sent the job's Materials card shows the order in its
+ * On order column and the bought part's line names the PO.
  *
  * Every name carries the run tag: the list is company-wide, so the spec only ever reads its own
  * vendor's group and its own parts' rows.
@@ -110,11 +111,12 @@ test("the job's Materials card points at the buy list, which shows the job's nee
   // The reorder part is the shop's need, not this job's.
   await expect(listRow(page, REORDER)).toHaveCount(0);
 
-  // Without the job filter, the whole shop: the reorder part too, topped up to its point.
+  // Without the job filter, the whole shop: the reorder part too, 7 under its point. The list
+  // suggests 8, not 7 — 3 + 7 would land ON the point, where the part is still listed.
   await page.getByRole('button', { name: `For ${JOB}` }).press('Delete');
   await expect(page).not.toHaveURL(/job=/);
   await expect(listRow(page, REORDER)).toContainText('7 each under its reorder point');
-  await expect(page.getByRole('textbox', { name: `Quantity of ${REORDER} to buy` })).toHaveValue('7');
+  await expect(page.getByRole('textbox', { name: `Quantity of ${REORDER} to buy` })).toHaveValue('8');
   await expect(page.getByRole('textbox', { name: `Quantity of ${MATERIAL} to buy` })).toHaveValue('20');
   await expect(page.getByText('Only POs in Jigged count as on order', { exact: false })).toBeVisible();
 });
@@ -146,25 +148,26 @@ test('an edited quantity goes on the draft as typed, and what the draft covers d
   poId = po!.id;
 });
 
-test('"Add to draft" puts the reorder part on the same draft; at its reorder point it still lists, for one more', async ({
+test('"Add to draft" puts the reorder part on the same draft at the suggested quantity, and it drops off the list', async ({
   page,
 }) => {
   await page.goto(toBuy());
+  await expect(page.getByRole('textbox', { name: `Quantity of ${REORDER} to buy` })).toHaveValue('8');
   await group(page).getByRole('button', { name: `Add to draft ${poNumber}` }).click();
   await expect(page.getByText(`Added 1 line to draft ${poNumber} (${vendor.name}).`)).toBeVisible();
 
   await page.reload();
-  // 3 on hand + 7 on draft is 10, AT its reorder point: still listed (the rule lists at equality),
-  // asking for at least one more.
-  await expect(listRow(page, REORDER)).toContainText('At its reorder point');
-  await expect(listRow(page, REORDER)).toContainText('7 on draft');
-  await expect(page.getByRole('textbox', { name: `Quantity of ${REORDER} to buy` })).toHaveValue('1');
+  // 3 on hand + 8 on draft is 11, ABOVE its reorder point of 10: ordering what the list suggested
+  // takes the part off it. (The old suggestion of 7 landed on the point, which still lists, and the
+  // part came straight back asking for one more.)
+  await expect(page.getByRole('textbox', { name: `Quantity of ${REORDER} to buy` })).toHaveCount(0);
+  await expect(listRow(page, REORDER)).toHaveCount(0);
 
   // One draft, three lines, at the quantities the list sent.
   await page.goto(`/dashboard/${companyId}/purchasing/orders/${poId}`);
   await expect(page.getByRole('row').filter({ hasText: MATERIAL })).toContainText('25 ea');
   await expect(page.getByRole('row').filter({ hasText: BOUGHT })).toContainText('2 ea');
-  await expect(page.getByRole('row').filter({ hasText: REORDER })).toContainText('7 ea');
+  await expect(page.getByRole('row').filter({ hasText: REORDER })).toContainText('8 ea');
   // The bought part's line is tied to the one job that needs it.
   await expect(page.getByRole('row').filter({ hasText: BOUGHT })).toContainText(`For ${JOB}`);
 });

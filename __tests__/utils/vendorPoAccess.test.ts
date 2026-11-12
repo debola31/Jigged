@@ -33,7 +33,9 @@ import {
   getRecentNoPoReceipts,
   getVendorPo,
   getVendorPoArchiveImpact,
+  isNothingLeftToReceiveRefusal,
   listOpenOutsideOpsForVendor,
+  listUnlinkedOutsideSlips,
   listVendorPoLinesForJob,
   listVendorPoLinesForPart,
   listVendorPoReceipts,
@@ -443,6 +445,39 @@ describe('state changes', () => {
   });
 });
 
+describe('isNothingLeftToReceiveRefusal — a close refused because the line is received in full (O2)', () => {
+  /**
+   * A close after a receipt that completed the line is refused with this sentence, and that refusal
+   * means the line is DONE (received in full). Told apart through the plumbing every refusal takes —
+   * the P0001 code kept by `purchasingRpcFailure`, and the whole sentence, for that line.
+   */
+  it('names the "nothing left to receive" refusal, for that line only, by its P0001 sentence', async () => {
+    const refusedWith = async (error: { code: string; message: string }): Promise<unknown> => {
+      stub.rpc.mockResolvedValueOnce({ data: null, error: { ...error, details: null, hint: null } });
+      return closeVendorPoLines('po-1', ['l2']).then(
+        () => null,
+        (err: unknown) => err,
+      );
+    };
+
+    const nothingLeft = await refusedWith({ code: 'P0001', message: 'Line 2 has nothing left to receive.' });
+    expect(nothingLeft).toBeInstanceOf(Error);
+    expect(isNothingLeftToReceiveRefusal(nothingLeft, 2)).toBe(true);
+    // A refusal, so the person's sentence and not our failure: nothing reported.
+    expect(mockCapture).not.toHaveBeenCalled();
+    // Another line's sentence is not this line's.
+    expect(isNothingLeftToReceiveRefusal(nothingLeft, 3)).toBe(false);
+
+    const otherRefusal = await refusedWith({ code: 'P0001', message: 'Line 2 is already closed.' });
+    expect(isNothingLeftToReceiveRefusal(otherRefusal, 2)).toBe(false);
+    // The same words under another code are not the refusal.
+    const notARefusal = await refusedWith({ code: 'XX000', message: 'Line 2 has nothing left to receive.' });
+    expect(isNothingLeftToReceiveRefusal(notARefusal, 2)).toBe(false);
+    expect(isNothingLeftToReceiveRefusal(new Error('Line 2 has nothing left to receive.'), 2)).toBe(false);
+    expect(isNothingLeftToReceiveRefusal(null, 2)).toBe(false);
+  });
+});
+
 describe('receiveVendorPo', () => {
   const entry = {
     line_id: 'line-1',
@@ -574,6 +609,66 @@ describe('voidVendorPoReceipt and relinkOutsideShipment', () => {
     const unlinked = await relinkOutsideShipment('s-1', null);
     expect(stub.rpc.mock.calls.at(-1)?.[1]).toEqual({ p_outside_shipment_id: 's-1', p_vendor_purchase_order_line_id: undefined });
     expect(unlinked.vendorPurchaseOrderLineId).toBeNull();
+  });
+});
+
+describe('listUnlinkedOutsideSlips — what "Link a slip…" offers', () => {
+  it("reads the step's LIVE slips to this vendor that ship against no line, company-scoped, oldest first", async () => {
+    stub.queue('outside_shipments', {
+      data: [
+        {
+          id: 's-2',
+          slip_number: 'VPS-0141-2',
+          vendor_purchase_order_line_id: null,
+          job_id: 'job-1',
+          job_operation_id: 'op-30',
+          quantity: 20,
+          shipped_at: '2026-11-05T09:00:00+00:00',
+          due_back_on: null,
+          closed_at: null,
+          voided_at: null,
+          outside_shipment_receipts: [
+            { quantity_good: 5, voided_at: null },
+            { quantity_good: 7, voided_at: '2026-11-06T00:00:00Z' },
+          ],
+        },
+      ],
+    });
+    const slips = await listUnlinkedOutsideSlips('co-1', 'op-30', 'v-1');
+
+    expect(stub.callsOf('outside_shipments', 'eq')).toEqual([
+      ['company_id', 'co-1'],
+      ['job_operation_id', 'op-30'],
+      ['vendor_id', 'v-1'],
+    ]);
+    // Voided slips are never offered (the relink refuses them), nor slips already on a line.
+    expect(stub.callsOf('outside_shipments', 'is')).toEqual([
+      ['voided_at', null],
+      ['vendor_purchase_order_line_id', null],
+    ]);
+    expect(stub.callsOf('outside_shipments', 'order')[0]).toEqual(['shipped_at', { ascending: true }]);
+    // A voided receipt does not count as back.
+    expect(slips).toEqual([
+      {
+        id: 's-2',
+        slipNumber: 'VPS-0141-2',
+        jobId: 'job-1',
+        jobOperationId: 'op-30',
+        quantity: 20,
+        shippedAt: '2026-11-05T09:00:00+00:00',
+        dueBackOn: null,
+        closedAt: null,
+        voidedAt: null,
+        receivedQuantity: 5,
+        outstandingQuantity: 15,
+      },
+    ]);
+    expectNoPurchasingTableWrites();
+  });
+
+  it('THROWS on a failed read: an empty list would say there is nothing to link', async () => {
+    stub.queue('outside_shipments', { error: { code: '08006', message: 'connection failure' } });
+    await expect(listUnlinkedOutsideSlips('co-1', 'op-30', 'v-1')).rejects.toThrow('Failed to load the slips to link.');
   });
 });
 

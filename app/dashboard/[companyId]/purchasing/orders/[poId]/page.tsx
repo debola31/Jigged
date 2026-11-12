@@ -139,8 +139,9 @@ function archiveImpactLines(impact: VendorPoArchiveImpact): string[] {
  * first that applies: send it, send the new revision, update QuickBooks.
  *
  * ONE REFRESH. Every write on this page — receive, void, close, reopen, send, the internal notes and
- * promised dates, QuickBooks — runs `refreshAfterWrite`, which re-reads the PO WITHOUT a loading
- * flash (useLoad's `refresh`): the page stays on screen until the fresh read replaces it.
+ * promised dates, a slip unlinked from or linked to an outside line, QuickBooks — runs
+ * `refreshAfterWrite`, which re-reads the PO WITHOUT a loading flash (useLoad's `refresh`): the page
+ * stays on screen until the fresh read replaces it.
  *
  * The internal notes and the promised dates save themselves, through their own doors: they are
  * never printed, never pushed and never a revision, so they never go through the vendor-visible
@@ -405,12 +406,15 @@ export default function VendorPoDetailPage() {
           slip_number: s.slipNumber,
           shipped_at: s.shippedAt,
           outstanding: s.outstandingQuantity,
-          // Every slip here ships against THIS line, so the dialog can offer to close it too.
+          // Every slip here ships against THIS line, so the dialog can offer to close it too — and
+          // this page knows what the line still expects, so a receipt that completes it skips the
+          // close instead of being refused one.
           poLine: {
             vendorPurchaseOrderId: header.id,
             poNumber: header.poNumber,
             lineId: outsideLine.id,
             lineNumber: outsideLine.lineNumber,
+            remainingQuantity: outsideLine.remainingQuantity,
           },
         }))
     : [];
@@ -436,10 +440,11 @@ export default function VendorPoDetailPage() {
         days_at_vendor_bucket: daysAtVendorBucket(slip?.shipped_at ?? null),
       });
       // The line is closed AFTER the receipt has landed, through the step every surface shares; a
-      // failure there comes back as a sentence and never undoes the receipt.
-      const poLineError = await closePoLineAfterReceipt(v.closePoLine ?? null);
+      // failure there comes back as a sentence and never undoes the receipt. A receipt that
+      // completed the line is done, not a failure: the refreshed line reads Received.
+      const lineClose = await closePoLineAfterReceipt(v.closePoLine ?? null, v.quantityGood);
       setOutsideLine(null);
-      if (poLineError) setActionError(poLineError);
+      if (lineClose?.kind === 'failed') setActionError(lineClose.message);
       else setSnack(`Recorded ${v.quantityGood} back from ${header.vendorName}.`);
     } catch (err) {
       setOutsideLine(null);
@@ -663,6 +668,12 @@ export default function VendorPoDetailPage() {
               onReopenLine={(line) => void reopenLine(line)}
               onOpenSlip={setSlipId}
               onReceiveOutside={setOutsideLine}
+              onSlipLinkChanged={(message) => {
+                // A slip moving on or off a line changes its received figure, and can change the
+                // PO's status and its QuickBooks state: the one refresh re-reads all of it.
+                setSnack(message);
+                void refreshAfterWrite();
+              }}
             />
           )}
           <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 4, mt: 2, flexWrap: 'wrap' }}>

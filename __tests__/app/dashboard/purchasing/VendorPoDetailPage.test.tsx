@@ -42,8 +42,12 @@ const access = {
   reopenVendorPoLines: vi.fn(),
   closeVendorPoLines: vi.fn(),
   voidVendorPoReceipt: vi.fn(),
+  relinkOutsideShipment: vi.fn(),
+  listUnlinkedOutsideSlips: vi.fn(),
 };
 vi.mock('@/utils/vendorPoAccess', () => ({
+  relinkOutsideShipment: (...a: unknown[]) => access.relinkOutsideShipment(...a),
+  listUnlinkedOutsideSlips: (...a: unknown[]) => access.listUnlinkedOutsideSlips(...a),
   getVendorPo: (...a: unknown[]) => access.getVendorPo(...a),
   markVendorPoSent: (...a: unknown[]) => access.markVendorPoSent(...a),
   setVendorPoInternalNotes: (...a: unknown[]) => access.setVendorPoInternalNotes(...a),
@@ -84,10 +88,11 @@ vi.mock('@/components/purchasing/ReceiveVendorPoDialog', () => ({ default: keep(
 vi.mock('@/components/purchasing/VendorPoPreviewDialog', () => ({ default: keep('preview') }));
 vi.mock('@/components/purchasing/SendVendorPoToQuickBooksDialog', () => ({ SendVendorPoToQuickBooksDialog: keep('quickbooks') }));
 vi.mock('@/components/outsideShipments/OutsideShipmentPreviewDialog', () => ({ default: keep('slip') }));
-const closePoLineAfterReceipt = vi.fn(async (_target: unknown): Promise<string | null> => null);
+type LineCloseOutcome = { kind: 'closed' } | { kind: 'received' } | { kind: 'failed'; message: string } | null;
+const closePoLineAfterReceipt = vi.fn(async (_target: unknown, _received: number): Promise<LineCloseOutcome> => null);
 vi.mock('@/components/jobs/ReceiveFromVendorDialog', () => ({
   default: keep('receiveOutside'),
-  closePoLineAfterReceipt: (target: unknown) => closePoLineAfterReceipt(target),
+  closePoLineAfterReceipt: (target: unknown, received: number) => closePoLineAfterReceipt(target, received),
 }));
 vi.mock('@/components/common/DeleteImpactDialog', () => ({ default: keep('archive') }));
 
@@ -299,30 +304,50 @@ describe('VendorPoDetailPage — every write runs the one refresh', () => {
     const line = outsideLine();
     (props.receive.onReceiveOutside as (l: unknown) => void)(line);
     await waitFor(() => expect(props.receiveOutside).toBeDefined());
-    // Every slip here ships against THIS line, so the dialog can offer "Also close PO-1042 line 3".
-    const slipPoLine = { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', lineId: 'l3', lineNumber: 3 };
+    // Every slip here ships against THIS line, so the dialog can offer "Also close PO-1042 line 3" —
+    // with what the line still expects (40 of 100), so a receipt that completes it closes nothing.
+    const slipPoLine = { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', lineId: 'l3', lineNumber: 3, remainingQuantity: 40 };
     expect(props.receiveOutside.openSlips).toEqual([
       { id: 's1', slip_number: 'VPS-0141-1', shipped_at: '2026-11-04T12:00:00Z', outstanding: 40, poLine: slipPoLine },
     ]);
     (props.receiveOutside.onSubmit as (v: unknown) => void)({ shipmentId: 's1', quantityGood: 40, closeShipment: false, closePoLine: null });
     await waitFor(() => expect(receiveOutsideShipment).toHaveBeenCalledWith('s1', { quantityGood: 40, closeShipment: false }));
     await waitFor(() => expect(loads()).toBe(2));
-    expect(closePoLineAfterReceipt).toHaveBeenCalledWith(null);
+    expect(closePoLineAfterReceipt).toHaveBeenCalledWith(null, 40);
     expect(capture).toHaveBeenCalledWith('outside shipment received', expect.objectContaining({ surface: 'office', is_full: true }));
   });
 
   it('closes the PO line after the receipt when asked, and says so if that part failed', async () => {
     receiveOutsideShipment.mockResolvedValue({ receiptId: 'or1' });
-    closePoLineAfterReceipt.mockResolvedValue('The receipt was recorded, but PO-1042 line 3 could not be closed: nope Close it on the PO.');
+    closePoLineAfterReceipt.mockResolvedValue({
+      kind: 'failed',
+      message: 'The receipt was recorded, but PO-1042 line 3 could not be closed: nope Close it on the PO.',
+    });
     show(poDetail({ lines: [poLine(), outsideLine()], outsideSlips: [poSlip()] }));
     await screen.findByRole('heading', { name: 'PO-1042' });
     (props.receive.onReceiveOutside as (l: unknown) => void)(outsideLine());
     await waitFor(() => expect(props.receiveOutside).toBeDefined());
-    const slipPoLine = { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', lineId: 'l3', lineNumber: 3 };
+    const slipPoLine = { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', lineId: 'l3', lineNumber: 3, remainingQuantity: 40 };
     (props.receiveOutside.onSubmit as (v: unknown) => void)({ shipmentId: 's1', quantityGood: 30, closeShipment: true, closePoLine: slipPoLine });
-    await waitFor(() => expect(closePoLineAfterReceipt).toHaveBeenCalledWith(slipPoLine));
+    await waitFor(() => expect(closePoLineAfterReceipt).toHaveBeenCalledWith(slipPoLine, 30));
     expect(receiveOutsideShipment.mock.invocationCallOrder[0]).toBeLessThan(closePoLineAfterReceipt.mock.invocationCallOrder[0]);
     expect(await screen.findByText(/could not be closed/i)).toBeInTheDocument();
+  });
+
+  /** The E2E finding, on this page: a receipt that completed the line is done, not refused. */
+  it('treats a receipt that completed the PO line as done — the receipt is recorded, nothing warns', async () => {
+    receiveOutsideShipment.mockResolvedValue({ receiptId: 'or1' });
+    closePoLineAfterReceipt.mockResolvedValue({ kind: 'received' });
+    show(poDetail({ lines: [poLine(), outsideLine()], outsideSlips: [poSlip()] }));
+    await screen.findByRole('heading', { name: 'PO-1042' });
+    (props.receive.onReceiveOutside as (l: unknown) => void)(outsideLine());
+    await waitFor(() => expect(props.receiveOutside).toBeDefined());
+    const slipPoLine = { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', lineId: 'l3', lineNumber: 3, remainingQuantity: 40 };
+    (props.receiveOutside.onSubmit as (v: unknown) => void)({ shipmentId: 's1', quantityGood: 40, closeShipment: true, closePoLine: slipPoLine });
+    expect(await screen.findByText('Recorded 40 back from Acme Steel Supply (frozen).')).toBeInTheDocument();
+    expect(closePoLineAfterReceipt).toHaveBeenCalledWith(slipPoLine, 40);
+    expect(screen.queryByText(/could not be closed/i)).not.toBeInTheDocument();
+    await waitFor(() => expect(loads()).toBe(2));
   });
 
   it('reopens a closed PO, and refreshes', async () => {
@@ -332,6 +357,67 @@ describe('VendorPoDetailPage — every write runs the one refresh', () => {
     await waitFor(() => expect(access.reopenVendorPoLines).toHaveBeenCalledWith('po-1', 'all'));
     await waitFor(() => expect(loads()).toBe(2));
     expect(capture).toHaveBeenCalledWith('vendor po lines reopened', { whole_po: true, line_count: 2 });
+  });
+});
+
+/**
+ * The explicit slip relink (plan §3.6; criterion O1) lives here, under each outside line's slips:
+ * the send dialog says the link is corrected on the PO page, and this is where. Both corrections
+ * run the page's one refresh, say what they did, and capture nothing — slip relink is deliberately
+ * not instrumented (plan §3.14).
+ */
+describe('VendorPoDetailPage — correcting which slips an outside line counts', () => {
+  const withSlip = (over: Parameters<typeof poDetail>[0] = {}) =>
+    poDetail({ lines: [poLine(), outsideLine()], outsideSlips: [poSlip()], ...over });
+
+  it('Unlink asks first, then the slip stops counting: said, and refreshed in place — no PostHog', async () => {
+    const user = userEvent.setup();
+    access.relinkOutsideShipment.mockResolvedValue({ outsideShipmentId: 's1', slipNumber: 'VPS-0141-1', vendorPurchaseOrderLineId: null });
+    show(withSlip());
+    await user.click(await screen.findByRole('button', { name: 'Unlink VPS-0141-1' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Unlink VPS-0141-1 from line 3?' });
+    expect(within(dialog).getByText(/stops counting toward line 3's received quantity/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Unlink' }));
+
+    await waitFor(() => expect(access.relinkOutsideShipment).toHaveBeenCalledWith('s1', null));
+    expect(await screen.findByText('VPS-0141-1 no longer counts toward line 3.')).toBeInTheDocument();
+    await waitFor(() => expect(loads()).toBe(2));
+    // Refreshed in place: once the dialog has gone, the page is still there — no loading flash.
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'PO-1042' })).toBeInTheDocument();
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('Link a slip… offers the step’s unlinked slips to this vendor, links one, and refreshes', async () => {
+    const user = userEvent.setup();
+    access.listUnlinkedOutsideSlips.mockResolvedValue([
+      { id: 's2', slipNumber: 'VPS-0141-2', jobId: 'j1', jobOperationId: 'op30', quantity: 20, shippedAt: '2026-11-06T12:00:00Z', dueBackOn: null, closedAt: null, voidedAt: null, receivedQuantity: 0, outstandingQuantity: 20 },
+    ]);
+    access.relinkOutsideShipment.mockResolvedValue({ outsideShipmentId: 's2', slipNumber: 'VPS-0141-2', vendorPurchaseOrderLineId: 'l3' });
+    show(withSlip());
+    await user.click(await screen.findByRole('button', { name: 'Link a slip…' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Link a slip to line 3' });
+    // Scoped to the PO's company, the line's step and the PO's vendor.
+    expect(access.listUnlinkedOutsideSlips).toHaveBeenCalledWith('test-company-id', 'op30', 'v1');
+    await user.click(await within(dialog).findByRole('button', { name: 'Link VPS-0141-2' }));
+
+    await waitFor(() => expect(access.relinkOutsideShipment).toHaveBeenCalledWith('s2', 'l3'));
+    expect(await screen.findByText('VPS-0141-2 now counts toward line 3.')).toBeInTheDocument();
+    await waitFor(() => expect(loads()).toBe(2));
+    expect(capture).not.toHaveBeenCalled();
+  });
+
+  it('a closed PO and an archived PO offer no slip corrections — like every other line action', async () => {
+    const { unmount } = show(withSlip({ header: poHeader({ closedAt: '2026-11-09T00:00:00Z' }), summary: poSummary({ status: 'closed' }) }));
+    expect(await screen.findByRole('button', { name: 'VPS-0141-1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /unlink/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /link a slip/i })).not.toBeInTheDocument();
+    unmount();
+
+    show(withSlip({ header: poHeader({ deletedAt: '2026-11-10T00:00:00Z', isArchived: true }) }));
+    expect(await screen.findByRole('button', { name: 'VPS-0141-1' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /unlink/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /link a slip/i })).not.toBeInTheDocument();
   });
 });
 

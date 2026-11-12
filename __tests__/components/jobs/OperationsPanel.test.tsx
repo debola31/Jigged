@@ -27,7 +27,10 @@ vi.mock('@/utils/operationCompletionsAccess', () => ({
 }));
 vi.mock('@/utils/operationIntervalsAccess', () => ({ getOperationActuals: vi.fn(async () => new Map()) }));
 vi.mock('@/components/outsideShipments', () => ({ OutsideShipmentPreviewDialog: () => null }));
-vi.mock('@/utils/vendorPoAccess', () => ({ closeVendorPoLines: vi.fn() }));
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/utils/vendorPoAccess')>();
+  return { closeVendorPoLines: vi.fn(), isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal };
+});
 
 import posthog from 'posthog-js';
 import OperationsPanel from '@/components/jobs/OperationsPanel';
@@ -240,5 +243,48 @@ describe('OperationsPanel — outside steps on a vendor PO', () => {
       vi.mocked(closeVendorPoLines).mock.invocationCallOrder[0],
     );
     expect(await screen.findByText(/PO-1042 line 2 is closed/)).toBeInTheDocument();
+  });
+
+  /**
+   * The E2E finding: the line ordered 48, the slip carried 50, and 48 came back — a short slip, but a
+   * complete line. The panel's own read of the job's PO lines says the line expected 48 more, so the
+   * receipt covers it: no close is sent (the database would refuse one), and nothing reads as failed.
+   */
+  it('counts a receipt that completes the PO line as done: no close is sent, and no warning', async () => {
+    const user = userEvent.setup();
+    vi.mocked(getOutsideSummariesForPart).mockResolvedValue([
+      ledger({ qty_sent: 50, qty_at_vendor: 50, qty_to_send: 50, open_slip_count: 1 }),
+    ]);
+    vi.mocked(getOpenOutsideShipments).mockResolvedValue([
+      {
+        id: 's1',
+        slip_number: 'VPS-1042-1',
+        shipped_at: '2026-03-01T12:00:00Z',
+        outstanding: 50,
+        vendor_purchase_order_line_id: 'line-2',
+        vendor_purchase_order_line: {
+          id: 'line-2',
+          line_number: 2,
+          vendor_purchase_order_id: 'po-1042',
+          vendor_purchase_order: { id: 'po-1042', po_number: 'PO-1042' },
+        },
+      },
+    ] as unknown as Awaited<ReturnType<typeof getOpenOutsideShipments>>);
+    vi.mocked(receiveOutsideShipment).mockResolvedValue({ receiptId: 'r1' });
+    draw([{ ...line, quantity: 48, openQuantity: 48 }]);
+
+    await user.click(await screen.findByRole('button', { name: /receive 50/i }));
+    const dialog = await screen.findByRole('dialog');
+    const qty = within(dialog).getByLabelText(/amount received/i);
+    await user.clear(qty);
+    await user.type(qty, '48');
+    await user.click(within(dialog).getByRole('checkbox', { name: /everything we're getting/i }));
+    await user.click(within(dialog).getByRole('checkbox', { name: /also close PO-1042 line 2/i }));
+    await user.click(within(dialog).getByRole('button', { name: /record receipt/i }));
+
+    expect(await screen.findByText('Recorded 48 back from the vendor. PO-1042 line 2 is received in full.')).toBeInTheDocument();
+    expect(receiveOutsideShipment).toHaveBeenCalledWith('s1', { quantityGood: 48, closeShipment: true });
+    expect(closeVendorPoLines).not.toHaveBeenCalled();
+    expect(screen.queryByText(/could not be closed/i)).not.toBeInTheDocument();
   });
 });

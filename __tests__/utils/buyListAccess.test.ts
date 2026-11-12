@@ -192,8 +192,9 @@ describe('getBuyList — what it proposes', () => {
     ]);
     const list = await getBuyList('co-1', { today: TODAY });
     const bushing = list.groups.flatMap((g) => g.rows).find((r) => r.partId === 'bushing')!;
-    // Still to ship 7; on hand 4 → position −3; reorder point 20 → 23 to buy.
-    expect(bushing).toMatchObject({ demand: 7, position: -3, reason: 'both', suggestedQuantity: 23 });
+    // Still to ship 7; on hand 4 → position −3; reorder point 20 → 24 to buy: 23 would land ON the
+    // point, where the part is still listed.
+    expect(bushing).toMatchObject({ demand: 7, position: -3, reason: 'both', shortfall: 23, suggestedQuantity: 24 });
     // Exactly one job wants it, so the line links that job (and the job part it is for).
     expect(bushing.jobLink).toEqual({ jobId: 'job-0', jobNumber: 'J-1000', jobPartId: 'jp-b' });
     // No vendor chosen: the group a person starts an RFQ from.

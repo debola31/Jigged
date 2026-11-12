@@ -2,7 +2,6 @@ import { test, expect, type Page } from '@playwright/test';
 
 import {
   admin,
-  asE2EUser,
   createJob,
   createOutsideOperation,
   createPart,
@@ -30,8 +29,8 @@ import {
  *   4. A short receipt closes the slip AND, ticked separately, the PO line: the line reads what came
  *      back (9) and is closed short, and the step advances to in progress with one still to send.
  *   5. Relinking: archiving the PO unlinks its slip, and a new PO's outside line for the step picks
- *      it back up (the line-insert auto-link). The explicit relink door has no screen of its own,
- *      so it is driven through its RPC as the E2E user and read back on the PO page.
+ *      it back up (the line-insert auto-link). Then the explicit correction, on the PO page under
+ *      the line's slips: Unlink (a light confirm says what changes), and Link a slip… puts it back.
  */
 
 test.describe.configure({ mode: 'serial' });
@@ -122,13 +121,20 @@ test('sending from the job links the slip to the line, and the slip, drawer and 
   await page.reload();
   await expect(page.getByText('0 / 10 back · 10 at vendor')).toBeVisible();
 
-  // The jobs list's "what's out" drawer carries the PO number on the slip's row.
+  // The jobs list's "what's out" drawer carries the PO number on the slip's row. This spec's long
+  // run-tagged names are wider than the drawer, which once squeezed the "service · PO" text to no
+  // width and pushed Receive off the edge: now the text gives way with an ellipsis, its whole
+  // wording kept in its title, and Receive stays inside the drawer.
   await page.goto(`/dashboard/${companyId}/jobs`);
   await page.getByRole('button', { name: /See what's out/i }).click();
-  // Read from the row's text, not the paragraph's visibility: with this spec's long run-tagged
-  // names the row is wider than the drawer and that paragraph is squeezed to no width at all.
   const drawerRow = page.getByRole('button', { name: JOB, exact: true }).locator('xpath=..');
   await expect(drawerRow).toContainText(`${SERVICE} · ${poNumber}`);
+  await expect(drawerRow.getByTitle(`${SERVICE} · ${poNumber}`)).toBeVisible();
+  const receiveInDrawer = drawerRow.getByRole('button', { name: 'Receive', exact: true });
+  await receiveInDrawer.scrollIntoViewIfNeeded();
+  const paper = await page.locator('.MuiDrawer-paper').boundingBox();
+  const receiveBox = await receiveInDrawer.boundingBox();
+  expect(receiveBox!.x + receiveBox!.width).toBeLessThanOrEqual(paper!.x + paper!.width);
 
   // And the PO line lists the slip, with what it says is out.
   await page.goto(poUrl);
@@ -223,23 +229,25 @@ test('archiving the PO unlinks the slip; a new PO for the step relinks it, and t
   await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber })).toBeVisible();
   await expect(lineRow(page, JOB)).toContainText('Sent 10 · back 9');
 
-  // The explicit door (no screen offers it): unlink, then link back, as the signed-in user.
-  const a = admin();
-  const { data: slip } = await a.from('outside_shipments').select('id, vendor_purchase_order_line_id').eq('slip_number', slipNumber).single();
-  const lineId = slip!.vendor_purchase_order_line_id as string;
-  const user = await asE2EUser();
-  const unlink = await user.rpc('set_outside_shipment_vendor_purchase_order_line', {
-    p_outside_shipment_id: slip!.id,
-    p_vendor_purchase_order_line_id: null,
-  });
-  expect(unlink.error).toBeNull();
+  // The explicit correction, under the line's slips. Unlink asks first and says what changes…
+  await lineRow(page, JOB).getByRole('button', { name: `Unlink ${slipNumber}` }).click();
+  const unlink = page.getByRole('dialog', { name: `Unlink ${slipNumber} from line 1?` });
+  await expect(unlink).toContainText("stops counting toward line 1's received quantity");
+  await expect(unlink).toContainText('the 9 back on it come off what line 1 has received');
+  await unlink.getByRole('button', { name: 'Unlink', exact: true }).click();
+  await expect(page.getByText(`${slipNumber} no longer counts toward line 1.`)).toBeVisible();
+  await expect(lineRow(page, JOB)).toContainText('No slips yet');
   await page.reload();
   await expect(lineRow(page, JOB)).toContainText('No slips yet');
-  const relink = await user.rpc('set_outside_shipment_vendor_purchase_order_line', {
-    p_outside_shipment_id: slip!.id,
-    p_vendor_purchase_order_line_id: lineId,
-  });
-  expect(relink.error).toBeNull();
+  await expect(lineRow(page, JOB)).toContainText('Sent 0 · back 0');
+
+  // …and Link a slip… offers the step's live, unlinked slip to this vendor and puts it back.
+  await lineRow(page, JOB).getByRole('button', { name: 'Link a slip…' }).click();
+  const link = page.getByRole('dialog', { name: 'Link a slip to line 1' });
+  await expect(link.getByRole('radio', { name: new RegExp(slipNumber) })).toBeChecked();
+  await link.getByRole('button', { name: `Link ${slipNumber}` }).click();
+  await expect(page.getByText(`${slipNumber} now counts toward line 1.`)).toBeVisible();
   await page.reload();
   await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber })).toBeVisible();
+  await expect(lineRow(page, JOB)).toContainText('Sent 10 · back 9');
 });

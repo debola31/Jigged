@@ -8,7 +8,10 @@
     "             clamped per job) + bought job parts still to ship",
     "  position = on hand (once) + on order + on draft - demand",
     "  listed   = position <= reorder point, or position < 0 with no reorder point",
-    "  suggest  = max(gap, minimum order) rounded up to whole purchase units, at least one",
+    "  suggest  = with a reorder point: the fewest whole purchase units that lift the position",
+    "             strictly ABOVE it (an order landing ON the point would list the part again,",
+    "             asking for one more); without one: enough to cover -position, rounded up to",
+    "             whole purchase units. Either way at least the minimum order, and at least one.",
     "Vendor: preferred unless Do not use or archived, else the only Approved vendor, else none.",
     "",
     "Each case: part {stock_unit, on_hand, on_order?, on_draft?, reorder_point?, preferred_vendor_id?},",
@@ -249,7 +252,7 @@
       }
     },
     {
-      "name": "exactly at the reorder point is listed, suggesting one purchase unit",
+      "name": "exactly at the reorder point is listed, and one purchase unit lifts it above",
       "part": {
         "stock_unit": "each",
         "on_hand": 50,
@@ -279,7 +282,7 @@
       }
     },
     {
-      "name": "below the reorder point tops up to it",
+      "name": "below the reorder point orders past it, never onto it",
       "part": {
         "stock_unit": "each",
         "on_hand": 30,
@@ -289,7 +292,7 @@
         "listed": true,
         "position": 30,
         "shortfall": 20,
-        "suggested_quantity": 20
+        "suggested_quantity": 21
       }
     },
     {
@@ -305,11 +308,11 @@
         "listed": true,
         "position": 45,
         "shortfall": 5,
-        "suggested_quantity": 5
+        "suggested_quantity": 6
       }
     },
     {
-      "name": "a reorder point and job demand together top up past the jobs",
+      "name": "a reorder point and job demand together: clearing the point covers the jobs too",
       "part": {
         "stock_unit": "each",
         "on_hand": 40,
@@ -328,7 +331,7 @@
         "demand": 50,
         "position": -10,
         "shortfall": 20,
-        "suggested_quantity": 20
+        "suggested_quantity": 21
       }
     },
     {
@@ -343,6 +346,102 @@
         "position": 0,
         "shortfall": 0,
         "suggested_quantity": 1
+      }
+    },
+    {
+      "name": "a reorder gap of exactly whole purchase units takes one more: two bars would land on the point",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 0,
+        "reorder_point": 288,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "reason": "below_reorder_point",
+        "position": 0,
+        "shortfall": 288,
+        "purchase_unit": "bar",
+        "suggested_quantity": 3,
+        "suggested_stock_quantity": 432
+      }
+    },
+    {
+      "name": "a reorder gap that rounds up to a whole purchase unit already clears the point",
+      "part": {
+        "stock_unit": "inches",
+        "on_hand": 100,
+        "reorder_point": 500,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "bar",
+          "purchase_factor": 144
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "position": 100,
+        "shortfall": 400,
+        "suggested_quantity": 3,
+        "suggested_stock_quantity": 432
+      }
+    },
+    {
+      "name": "a reorder gap of 1.1 at 0.1 per purchase unit is 12 units: 11 would land on the point",
+      "part": {
+        "stock_unit": "pounds",
+        "on_hand": 0,
+        "reorder_point": 1.1,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "tenth",
+          "purchase_factor": 0.1
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "shortfall": 1.1,
+        "suggested_quantity": 12,
+        "suggested_stock_quantity": 1.2
+      }
+    },
+    {
+      "name": "the minimum order still wins when it is more than clearing the reorder point needs",
+      "part": {
+        "stock_unit": "each",
+        "on_hand": 8,
+        "reorder_point": 10,
+        "preferred_vendor_id": "acme"
+      },
+      "vendors": [
+        {
+          "vendor_id": "acme",
+          "status": "approved",
+          "purchase_unit": "each",
+          "purchase_factor": 1,
+          "minimum_order_quantity": 25
+        }
+      ],
+      "expected": {
+        "listed": true,
+        "shortfall": 2,
+        "suggested_quantity": 25
       }
     },
     {
@@ -378,7 +477,7 @@
       }
     },
     {
-      "name": "an exact multiple of the purchase unit stays exact",
+      "name": "with no reorder point, a shortage of an exact multiple of the purchase unit stays exact",
       "part": {
         "stock_unit": "inches",
         "on_hand": 0,

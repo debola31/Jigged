@@ -377,7 +377,8 @@ export default function VendorPoList({ companyId }: VendorPoListProps) {
       {
         field: 'nextExpectedOn',
         headerName: 'Next due',
-        width: 170,
+        // Fits "11/11/2026 Overdue": at 170 the cell cut the word to "Overdu".
+        width: 200,
         valueFormatter: (params: ValueFormatterParams<VendorPoListRow>) =>
           params.value ? formatDateOnly(params.value) : '—',
         // Amber, with the WORD: overdue is behind, not broken (design-system.md "Red means broken;
@@ -400,7 +401,8 @@ export default function VendorPoList({ companyId }: VendorPoListProps) {
       {
         field: 'openAmount',
         headerName: 'Open value (at PO price)',
-        width: 200,
+        // Fits its own header with the sort arrow: at 200 it read "Open value (at PO pr…".
+        width: 240,
         type: 'rightAligned',
         // "At PO price", because it is: Jigged never sees the vendor's bill (plan §3.1 UI words).
         valueFormatter: (params: ValueFormatterParams<VendorPoListRow>) => {

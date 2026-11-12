@@ -24,6 +24,7 @@ import type { OperationActuals } from '@/types/operationInterval';
 import type { VendorPoJobLine } from '@/types/vendorPo';
 import { formatTime } from '@/types/routings';
 import { formatDuration } from '@/lib/duration';
+import { formatDateOnly } from '@/lib/localDate';
 import { formatShortDate } from '@/lib/purchasing/priceDefault';
 import { VENDOR_PO_OVERDUE } from '@/lib/purchasing/vendorPoStatus';
 import OperationStatusChip from './OperationStatusChip';
@@ -306,8 +307,10 @@ export default function OperationCard({
               <Typography variant="caption" color="text.secondary">
                 {outside.qty_at_vendor} at {vendorName ?? 'the vendor'} since{' '}
                 {formatDateTime(outside.oldest_open_shipped_at)}
+                {/* A slip's due-back is a DATE: formatDateTime read it as UTC midnight, which
+                    printed the day before, at 4:00 PM, anywhere west of Greenwich. */}
                 {outside.earliest_due_back_on
-                  ? ` · due back ${formatDateTime(outside.earliest_due_back_on)}`
+                  ? ` · due back ${formatDateOnly(outside.earliest_due_back_on)}`
                   : ''}
               </Typography>
             </Box>

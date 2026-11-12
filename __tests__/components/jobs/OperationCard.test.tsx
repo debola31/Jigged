@@ -338,6 +338,18 @@ describe('OperationCard — the vendor PO an outside step ships against', () => 
     expect(screen.getByText(/overdue/i)).toBeInTheDocument();
   });
 
+  /**
+   * A slip's due-back is a date column. Formatted as an instant it was read as UTC midnight: west of
+   * Greenwich that printed the day before at 4:00 PM, contradicting the PO caption under it; in UTC
+   * it still printed a time no one set.
+   */
+  it('prints the due-back as the date on the slip, with no time', () => {
+    drawCard(outsideOp(), { outside: { ...outside, earliest_due_back_on: '2026-03-09' }, purchaseOrder: poLink });
+    const caption = screen.getByText(/at AcmeCoat since/);
+    expect(caption.textContent).toContain(`due back ${new Date(2026, 2, 9).toLocaleDateString()}`);
+    expect(caption.textContent).not.toMatch(/due back [^·]*\d{1,2}:\d{2}/);
+  });
+
   it('offers "Create PO" when the step is on no PO, with Send and Receive still there', () => {
     drawCard(outsideOp(), { purchaseOrder: null, createPoHref: '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1' });
     expect(screen.getByRole('link', { name: /create po/i })).toHaveAttribute(

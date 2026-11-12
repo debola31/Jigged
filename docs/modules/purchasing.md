@@ -873,11 +873,16 @@ name, a vendor with no address, 1,500 characters of terms, Rev 3 + CLOSED, TBC l
 without a logo) and M-1 / M-2 above. A mocked jsPDF cannot see overflow — the lesson of
 [outside-processing.md](outside-processing.md#the-document). The render checks ran on 2026-11-12
 against the real jsPDF, along with an RFQ of 30 lines and a slip carrying its PO number, and all
-pass. They found three layout faults, now fixed in the builders:
+pass. They found four layout faults, now fixed in the builders:
 - a long PO line split across a page break, its tail landing on the next page with no line
   number (both tables now keep a row whole);
 - the RFQ table ran into its footer (it now reserves the PO's bottom margin);
-- the RFQ's *Your part #* column broke a 13-character vendor number mid-token.
+- the RFQ's *Your part #* column broke a 13-character vendor number mid-token;
+- the shop's logo shrank with the meta column beside it. A PO with only its number and date
+  printed none, an RFQ with both dates printed it at 18pt, and a vendor slip with no due-back
+  date printed it at 4pt (that one is older than purchasing). With a logo, the column now
+  measures at least seven rows ([`metaColumnBottom`](../../utils/packingSlipPdf.ts)), which
+  leaves a three-line letterhead about 60pt.
 
 ---
 

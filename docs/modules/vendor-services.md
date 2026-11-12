@@ -2,7 +2,8 @@
 
 A **vendor service** is a process an outside vendor performs on your parts — anodize, heat treat,
 wire EDM. It is owned by the vendor that performs it. **Built; in production.**
-Depends on [Vendors](vendors.md). Consumed by [Routings](routings.md) and [Jobs](jobs.md).
+Depends on [Vendors](vendors.md). Consumed by [Routings](routings.md), [Jobs](jobs.md) and, since
+2026-11, [Purchasing](purchasing.md) — an outside PO line prices from it.
 
 > **This replaces "external work centers."** Until 2026-08-23 an outsourced process was a
 > `work_centers` row with `kind='external'` and a `vendor_id`. That is gone — the rows moved, and
@@ -81,6 +82,13 @@ adjacent fields with opposite semantics, on one screen, for a 50–60 year old u
 
 `create_job_part_operations_from_routing` snapshots the **effective** price, so a shipped job freezes
 what was actually charged rather than a NULL that later reads as "never priced".
+
+**A vendor service is what an outside PO line prices from (2026-11).** A vendor PO's *outside
+service* line for a job step defaults to the service's **current** `unit_price`, else the step's
+frozen price, and says *"Job costed at $X"* when the two differ — the job keeps what it was costed
+at, the PO pays what the vendor charges now. The line freezes `vendor_service_id` (SET NULL) and
+`service_name` at insert, so a later rename or archive never changes a PO; the vendor must be the
+one that performs the step ([purchasing.md](purchasing.md#anodize-on-a-job-operation-through-the-vps-slip)).
 
 ## The two hazards the split had to close
 
@@ -180,3 +188,4 @@ dict that silently routed a cost-bearing step into whichever vendor PostgREST re
 - [Work Centers](work-centers.md) — in-house capacity, and what this is *not*.
 - [Routings](routings.md) — how a step targets one or the other.
 - [Jobs](jobs.md#outside-external-vendor-operations) — the send/receive lifecycle.
+- [Purchasing](purchasing.md) — the vendor PO an outside step can be ordered on.

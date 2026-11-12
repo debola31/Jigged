@@ -41,7 +41,10 @@ Detailed specs live in [modules/](modules/).
 `operation_types` terminology history ·
 [vendors.md](modules/vendors.md) · [shipments.md](modules/shipments.md) ·
 [outside-processing.md](modules/outside-processing.md) — shipping parts out to a vendor and
-receiving them back; owns the quantity-derived outside-op status and the trigger-depth trap
+receiving them back; owns the quantity-derived outside-op status and the trigger-depth trap ·
+[purchasing.md](modules/purchasing.md) — vendor POs, receiving against them, the buy list,
+approved vendors and price sheets, RFQs, and the optional QuickBooks PO push; owns what the
+bookkeeper does differently
 
 **Shop floor:** [operator-view.md](modules/operator-view.md) — screens, quantity capture, the
 notes read-back loop, and the operator journeys ·

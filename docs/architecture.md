@@ -321,7 +321,9 @@ writing down:
 | Table(s) | Rule |
 |---|---|
 | `parts` | Company-wide, no `customer_id`. Absorbed the former `inventory_items`. |
-| `part_pricing_tiers` | **One tier ladder per part**, unique on `(part_id, quantity)`. Each break carries `cost_per_unit` (what a *bought* part costs us; NULL for made parts) and `markup_percent`. **Markup is the source of truth**; unit price derives live as `base_cost × (1 + markup/100)` — base cost from `cost_per_unit` for bought parts, from the routing/BOM rollup for made ones. Cost is a property of the **part**: `parts.preferred_vendor_id` is a supplier *label*, not a cost filter, and multi-vendor sheets / RFQ / POs are deferred to a future purchasing module. Bought costs lived in a separate `part_procurement_tiers` table with its own `min_quantity` ladder until 2026-09-06 — two ladders nothing kept aligned. |
+| `part_pricing_tiers` | **One tier ladder per part**, unique on `(part_id, quantity)`. Each break carries `cost_per_unit` (what a *bought* part costs us; NULL for made parts) and `markup_percent`. **Markup is the source of truth**; unit price derives live as `base_cost × (1 + markup/100)` — base cost from `cost_per_unit` for bought parts, from the routing/BOM rollup for made ones. Cost is a property of the **part**: `parts.preferred_vendor_id` is a supplier *label*, not a cost filter. Multi-vendor price sheets, RFQs and POs arrived 2026-11 as **purchasing** data, not cost ([purchasing.md](modules/purchasing.md)): the only purchasing writer of a tier is the explicit, previewed `apply_part_cost_from_vendor`. ⚠ *This row called them deferred to a future purchasing module.* Bought costs lived in a separate `part_procurement_tiers` table with its own `min_quantity` ladder until 2026-09-06 — two ladders nothing kept aligned. |
+| `purchasing_document_series` | Vendor PO (`PO-0001`) and RFQ (`RFQ-0001`) numbers — **not** `company_order_counters`. Minted inside the create RPC under a row lock: an existing number is skipped, none is ever reissued, a rollback consumes nothing. The PO prefix and next number are settable so a shop can continue its QuickBooks sequence, ≤ 11 characters in all (QuickBooks Desktop's `refNumber`). [purchasing.md](modules/purchasing.md#numbering) |
+| `vendor_purchase_orders`, `part_vendors`, `vendor_rfqs` and their children | The browser holds **SELECT only**; every write is a `SECURITY DEFINER` RPC that asserts an office role in its own body, because RLS has no role predicate. Statuses are derived in views, never stored. [purchasing.md](modules/purchasing.md#data-model) |
 | `routings`, `routing_operations` | 1:1 with parts (unique `part_id`); operations are a linear, sequence-ordered list. Materials are **not** routing-attached — they live on `parts_bom`. The old `routing_materials` table was removed. |
 | `parts_bom` | `(parent_part_id, child_part_id, quantity, unit)`; feeds `compute_part_cost_at_qty`. |
 | `quote_line_items` | Immutable snapshot of the selected `part_pricing_tiers` (`pricing_basis_snapshot`), with per-quote overrides via `is_quote_override`. |
@@ -646,10 +648,14 @@ customer-facing/financial documents; apply the standard above when closing them.
 
 **"Delete" = archive (soft-delete), universally.** Every user-facing entity —
 `parts`, `customers`, `customer_contacts`, `customer_carrier_accounts`, `vendors`,
-`work_centers`, `jobs`, `quotes` — carries a nullable `deleted_at timestamptz`. That
-list is not a maintained copy: it is exactly the set of tables with a `deleted_at`
-column in [`types/database.ts`](../types/database.ts) (re-derive with `grep -n deleted_at`),
-re-checked 2026-08-03. *(CLAUDE.md's copy named six, omitting the two customer children.)*
+`vendor_services`, `work_centers`, `jobs`, `quotes`, `material_lots`, `ai_chat_threads`,
+`chat_action_grants`, and purchasing's `part_vendors`, `vendor_purchase_orders` and
+`vendor_rfqs` — carries a nullable `deleted_at timestamptz`. That list is not a maintained copy:
+it is exactly the set of tables with a `deleted_at` column in
+[`types/database.ts`](../types/database.ts) (re-derive with `grep -n deleted_at`), re-checked
+2026-11-12. *(CLAUDE.md's copy named six, omitting the two customer children. ⚠ This list was
+re-checked last on 2026-08-03 and had since missed `vendor_services`, `material_lots` and the two
+chat tables — the claim "exactly the set" is only as good as its last re-check.)*
 The UI Delete action sets it instead of issuing a SQL `DELETE`, and **never blocks**:
 the row survives, so every downstream reference (quote lines, job parts, shipments,
 invoices, BOM edges) keeps resolving and no foreign key can trap the user.
@@ -722,6 +728,15 @@ archives like anything else, and money-record protection belongs only at a futur
 permanent-purge step. (One such guard is still live in the UI: #682, below.)
 Jobs keep an orthogonal `cancelled` **production** status (`cancelJob`/`reopenJob`)
 — a shop-floor outcome, not deletion.
+
+**Purchasing documents (2026-11) archive the same way, and their numbers survive them.** A vendor
+PO or RFQ archive is never blocked — a received, pushed PO included — and its number is never
+reissued (`UNIQUE (company_id, po_number)` is full). Its children — lines, receipts, invitations,
+responses — carry no `deleted_at` of their own and go with the parent; the AI's policies inherit the
+parent's filter. Archiving a PO **unlinks its outside slips and never calls QuickBooks**, where it
+stays open until closed there. An approved-vendor row (`part_vendors`) revives on its (part, vendor)
+key the way a name does; a receipt is **voided**, never archived — the `shipments` posture.
+[purchasing.md](modules/purchasing.md#data-model)
 
 **Deferred (not built in v1): restore UX & permanent purge.** v1 archives and
 retains; there is intentionally **no** Trash / Restore / Permanent-delete UI.

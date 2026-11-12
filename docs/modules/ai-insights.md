@@ -140,6 +140,25 @@ answer it. `ai_jobs` is worse: its `payload` carries the questions **other compa
 are blocked the same three ways, with `ai_call_write_leaks()` and `ai_job_write_leaks()` asserting
 the grant and policy layers on every CI run.
 
+**Purchasing (2026-11) is readable column by column, and some of its tables not at all**
+([`20261110043600`](../../supabase/migrations/20261110043600_purchasing_tables.sql) §13,
+[purchasing.md](purchasing.md#mcp-tools-and-the-insights-ai)). The PO, approved-vendor and RFQ
+headers go through `apply_ai_read_access` with column lists; their children through hand-written
+policies that inherit the parent's `deleted_at`. **Withheld everywhere:** actor columns, internal
+notes, contact and address snapshots, terms and conditions, notes and void reasons — no business
+question needs who signed for a delivery. The status views, `is_vendor_purchase_order_late()` and
+`vendor_po_line_amount()` are readable, so "late" and "open value" have one definition here too.
+**Exempt, each with its reason in `tenant_tables_missing_ai_decision()`:**
+`vendor_purchase_order_revisions` (a superseded price or quantity would be quoted as current),
+`purchasing_document_series` (numbering plumbing, the twin of `company_order_counters`), and the
+`quickbooks_*` purchasing tables (third-party ids beside the invoice links, and in `SENSITIVE_TABLES`).
+The views still say *in QuickBooks* or *out of date* through `quickbooks_purchase_order_state()`,
+`SECURITY DEFINER` and returning no QuickBooks id. The same migration granted
+`outside_shipments.closed_at`, which predated the column grant, so the model had been unable to tell
+a short-closed slip from one still at the vendor. Pinned by
+[`test_purchasing_access_and_guards.py`](../../api/tests/integration/test_purchasing_access_and_guards.py)
+§ M5.
+
 ### An answer that is a database error is not an answer
 
 **Added 2026-08-26, from the local-model A/B.** Every local arm reached its final turn holding
@@ -473,6 +492,11 @@ without it.
 
 For a **child table** (no `company_id`, scoped through a parent) the helper raises and you write
 both halves by hand in the same migration — see `customer_contacts`, or `shipment_line_items`.
+**A hand-written column grant narrows nothing until the table-wide `SELECT` is revoked first:** the
+baseline's default privileges give this role `SELECT` on every new public table, which supersedes a
+column list and silently makes it decorative. The helper does that revoke itself when given
+`p_columns`; by hand, `REVOKE SELECT ON TABLE … FROM jigged_ai_readonly` goes first, as the
+purchasing migration does for every table it creates.
 **A hand-written policy on a soft-deletable table must filter `deleted_at` itself, on both sides:**
 `customer_contacts` requires the contact to be live AND its customer to be live, or an archived
 contact of a live customer stays visible. `ai_policies_missing_soft_delete_filter()` fails CI if you

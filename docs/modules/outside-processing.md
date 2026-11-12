@@ -19,7 +19,13 @@ back.** Built 2026-09-03. Depends on [Vendor Services](vendor-services.md) and [
 | **Grain** | One shipment = ONE `job_operations` row + a quantity. An operation may have many — send 50 now, 50 next week. |
 | **Shipping is the send** | There is no state-only write left. `job_operations.status`/`sent_at`/`sent_by` are derived, and a hand-written one is **refused by a trigger**. |
 | **Quantities drive status** | Exactly as in-house completions do. This deliberately reversed the outside-op exemption in `compute_job_operation_status`. |
-| **No purchase orders** | The slip is the outside-work document, and it works with no accounting system connected — which the [purchase-order plan](jobs.md) could not. |
+| **The slip moves the parts; a PO only orders them** | The slip and its receipts are the only record of what went out and came back, and they work with no accounting system connected. Since 2026-11 a vendor PO may price and order the step — a native, Jigged-numbered document, its QuickBooks push optional — and the slip links to its line ([below](#the-vendor-po-line-a-slip-ships-against--2026-11)). |
+
+**Withdrawn 2026-11:** *"No purchase orders — the slip is the outside-work document, and it works
+with no accounting system connected, which the purchase-order plan could not"* — wrong on its own
+ground once the PO is Jigged's document, which needs no accounting system either
+([purchasing.md](purchasing.md#why-it-exists)). Only that ground fell: the slip is still the one
+record of movement, and nothing on a PO writes a slip or a receipt.
 
 **Why now rather than later.** Contour had **37 outside operations, every one `pending`, none ever
 sent**, while completing 36 in-house ones. Of those 37 exactly **one** was unblocked by its
@@ -37,7 +43,9 @@ convenience, the per-job slip counter reads it under an advisory lock), `vendor_
 (**ON DELETE RESTRICT**, like `vendor_services.vendor_id`), `vendor_address_id` /
 `vendor_contact_id` (SET NULL), the Document-Snapshot-Standard freeze `vendor_name`,
 `service_name`, `ship_to_address` jsonb, `ship_to_contact` jsonb, then `slip_number`, `quantity`,
-`shipped_at`, `due_back_on`, `carrier`, `notes`, `created_by`, `voided_at`/`voided_by`, timestamps.
+`shipped_at`, `due_back_on`, `carrier`, `notes`, `created_by`, `voided_at`/`voided_by`,
+`closed_at`/`closed_by` (the short-close, 2026-09-06), `vendor_purchase_order_line_id`
+([below](#the-vendor-po-line-a-slip-ships-against--2026-11)), timestamps.
 
 - **`shipped_at` is timestamptz; `due_back_on` is a date.** The first is an event the `/activity`
   feed sorts on and `job_operations.sent_at` mirrors exactly; the second is a *promise*, the same
@@ -54,16 +62,41 @@ convenience, the per-job slip counter reads it under an advisory lock), `vendor_
 ### `outside_shipment_receipts` — what came back
 
 `id`, `company_id`, `outside_shipment_id` **NOT NULL**, `job_operation_id`, `job_part_id`,
-`quantity_good`, `quantity_scrapped`, `received_at`, `received_by`, `note`, `voided_at`/`voided_by`,
-timestamps. Append-only: corrections are a void plus a new row, which is why `authenticated` holds
-an UPDATE grant on `voided_at`/`voided_by` **and no other column**.
+`quantity_good`, `received_at`, `received_by`, `note`, `voided_at`/`voided_by`, timestamps.
+Append-only: corrections are a void plus a new row, which is why `authenticated` holds an UPDATE
+grant on `voided_at`/`voided_by` **and no other column**.
 
-- Each quantity is `>= 0`, **not `> 0`**, with `good + scrapped > 0`. A vendor that ruined the whole
-  lot returns `(good 0, scrapped 50)` — which `job_op_completions_quantity_positive` makes
-  unrepresentable, and which is one of the reasons receipts are not that table.
+- **Good-only, `quantity_good > 0`**, like its in-house sibling. A short return is settled by
+  **short-closing the slip** (`outside_shipments.closed_at`, *"that is everything we are getting"*)
+  — Sage's short-close, Oracle's quantity-cancelled — which retires what is outstanding without
+  counting toward good. ⚠ *Until [`20260906005725`](../../supabase/migrations/20260906005725_short_close_outside_shipment.sql)
+  a receipt also carried `quantity_scrapped`, each `>= 0` with `good + scrapped > 0`, so a vendor that
+  ruined the lot returned `(good 0, scrapped 50)`; that case is now a close with no receipt at all.*
 - One **composite FK** `(outside_shipment_id, company_id, job_operation_id, job_part_id)` makes a
   receipt whose denormalized ids disagree with its shipment *unrepresentable*, rather than a rule
   three future queries have to remember.
+
+### The vendor PO line a slip ships against — 2026-11
+
+`outside_shipments.vendor_purchase_order_line_id` (SET NULL) names the *outside service* line of a
+[vendor PO](purchasing.md#outside-processing-one-source-of-truth-for-received) the slip ships
+against. The PO is an optional commercial layer; **the line's sent, at-vendor and received figures
+are read off its linked slips**, and an outside receipt cannot be represented on the PO at all.
+
+| Rule | How |
+|---|---|
+| One open outside line per (operation, vendor) | Enforced by the PO writers, re-checked on reopen |
+| A slip links itself | `create_outside_shipment` links the single eligible line — draft or sent, not closed, not archived, same operation and vendor. **It takes no PO argument and no office check**: operators send, and the link happens anyway |
+| A line links its slips | Inserting an outside line links that step's existing live, unlinked slips for the vendor |
+| A person can correct it | `set_outside_shipment_vendor_purchase_order_line`, office-only relink or unlink |
+| A link goes | When the PO is archived or the line removed |
+| A wrong link is unrepresentable | A BEFORE trigger refuses a line of another company, kind, operation or vendor — 23514, the service role included |
+| **Linking changes no status** | The column is in no status trigger's `UPDATE OF` list, so it fires nothing in the cascade and cannot reach [the trap below](#the-write-surface-and-why-it-is-shaped-this-way) |
+
+**Closing the slip short and closing the PO line are independent**; the receive dialog's unticked
+*"Also close PO-1042 line 2 — nothing more expected"* is the one place they meet. The PO side — the
+send dialog's *"Ships against PO-1042 line 2"*, `PO: …` on the slip, the drawer's PO number — is
+listed in [purchasing.md](purchasing.md#screens).
 
 ### Why receipts are not `job_operation_completions` rows
 
@@ -78,8 +111,9 @@ a door that has to stay shut, with no column-list escape (the objection is to `c
 *internal* rows). Here the two tables are **readable, column-scoped**, with the actor columns
 withheld: no business question needs the name of the person who signed for a box.
 
-Three supporting reasons: the all-scrap case above; *"a receipt must reference a shipment"* is a
-`NOT NULL` here and would have been a trigger there; and the client-side guards in
+Two supporting reasons — a third, the all-scrap receipt, went with `quantity_scrapped` on
+2026-09-06: *"a receipt must reference a shipment"* is a `NOT NULL` here and would have been a
+trigger there; and the client-side guards in
 `createOperationCompletion` and `completeJobOperation` stay unconditionally true instead of gaining
 an *"unless `capture_source='vendor_receipt'`"* clause that a plain PostgREST insert could sidestep.
 
@@ -92,15 +126,18 @@ an *"unless `capture_source='vendor_receipt'`"* clause that a plain PostgREST in
 in-house arm byte-identical:
 
 ```
-v_sent = SUM(live outside_shipments.quantity)
-v_good = SUM(live receipts.quantity_good)
-v_back = SUM(live receipts.quantity_good + quantity_scrapped)
+v_good        = SUM(live receipts.quantity_good)
+v_outstanding = SUM over live slips: 0 if the slip is closed, else max(0, its quantity − its live good)
 
 v_good >= job_parts.quantity  -> 'completed'    ← tested FIRST, deliberately
-v_sent - v_back > 0           -> 'sent'         ← pieces are physically at the vendor
+v_outstanding > 0             -> 'sent'         ← pieces are physically at the vendor
 v_good > 0                    -> 'in_progress'
                               -> 'pending'
 ```
+
+⚠ *Rebuilt 2026-09-06 ([`20260906005725`](../../supabase/migrations/20260906005725_short_close_outside_shipment.sql)):
+outstanding is counted **per slip**, because a short-closed slip owes nothing however much came back
+on it — which a company-wide `v_sent − v_back`, with `v_back = good + scrapped`, could not express.*
 
 **Completed is tested first and the order is load-bearing.** Send 120 for a 100-piece order, get 100
 good back and 20 never returned: the op is done, and testing outstanding first would hold it at
@@ -110,14 +147,14 @@ good back and 20 never returned: the op is done, and testing outstanding first w
 
 | | |
 |---|---|
-| 100 out, 98 good + 2 **scrapped** | Outstanding 0, so nothing is at the plater; `98 < 100`, so → **`in_progress`**. Exactly what an in-house op says at 98 good of 100. Resolutions that already exist: re-run and send a second shipment, drop `job_parts.quantity` to 98 (the part-quantity trigger derives `completed`), or cancel the part. **There is no close-out flag** — a second mechanism for a fact the quantities carry would eventually disagree with them. |
-| 100 out, 98 good, **0 scrapped** | Outstanding 2 → stays **`sent`**. As far as the shop knows, 2 pieces are on someone's rack. Booking them as scrapped is a decision a person takes. |
+| 100 out, 98 good, slip **closed short** | Outstanding 0, so nothing is at the plater; `98 < 100`, so → **`in_progress`**. Exactly what an in-house op says at 98 good of 100. Resolutions that already exist: re-run and send a second shipment, drop `job_parts.quantity` to 98 (the part-quantity trigger derives `completed`), or cancel the part. **Withdrawn:** *"there is no close-out flag — a second mechanism for a fact the quantities carry would eventually disagree with them"* — wrong because the close (2026-09-06) **replaced** the scrap quantity rather than joining it, so there is still one mechanism. |
+| 100 out, 98 good, slip **left open** | Outstanding 2 → stays **`sent`**. As far as the shop knows, 2 pieces are on someone's rack. Closing the slip short is a decision a person takes. |
 | A part-quantity edit | **The 2026-08-23 hazard is closed by construction, not by a guard.** The exemption existed because `recompute_job_ops_status_from_part_qty()` runs the status function over every op on the part and a `sent` op reset to `pending`. The outside arm reads shipments and receipts; a quantity edit writes neither. `sent_at` survives for the same reason — it is a mirror, not the record. |
 
 ### "How many still have to go out" is not `ordered − sent`
 
 `qty_to_send` is **`ordered − good − at_vendor`**, and the difference matters the first time a
-vendor scraps something. Send 12, get 10 good and 2 scrapped: `ordered − sent` says **0** while the
+vendor comes back short. Send 12, get 10 good and close the slip: `ordered − sent` says **0** while the
 job is still two parts short, so the shop is offered a dead button and no way to act. The pieces the
 vendor ruined have to be re-run and sent again, so they reappear in what is left to send.
 
@@ -231,7 +268,7 @@ between AND and OR.
 |---|---|
 | **Office op card** ([`OperationCard`](../../components/jobs/OperationCard.tsx)) | `Send to {vendor}` (outlined/warning — the sanctioned exception named in `interactionStandardsCheck.ts`) and `Receive {n}` (contained/**primary**, never green). **Gated on quantities, not status**: an op with 50 out and 50 in the shop offers BOTH, which is what makes send-50-now-50-later reachable. **Slip history is not on the card** — it lives on the job's [activity rail](jobs.md#job-detail--dashboardcompanyidjobsid) as `sent` / `received` / `short_closed` rows, each carrying its `VPS-` number. |
 | **Send / receive dialogs** | Prefilled to state their own outcome. Over-send **warns, never blocks**. Due back is **empty by default** — no lead-time data exists, and an invented promise on a printed document is worse than a blank line. |
-| **Operator step screen** | One tap survives and gains a fact: the button reads `SEND 50 TO PROFINISH`, the same move the page already makes with `RECORD n FINISHED`. Scrap is **progressively disclosed** — two prefilled numeric fields side by side on a one-handed phone is the shape that gets fat-fingered. |
+| **Operator step screen** | One tap survives and gains a fact: the button reads `SEND 50 TO PROFINISH`, the same move the page already makes with `RECORD n FINISHED`. A short return is closed with one tick, offered only when fewer come back than are out. ⚠ *This was a progressively disclosed scrap field until scrap left the receipt, 2026-09-06.* |
 | **Slip preview** | Reprint, download, print — and **Void, which lives here and nowhere else**, so the destructive action is only reachable once the document is on screen. |
 | **Jobs-page strip** ([`OutsideWorkStrip`](../../components/jobs/OutsideWorkStrip.tsx)) | Renders **only while something is at a vendor** — so on the days nothing is out, most days for a shop with three outside steps, the Jobs page is exactly what it was. Costs no query: every number comes from the outside queue the page already loads for its At-vendor chip. |
 | **Outside-work drawer** ([`OutsideWorkDrawer`](../../components/jobs/OutsideWorkDrawer.tsx)) | Opened by the strip. Grouped **by vendor**, oldest first, because "what has PerformCoat got?" is how the question is actually asked. Each row is the job number as **one link** — deep-linking to `?op=` on the job — plus **Receive**. Loaded on open, not with the page. |
@@ -298,7 +335,7 @@ leaves the document in bold 11 and `splitTextToSize` wraps against whatever is c
 
 | Layer | File | What it pins |
 |---|---|---|
-| DB / RLS / triggers | [`test_outside_processing.py`](../../api/tests/integration/test_outside_processing.py) | The derivation walk, the 98-of-100 case, scrap vs never-returned, **the void cascade reaching the JOB** (the trigger-depth trap), slip-number reuse, the guard trigger, the composite FK, cross-tenant |
+| DB / RLS / triggers | [`test_outside_processing.py`](../../api/tests/integration/test_outside_processing.py) | The derivation walk, the 98-of-100 case, closed short vs never returned, **the void cascade reaching the JOB** (the trigger-depth trap), slip-number reuse, the guard trigger, the composite FK, cross-tenant |
 | The closed hazard | [`test_vendor_services_split_hazards.py`](../../api/tests/integration/test_vendor_services_split_hazards.py) | A part-quantity edit cannot reach the send — now via a real shipment |
 | Access | [`outsideShipmentsAccess.test.ts`](../../__tests__/utils/outsideShipmentsAccess.test.ts) | Ledger arithmetic and its 2dp re-rounding, point-in-time backlog, instant-not-text ordering, the refusal to guess a ship-to |
 | Document | [`outsideShipmentPdf.test.ts`](../../__tests__/utils/outsideShipmentPdf.test.ts) | Ordering, argument values and font state — the three things that survive a mocked jsPDF |

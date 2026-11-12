@@ -817,7 +817,7 @@ itself. As-built, verified 2026-08-03:
 | Pattern | Entities | Shape |
 |---|---|---|
 | **A — Reference entity** | Customers, Vendors | Back + Edit/Delete row → **title card** (name + identity chips inline on one row) → `<Grid container>` of two `size={{ xs: 12, md: 6 }}` cards, both `sx={{ height: '100%' }}` so their bottoms align → optional full-width footer. |
-| **B — Workflow / document entity** | Jobs, Quotes | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
+| **B — Workflow / document entity** | Jobs, Quotes, Vendor POs, RFQs *(the last two 2026-11, [purchasing.md](modules/purchasing.md#screens))* | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
 | **C — Maturity-adaptive workspace** | Parts | Sticky identity header + URL-addressable tabs (`?tab=`), edited in place with auto-save on blur; no Edit mode, no `/parts/{id}/edit` route. Owned by [`modules/parts.md` § "Part detail workspace"](modules/parts.md). |
 
 *(Corrections 2026-08-03: this doc put **Parts** and **Work Centers** under Pattern A. Parts became

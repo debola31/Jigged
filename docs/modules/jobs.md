@@ -233,8 +233,13 @@ how job-shop ERPs handle purchased/COTS items (JobBOSS "buy-to-job", ProShop COT
 the same order-to-ship document, it just skips manufacturing. On a legacy **mixed** job the bought
 parts show production-complete while the made parts run their routings; quote conversion no longer
 produces one, since each part becomes its own job.
-**Gap:** no "received from vendor" step — a bought part is shippable immediately. A purchasing
-module would add one.
+**No "received from vendor" gate — by decision, 2026-11.** A vendor PO can be raised for a bought
+part ([purchasing.md](purchasing.md)) and the job shows it — *"Bought · PO-1042 (Acme) · 40 of 100
+received"* on the part's line, a *Vendor POs* row in the details card — but a receipt leaves the
+part's production status alone, so it is still shippable immediately. Bought parts still to ship
+count as demand on the To buy list, because they read `completed` from creation. ⚠ *This line
+called the missing step a gap "a purchasing module would add"; the purchasing module decided
+against it — a gate would block shipping on paperwork.*
 
 ---
 
@@ -569,18 +574,19 @@ heat-treat). It is a first-class routing step, not paperwork.
 | Reading | When |
 |---|---|
 | `completed` | received good ≥ `job_parts.quantity`. **Tested first**, so 120 sent / 100 good back / 20 never returned is done, not held open over 20 pieces nobody wants |
-| `sent` | live shipment quantity exceeds received good-plus-scrapped — i.e. pieces are physically at a vendor |
-| `in_progress` | everything that went out has come back and it was not enough (98 good + 2 scrapped of 100) |
+| `sent` | a live slip still owes pieces — its quantity less the good back, counted per slip, a short-closed slip owing nothing — i.e. pieces are physically at a vendor |
+| `in_progress` | everything that went out has come back or been closed short, and it was not enough (98 good of 100, slip closed) |
 | `pending` | nothing has gone out |
 
 - **An operation may have MANY shipments.** Send 50 now, 50 next week; each mints its own
   `VPS-{jobBase}-{n}` slip. That is the whole reason the quantity picker exists.
-- **`quantity_scrapped` is separate from `quantity_good` and both are needed.** Together they
-  retire the vendor's outstanding balance, so the step stops reading "at the vendor". Only `good`
-  counts toward the step being done. 98 + 2 of 100 therefore closes the slip and leaves the op
-  `in_progress` — the same answer an in-house op gives at 98 good. **There is deliberately no
-  "close this out" flag**: it would be a second mechanism for a fact these two numbers already
-  carry, and the two would eventually disagree.
+- **A short return is a close, not a scrap number** (2026-09-06). Short-closing the slip retires
+  what it still owes, so the step stops reading "at the vendor"; only `good` counts toward done.
+  98 good of 100, closed, leaves the op `in_progress` — the same answer an in-house op gives at 98
+  good. ⚠ *This bullet argued for a `quantity_scrapped` beside `quantity_good` and against any
+  "close this out" flag, as a second mechanism that would disagree with them. The close replaced
+  the scrap number rather than joining it, so there is still one mechanism
+  ([outside-processing.md](outside-processing.md#status-derivation)).*
 - **Undo steps back one MOVEMENT** — the newest live receipt, else the newest live shipment. Never
   both, never skipped.
 - Never completable through the internal path (`completeJobOperation` / `createOperationCompletion`
@@ -609,12 +615,13 @@ where in-house steps show setup·cycle).
 > vendor, whose rows deep-link to `?op=` on the job so acting is one click rather than a hunt.
 > `getOutsideOpsForCompany` survives — it backs all of the above.
 >
-> **Still true after 2026-09-03, and worth saying because that change adds a cross-job page.**
-> `/dashboard/{companyId}/outside-work` lists SLIPS, not operations, and is read-and-reprint only:
-> send, receive and undo stay exclusively on the operation, and Void is reachable only inside a
-> slip's own preview. The deleted tab's liability was a second place to **act** on the same row;
-> a numbered, printable, voidable document is a thing an operation row cannot represent at all,
-> which is why the register is not a re-litigation of that decision.
+> **⚠ Corrected 2026-11 — there is no `/outside-work` page.** This paragraph defended a cross-job
+> slip register at `/dashboard/{companyId}/outside-work`, read-and-reprint only. It was deleted
+> 2026-09-05 (`a85e6806`) for a strip on the Jobs page that renders only while something is out and
+> a drawer grouped by vendor ([outside-processing.md](outside-processing.md#surfaces)) — and the
+> drawer **receives**, because a truck from the plater with three boxes for three jobs is one
+> place's job. Send and undo stay on the operation and Void inside a slip's preview, so the deleted
+> tab's argument still holds for those: a second place to **act** on the same row is a liability.
 
 **Audit:** send/receive are **not** written as notes — the `outside_shipments` and
 `outside_shipment_receipts` rows *are* the record, and `sent_at`/`completed_at` mirror them. The **/activity** feed derives vendor-tagged
@@ -631,9 +638,12 @@ it.
 
 **Deferred:** vendor lead-time → due-date math, per-op cost actuals, and scheduling.
 *(⚠ Two items left this list on 2026-09-03. **Partial/split sends** shipped — that is what the
-whole outside-processing module is. **PO generation** was not deferred but* dropped: *the slip is
-the outside-work document, and it works with no accounting system connected, which the purchase-
-order plan could not.)*
+whole outside-processing module is. **PO generation** was then dropped — "the slip is the
+outside-work document, and it works with no accounting system connected, which the purchase-order
+plan could not" — and **came back 2026-11 on that same ground**: a Jigged-numbered vendor PO needs
+no accounting system either. An outside step's* Create PO *opens a prefilled outside-service line
+and its slips link to it, while the slip stays the record of movement
+([purchasing.md](purchasing.md#anodize-on-a-job-operation-through-the-vps-slip)).)*
 
 ---
 

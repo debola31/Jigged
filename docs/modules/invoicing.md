@@ -12,6 +12,10 @@ state — is [quickbooks-desktop.md](quickbooks-desktop.md). See also
 [quickbooks integration](../../CLAUDE.md) provenance, [jobs](jobs.md), and
 [shipments](shipments.md).
 
+**Vendor purchase orders go the other way, through the same machinery** (2026-11): Jigged's PO is
+pushed for the bookkeeper to bill against, with this page's claim, request-id and four-state link —
+[purchasing.md](purchasing.md#quickbooks-push).
+
 ## Model: many invoices per job, billed by quantity
 
 A job has **many** invoices (progressive billing), independent of shipments — a job might
@@ -187,7 +191,8 @@ owner can predict, since the exception turned on state they cannot see.
 
 **Switching companies on purpose still works: Disconnect, then connect.** That path deletes the
 connection row, which is exactly what makes it safe — every stale realm-specific setting goes with
-it — and `revoke_token` never raises, so it cannot get stuck. The one comparison that is skipped is
+it, the purchasing setup included since 2026-11 — and `revoke_token` never raises, so it cannot get
+stuck. The one comparison that is skipped is
 a stored row from the *other* Intuit environment: a sandbox row while running production is stale by
 definition, not a company to protect, so it never blocks a fresh connection.
 

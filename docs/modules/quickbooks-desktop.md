@@ -1,8 +1,9 @@
 # QuickBooks Desktop
 
-How Jigged pushes invoices into a **locally installed** QuickBooks Desktop, via
-[Conductor](https://conductor.is). The companion to [invoicing.md](invoicing.md), which owns the
-billing model itself — this doc owns only what is different about Desktop.
+How Jigged pushes invoices — and, since 2026-11, vendor purchase orders — into a **locally
+installed** QuickBooks Desktop, via [Conductor](https://conductor.is). The companion to
+[invoicing.md](invoicing.md), which owns the billing model, and to [purchasing.md](purchasing.md),
+which owns the PO push — this doc owns only what is different about Desktop.
 
 **A company connects EITHER QuickBooks Online OR QuickBooks Desktop, never both.** That is a
 database invariant (`assert_single_accounting_provider()`, a BEFORE INSERT trigger on both
@@ -191,6 +192,61 @@ whatever term is chosen at push time.
 
 ---
 
+## Purchase orders
+
+**Added 2026-11.** The push, its state machine and its error map are one implementation for both
+providers ([purchasing.md](purchasing.md#quickbooks-push)); what differs on Desktop is below.
+**What Jigged may change in QuickBooks is only the POs it sent there** — the integration card says
+*"Jigged never deletes anything in QuickBooks, and changes only the POs it sent there"*, replacing
+"never changes anything", which an Update made untrue.
+
+| | Desktop | Why |
+|---|---|---|
+| PO number | **Jigged sends its own as `refNumber` — the opposite of invoices**, which QuickBooks numbers | The vendor holds a document with Jigged's number; the QuickBooks PO has to match it. A duplicate is still accepted silently, hence the bookkeeper's [numbering advice](purchasing.md#what-the-bookkeeper-does-differently) |
+| 11 characters | `refNumber`'s limit, so it is the PO number's CHECK and the numbering settings' cap | A longer number could never be sent. The push's `qbd_po_number_too_long` is a defensive second check; the column already holds every number to 11 |
+| Notes to vendor | `vendorMessage` — **prints**, 99 characters, cut with "…" | The PDF carries the full text |
+| `Jigged PO-1042 Rev 2 · link` | `memo` — **does not print**, 4,095 characters | The **names are the opposite of Online's**, where `Memo` prints and `PrivateNote` does not |
+| Lines | `rate`, never `amount`; quantity and rate in the purchase unit | As for invoices: Conductor ignores `rate` when `amount` is sent |
+| Need-by | `expectedDate` | Online has no field for it — its `DueDate` means payment due |
+| Ship method | matched by name, **never created** | A typo in *ship via* would become a permanent entry in the company file |
+| Ship-to | cut to QuickBooks' caps (lines 41, city 31, state 21, postal code 13, country 31), with a warning | An address is a label, so it is cut; a vendor name is an identity, so it is refused |
+| AP account | none — Desktop POs carry no accounts-payable account | |
+
+**Items:** a **one-way non-inventory item** posting to an expense, cost-of-goods-sold or other-expense
+account — one general purchases item by default, all three line kinds on it, the founder's *"1
+general thing"* ([purchasing.md](purchasing.md#decisions)). A name is 31 characters at most, with
+no colon. Item names are unique across **every** item type, so both the non-inventory and service
+lists are searched, and a same-named item is reused **only** when it already posts to the chosen
+account — the invoice path's lookup reuses by name alone. POs exist only while *Inventory and
+purchase orders are active* is on (Edit → Preferences → Items & Inventory); **Check QuickBooks**
+reads `purchasesAndVendors.isUsingInventory`. Custom numbering is not a question here: Desktop always
+takes the `refNumber`.
+
+**The read before the write.** Update, close and reopen read the PO once, by id, inside the click:
+`revisionNumber`, the line ids, and each line's received and billed state. Sending `lines` replaces
+them all, so existing ids are kept and a new line is `-1`. `isManuallyClosed` exists on **update
+only** — a create cannot close — at header and line level, and **cannot return to false once the PO
+is received in full**, which is `qb_cannot_reopen`. A QuickBooks line Jigged never sent, or a received
+or billed line the edit would remove or shrink, refuses the push with nothing written.
+
+**Recovery is the invoice path's, for a PO:** no idempotency key, so a create that times out is an
+unknown outcome, **probed once** — `vendorIds` plus a one-day `transactionDate` window, matched on
+`externalId` client-side, never `refNumbers` or `ids`, whose miss fails the request — then adopted or
+parked `needs_verification` with one `capture_message`, and **never retried automatically**. It blocks
+only that PO; **Check again** is the way out. An update whose outcome is unknown is read back: the
+token unchanged means it did not land (released, and a retry is safe — an update cannot duplicate);
+moved with every line as sent means it did (adopted); anything else waits for a person.
+
+**Disconnecting clears the purchasing setup** (its rows hang off the connection row
+`ON DELETE CASCADE`), and the Disconnect dialog says so; the vendor map is kept, like the customer
+map.
+
+**Unverified until manual check M-2 on a sample company file:** the stale-revision code (`3200` in the
+qbXML SDK), the "not found" shape of a deleted PO, which edits a received line refuses, and whether
+`vendorMessage` prints while `memo` does not.
+
+---
+
 ## Scope
 
 **v1 targets a locally installed QuickBooks Desktop.** Nothing server-side assumes that — the payload
@@ -264,6 +320,8 @@ company file.
 | Provider seam (protocol + both adapters) | [api/services/accounting/](../../api/services/accounting) |
 | Connection lifecycle and terms refresh | [api/routes/quickbooks_desktop_routes.py](../../api/routes/quickbooks_desktop_routes.py) |
 | Invoice push, including customer resolution (shared with QBO) | [api/routes/quickbooks_routes.py](../../api/routes/quickbooks_routes.py) |
+| Vendor PO push and purchasing setup (shared with QBO) | [api/routes/quickbooks_purchasing_routes.py](../../api/routes/quickbooks_purchasing_routes.py) |
+| Vendor PO payload, items, vendors and the recovery probe | [api/services/quickbooks_desktop_purchasing.py](../../api/services/quickbooks_desktop_purchasing.py) |
 | Schema | [20260816043137_quickbooks_desktop_provider.sql](../../supabase/migrations/20260816043137_quickbooks_desktop_provider.sql) |
 | Settings UI | [QuickBooksIntegrationCard.tsx](../../components/settings/QuickBooksIntegrationCard.tsx) |
 | Frontend client | [utils/quickbooksDesktop.ts](../../utils/quickbooksDesktop.ts) |

@@ -42,6 +42,12 @@ vi.mock('jspdf-autotable', () => ({ default: autoTableFn }));
 // packingSlipPdf reaches lib/supabase at module load, which builds a real
 // browser client. supabase: null below means the logo path never calls it.
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}), createClient: () => ({}) }));
+// Where a test needs a logo it sets logo.url; the fetch itself is packingSlipPdf's business.
+const logo = vi.hoisted(() => ({ url: null as string | null }));
+vi.mock('@/utils/packingSlipPdf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/packingSlipPdf')>()),
+  loadLogoAsDataUrl: vi.fn(async () => logo.url),
+}));
 
 import {
   generateOutsideShipmentPdf,
@@ -103,6 +109,7 @@ const drawn = () => doc.text.mock.calls.map((c) => String(c[0]));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  logo.url = null;
   // Pass-through by default, which is what the real splitTextToSize does for a
   // string that fits. Returning a placeholder instead would make every
   // assertion about drawn address text read 'wrapped'.
@@ -160,6 +167,20 @@ describe('generateOutsideShipmentPdf — what the vendor reads', () => {
       shipment: slip({ due_back_on: null }), company, sentBefore: 0, supabase: null,
     });
     expect(drawn().some((s) => s.startsWith('Due Back:'))).toBe(false);
+  });
+
+  it('prints the logo at a real size on a slip with no due-back date and no PO', async () => {
+    // Slip #, Ship Date and Job: three meta lines left a three-line letterhead a 4pt logo.
+    logo.url = 'data:image/png;base64,AAAA';
+    await generateOutsideShipmentPdf({
+      shipment: slip({ due_back_on: null }),
+      company: { ...company, logo_url: 'logo.png' },
+      sentBefore: 0,
+      supabase: null,
+    });
+    const firstImage = doc.addImage.mock.calls[0];
+    expect(firstImage).toBeDefined();
+    expect(Number(firstImage[5])).toBeGreaterThanOrEqual(40);
   });
 
   it('banners a voided slip as PARTS NOT SENT, before the table is drawn', async () => {

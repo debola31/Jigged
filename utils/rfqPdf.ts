@@ -39,6 +39,7 @@ import {
   drawShopHeaderBlock,
   formatDate,
   loadLogoAsDataUrl,
+  metaColumnBottom,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
 
@@ -163,9 +164,10 @@ export async function generateRfqPdf(ctx: RfqPdfContext): Promise<jsPDF> {
   const metaLines: string[] = [`RFQ #: ${rfq.header.rfqNumber}`, `Date: ${formatDate(rfq.header.createdAt)}`];
   if (rfq.header.respondByOn) metaLines.push(`Respond by: ${formatDate(rfq.header.respondByOn)}`);
   if (rfq.header.neededByOn) metaLines.push(`Needed by: ${formatDate(rfq.header.neededByOn)}`);
-  const metaBlockBottom = headerTop + 20 + metaLines.length * 14;
-
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  // 2 to 4 meta lines; with a logo the column measures a floor of rows (see metaColumnBottom).
+  const metaBlockBottom = metaColumnBottom(headerTop, metaLines.length, logoDataUrl !== null);
+
   const shopBlockBottom = drawShopHeaderBlock(doc, {
     company,
     logoDataUrl,

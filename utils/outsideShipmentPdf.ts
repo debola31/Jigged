@@ -37,6 +37,7 @@ import {
   drawShopHeaderBlock,
   formatDate,
   loadLogoAsDataUrl,
+  metaColumnBottom,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
 
@@ -97,9 +98,11 @@ export async function generateOutsideShipmentPdf(
   // the PO is archived. To the plater it is simply "our PO": the number their invoice should quote.
   const poNumber = outsideShipmentPoNumber(shipment);
   if (poNumber) metaLines.push(`PO: ${poNumber}`);
-  const metaBlockBottom = headerTop + 20 + metaLines.length * 14;
-
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  // 3 to 5 meta lines; with a logo the column measures a floor of rows, or a slip with no due-back
+  // date and no PO would print the shop's logo as a 4pt speck (see metaColumnBottom).
+  const metaBlockBottom = metaColumnBottom(headerTop, metaLines.length, logoDataUrl !== null);
+
   const shopBlockBottom = drawShopHeaderBlock(doc, {
     company,
     logoDataUrl,

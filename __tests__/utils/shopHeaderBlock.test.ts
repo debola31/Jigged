@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 
-import { drawShopHeaderBlock } from '@/utils/packingSlipPdf';
+import { drawShopHeaderBlock, META_ROWS_FOR_A_LOGO, metaColumnBottom } from '@/utils/packingSlipPdf';
 import type { Company } from '@/utils/companyAccess';
 
 /**
@@ -229,5 +229,38 @@ describe('drawShopHeaderBlock — it never breaks a document', () => {
       }),
     ).not.toThrow();
     expect(drawn(t)).toEqual(['Bare Shop']);
+  });
+});
+
+/**
+ * The vendor documents' meta column varies with their optional fields (the PO 2 to 6 lines, the RFQ
+ * 2 to 4, the vendor slip 3 to 5), so "the space the header already has" could be nothing. With a
+ * logo the column is measured as a floor of rows; without one it keeps its own height.
+ */
+describe('metaColumnBottom — a short meta column still leaves the logo room', () => {
+  it('measures the column as it is when there is no logo, so a sparse document gains no blank band', () => {
+    expect(metaColumnBottom(40, 2, false)).toBe(40 + 20 + 2 * 14);
+    expect(metaColumnBottom(40, 6, false)).toBe(40 + 20 + 6 * 14);
+  });
+
+  it('measures at least META_ROWS_FOR_A_LOGO rows when there is a logo, and a longer column as it is', () => {
+    expect(metaColumnBottom(40, 2, true)).toBe(40 + 20 + META_ROWS_FOR_A_LOGO * 14);
+    expect(metaColumnBottom(40, META_ROWS_FOR_A_LOGO + 2, true)).toBe(40 + 20 + (META_ROWS_FOR_A_LOGO + 2) * 14);
+  });
+
+  it("draws a real logo over two meta lines, where the column's own height drew none", () => {
+    const before = target();
+    drawShopHeaderBlock(before.doc, {
+      company, logoDataUrl: 'data:image/png;base64,x', logoIncludesName: false,
+      x: 40, y: 40, availableBottom: 40 + 20 + 2 * 14,
+    });
+    expect(before.addImage).not.toHaveBeenCalled();
+
+    const after = target();
+    drawShopHeaderBlock(after.doc, {
+      company, logoDataUrl: 'data:image/png;base64,x', logoIncludesName: false,
+      x: 40, y: 40, availableBottom: metaColumnBottom(40, 2, true),
+    });
+    expect(logo(after).h).toBeGreaterThanOrEqual(40);
   });
 });

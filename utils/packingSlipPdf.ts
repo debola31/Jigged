@@ -331,6 +331,28 @@ const SHOP_LOGO_MAX_W = 190;
 const SHOP_LINE_H = 12;
 const SHOP_NAME_H = 16;
 
+/**
+ * The fewest rows a 14pt meta column measures when its header has a logo to draw.
+ *
+ * The logo gets what the right column leaves (see `ShopHeaderOptions.availableBottom`), and the
+ * vendor documents' right column varies with their optional fields: the PO prints 2 to 6 lines,
+ * the RFQ 2 to 4, the vendor slip 3 to 5. At two lines a three-line letterhead left the logo
+ * nothing, so it vanished; at three, a 4pt speck. Seven rows leave that letterhead a logo of about
+ * 60pt, near the cap, and a five-line one 36pt. Without a logo the column keeps its own height, so
+ * a sparse document gains no blank band above its parties.
+ */
+export const META_ROWS_FOR_A_LOGO = 7;
+
+/**
+ * Where a meta column of `lineCount` 14pt lines, starting 20pt below `top`, ends: at least
+ * `META_ROWS_FOR_A_LOGO` rows down when there is a logo. The vendor PO, the RFQ and the vendor slip
+ * hand it to `drawShopHeaderBlock` as `availableBottom`.
+ */
+export function metaColumnBottom(top: number, lineCount: number, hasLogo: boolean): number {
+  const rows = hasLogo ? Math.max(lineCount, META_ROWS_FOR_A_LOGO) : lineCount;
+  return top + 20 + rows * 14;
+}
+
 export interface ShopHeaderOptions {
   company: Company;
   /** Already-resolved logo image, or null. */

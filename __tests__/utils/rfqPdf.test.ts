@@ -43,6 +43,12 @@ vi.mock('jspdf', () => ({ jsPDF: jsPDFCtor }));
 vi.mock('jspdf-autotable', () => ({ default: autoTableFn }));
 // packingSlipPdf reaches lib/supabase at module load; supabase: null below keeps the logo path inert.
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}), createClient: () => ({}) }));
+// The logo fetch is the slip's business (tested there); here only its result matters.
+const logo = vi.hoisted(() => ({ url: null as string | null }));
+vi.mock('@/utils/packingSlipPdf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/packingSlipPdf')>()),
+  loadLogoAsDataUrl: vi.fn(async () => logo.url),
+}));
 
 import { generateRfqPdf, rfqEmailHref, rfqPdfFilename, RFQ_QUOTE_REQUEST } from '@/utils/rfqPdf';
 import type { RfqPdfContext } from '@/utils/rfqPdf';
@@ -181,6 +187,7 @@ const everything = () => [...drawn(), ...tableCells()];
 
 beforeEach(() => {
   vi.clearAllMocks();
+  logo.url = null;
   doc.splitTextToSize.mockImplementation((s: string) => [s]);
   doc.getNumberOfPages.mockReturnValue(1);
 });
@@ -300,6 +307,19 @@ describe('generateRfqPdf — addressed to ONE vendor (Q1)', () => {
 });
 
 describe('generateRfqPdf — measuring and the footer', () => {
+  it('prints the logo at a real size on an RFQ with no dates, whose two meta lines left it no room', async () => {
+    logo.url = 'data:image/png;base64,AAAA';
+    const base = context();
+    await generateRfqPdf({
+      ...base,
+      company: { ...company, logo_url: 'logo.png' },
+      rfq: { ...base.rfq, header: { ...base.rfq.header, respondByOn: null, neededByOn: null } },
+    });
+    const firstImage = doc.addImage.mock.calls[0];
+    expect(firstImage).toBeDefined();
+    expect(Number(firstImage[5])).toBeGreaterThanOrEqual(40);
+  });
+
   it("measures a long vendor name in the font it is drawn in", async () => {
     await generateRfqPdf(context());
     const name = 'Acme Steel Supply Company of Greater Michigan, LLC';

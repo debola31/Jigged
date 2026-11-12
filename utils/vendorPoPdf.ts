@@ -38,6 +38,7 @@ import {
   drawShopHeaderBlock,
   formatDate,
   loadLogoAsDataUrl,
+  metaColumnBottom,
   type SupabaseLike,
 } from '@/utils/packingSlipPdf';
 
@@ -117,9 +118,11 @@ export async function generateVendorPoPdf(ctx: VendorPoPdfContext): Promise<jsPD
   if (header.needByOn) metaLines.push(`Need by: ${formatDate(header.needByOn)}`);
   if (header.paymentTerms) metaLines.push(`Terms: ${header.paymentTerms}`);
   if (header.shipVia) metaLines.push(`Ship via: ${header.shipVia}`);
-  const metaBlockBottom = headerTop + 20 + metaLines.length * 14;
-
   const logoDataUrl = await loadLogoAsDataUrl(company.logo_url, ctx.supabase ?? null);
+  // A PO prints 2 to 6 meta lines; with a logo the column measures a floor of rows, or a PO with
+  // only its number and date would print the shop's logo as a speck, or not at all.
+  const metaBlockBottom = metaColumnBottom(headerTop, metaLines.length, logoDataUrl !== null);
+
   const shopBlockBottom = drawShopHeaderBlock(doc, {
     company,
     logoDataUrl,

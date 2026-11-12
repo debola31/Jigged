@@ -57,6 +57,7 @@ vi.mock('@/utils/packingSlipPdf', async (importOriginal) => ({
 }));
 
 import { generateVendorPoPdf, vendorPoPdfFilename } from '@/utils/vendorPoPdf';
+import { META_ROWS_FOR_A_LOGO } from '@/utils/packingSlipPdf';
 import type { Company } from '@/utils/companyAccess';
 import { draftPoDetail, otherLine, outsideLine, poDetail, poHeader, poLine, poSummary } from '../components/purchasing/vendorPoFixtures';
 
@@ -126,6 +127,26 @@ describe('generateVendorPoPdf — the header', () => {
     expect(top + height).toBeLessThanOrEqual(40 + 20 + 6 * 14);
     // And the meta lines were all drawn — none was added after the header was sized.
     expect(drawn()).toContain('Rev: 1');
+  });
+
+  // A PO with no need-by date, terms or ship via prints two meta lines, which left a three-line
+  // letterhead no room: the shop's logo vanished (at three lines, a 4pt speck).
+  const sparse = () => poDetail({ header: poHeader({ needByOn: null, paymentTerms: null, shipVia: null }) });
+
+  it('prints the logo at a real size on a PO with only its number and date', async () => {
+    logo.url = 'data:image/png;base64,AAAA';
+    await generateVendorPoPdf({ po: sparse(), company: { ...company, logo_url: 'logo.png' }, supabase: null });
+    const firstImage = doc.addImage.mock.calls[0];
+    expect(firstImage).toBeDefined();
+    expect(Number(firstImage[5])).toBeGreaterThanOrEqual(40);
+  });
+
+  it('keeps that PO compact when there is no logo: no blank band above the parties', async () => {
+    await generateVendorPoPdf({ po: sparse(), company, supabase: null });
+    // The divider under the header is the first line drawn; the logo's floor of rows would put it
+    // below where that floor ends.
+    const dividerY = Number(doc.line.mock.calls[0][1]);
+    expect(dividerY).toBeLessThan(40 + 20 + META_ROWS_FOR_A_LOGO * 14);
   });
 });
 

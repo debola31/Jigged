@@ -310,8 +310,10 @@ founder looked here and concluded place-scoped counting did not exist. Dropping 
 took the button with it, so that lesson had to be paid for a second way: the `inventory_locations`
 flag was **removed entirely** (Aug 2026), which makes the Storage board a place every tenant
 actually has, not one a toggle can take away. Counting is
-reached from Storage, and from a part's own Storage tab. `/inventory/count` itself is unchanged
-and still accepts `?from=`.
+reached from Storage → Inventory: `Count Inventory` in its toolbar, and `Count all N locations` in
+a split part's side rail. ⚠ *Neither existed from 2026-09-09, when the part page's Storage tab took
+the last door with it, to 2026-11-12.* `/inventory/count` itself is unchanged and still accepts
+`?from=`.
 
 ### Part create — `/dashboard/{companyId}/parts/new`
 

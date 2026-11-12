@@ -155,7 +155,9 @@ question needs who signed for a delivery. The status views, `is_vendor_purchase_
 The views still say *in QuickBooks* or *out of date* through `quickbooks_purchase_order_state()`,
 `SECURITY DEFINER` and returning no QuickBooks id. The same migration granted
 `outside_shipments.closed_at`, which predated the column grant, so the model had been unable to tell
-a short-closed slip from one still at the vendor. Pinned by
+a short-closed slip from one still at the vendor. ⚠ *Readable since 2026-09-03, neither slip table had
+a `SCHEMA_CONTEXT` section until 2026-11-12; both are described now, granted columns only
+([purchasing.md](purchasing.md#found-while-building-fixed-here)).* Pinned by
 [`test_purchasing_access_and_guards.py`](../../api/tests/integration/test_purchasing_access_and_guards.py)
 § M5.
 

@@ -33,6 +33,8 @@
     "job_materials": "The material a specific job part is expected to consume, snapshotted at job time.",
     "work_centers": "In-house machines, cells and benches -- work centres -- where operations are run.",
     "vendor_services": "A process an outside vendor performs, such as anodising, plating or heat treat.",
+    "outside_shipments": "Parts sent out to vendors for outside work such as plating, anodising or heat treat: each vendor packing slip, how many went out and when, when they are due back, and what is still out at the vendor.",
+    "outside_shipment_receipts": "Parts coming back from outside vendors against a packing slip: how many good pieces returned and when -- how long a vendor takes to turn work around.",
     "routings": "The manufacturing plan for a part: the ordered set of operations that make it.",
     "routing_operations": "One step in a part's standing routing: its sequence, the work centre that runs it, and standard times.",
     "inventory_transactions": "Stock movements against a part: material taken in, issued to jobs, and adjusted after a count.",

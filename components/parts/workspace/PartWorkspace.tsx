@@ -29,6 +29,7 @@ import {
 } from '@/utils/partsAccess';
 import { ensureStarterPricingTier } from '@/utils/partPricingTiersAccess';
 import { parseBackChain } from '@/lib/partNavStack';
+import { PART_WORKSPACE_TABS } from '@/lib/partWorkspaceTabs';
 import type { Part, PartFormData, PartUnitConversion } from '@/types/part';
 import { usePageTitle } from '@/components/layout/PageTitleProvider';
 
@@ -46,7 +47,7 @@ import FilesTab from './tabs/FilesTab';
 /**
  * The part workspace: a maturity-adaptive record that leads with the
  * type-specific setup (Workspace tab) and surfaces accumulating record data
- * (Storage, Usage) as deep-linkable tabs under a sticky identity header.
+ * (Usage, Files, Activity) as deep-linkable tabs under a sticky identity header.
  *
  * This is the orchestrator — it owns the data fetch, refresh keys, breadcrumb
  * chain, completeness/priceability signal, the transaction + delete modals,
@@ -271,42 +272,28 @@ export default function PartWorkspace({
     }
   };
 
-  // --- Tabs (URL-addressable via ?tab=) ---
+  // --- Tabs (URL-addressable via ?tab=; the slugs are lib/partWorkspaceTabs.ts) ---
   const partSource = part?.source ?? null;
-  const visibleTabs = useMemo<PartTabDescriptor[]>(() => {
-    const tabs: PartTabDescriptor[] = [{ slug: 'workspace', label: 'Workspace' }];
-    // Bought parts only: who it is bought from, at what price, and what is on order
-    // (purchasing plan §3.8). A made part's cost is its routing and materials, so the tab
-    // would be empty for it — and a tab that is blank most times you open it is one people
-    // stop opening (the Storage lesson below). `?tab=buying` on a made part falls back to
-    // Workspace like any unknown slug.
-    if (partSource === 'bought') tabs.push({ slug: 'buying', label: 'Buying' });
-    // Unconditional since is_stocked was dropped: every part is stockable, so every part
-    // has somewhere its stock lives — even when that is 0 at the Unassigned bucket.
-    //
-    // Labelled "Storage", the name this area has carried since #622 folded
-    // /inventory into Parts. The slug stays 'inventory' so existing ?tab=inventory
-    // links keep working — the same treatment 'history' gets for the Activity tab
-    // two lines down.
-    /*
-     * NO Storage tab — removed 2026-09-09.
-     *
-     * A shop holds ~9,000 parts and stocks a handful of them, so this tab was empty for most of
-     * the catalogue: a tab that is blank most times you open it is one people stop opening, and
-     * it split every stock action across two places. Storage → Inventory is the subset that IS
-     * stocked, and clicking a row there opens the same part with the same four verbs.
-     *
-     * What it held went with it: the balances and verbs to that side rail, heats and certificates
-     * to the same rail (the document axis), the transaction ledger to this page's Activity tab and
-     * the shop-wide feed, and the unit-conversion editor nowhere — there is no home for that
-     * setting yet and a half-hidden one on a tab nobody opens was not it.
-     */
-    tabs.push({ slug: 'usage', label: 'Usage' });
-    tabs.push({ slug: 'files', label: 'Files' });
-    // Slug stays 'history' so existing ?tab=history deep links keep working.
-    tabs.push({ slug: 'history', label: 'Activity' });
-    return tabs;
-  }, [partSource]);
+  /*
+   * Buying is for bought parts only: who it is bought from, at what price, and what is on order
+   * (purchasing plan §3.8). A made part's cost is its routing and materials, so the tab would be
+   * empty for it — and a tab that is blank most times you open it is one people stop opening (the
+   * Storage lesson below).
+   *
+   * NO Storage tab — removed 2026-09-09. A shop holds ~9,000 parts and stocks a handful of them,
+   * so it was empty for most of the catalogue, and it split every stock action across two places.
+   * Storage → Inventory is the subset that IS stocked, and clicking a row there opens the same part
+   * with the same four verbs. What it held went with it: the balances and verbs to that side rail,
+   * heats and certificates to the same rail (the document axis), the transaction ledger to this
+   * page's Activity tab and the shop-wide feed, and the unit-conversion editor nowhere — there is
+   * no home for that setting yet and a half-hidden one on a tab nobody opens was not it. Its old
+   * `?tab=inventory` slug falls back to Workspace like any unknown one, which is why every link's
+   * slug is checked against PART_WORKSPACE_TABS (__tests__/standards/partWorkspaceTabLinks.test.ts).
+   */
+  const visibleTabs = useMemo<PartTabDescriptor[]>(
+    () => PART_WORKSPACE_TABS.filter((t) => t.slug !== 'buying' || partSource === 'bought'),
+    [partSource],
+  );
 
   const tabParam = searchParams.get('tab') ?? 'workspace';
   const activeTab = visibleTabs.some((t) => t.slug === tabParam) ? tabParam : 'workspace';

@@ -294,6 +294,31 @@ describe('one line per part', () => {
   });
 });
 
+/**
+ * The shop-wide count's door. Nothing linked to `/inventory/count` from 2026-09-09, when the part
+ * page's Storage tab went, until this button: the worksheet worked and could only be reached by
+ * typing its URL.
+ */
+describe('the shop-wide count is reached from this tab', () => {
+  it('links Count Inventory to the count worksheet', async () => {
+    renderTable(true, [row()]);
+    await screen.findByTestId('grid');
+
+    expect(screen.getByRole('link', { name: 'Count Inventory' })).toHaveAttribute(
+      'href',
+      '/dashboard/c1/inventory/count',
+    );
+  });
+
+  it('offers it to a viewer who cannot see the money too', async () => {
+    renderTable(false, [row()]);
+    await screen.findByTestId('grid');
+
+    // Counting is not an admin action; only the cost figures are gated.
+    expect(screen.getByRole('link', { name: 'Count Inventory' })).toBeInTheDocument();
+  });
+});
+
 describe('a row opens the part', () => {
   it('hands the clicked row s part to the side rail', async () => {
     renderTable(true, [row({ partId: 'p9', partName: '4140 Bar', primaryUnit: 'in' })]);

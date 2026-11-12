@@ -168,6 +168,50 @@ describe('PartPlacesDrawer', () => {
   });
 });
 
+/**
+ * The per-part count's door. The part page's Storage tab carried `Count all N locations` until it
+ * was removed on 2026-09-09; this rail inherited everything else that tab held, and not this.
+ */
+describe('PartPlacesDrawer — counting a split part everywhere', () => {
+  it('links a part in two locations to one sheet with a row per location', async () => {
+    setup();
+
+    const link = await screen.findByRole('link', { name: /count all 2 locations/i });
+    expect(link).toHaveAttribute('href', '/dashboard/co1/inventory/count?part=p-oring');
+  });
+
+  /** In one place, that row's Adjust already IS counting it everywhere. */
+  it('offers nothing extra for a part in one location, however many heats it holds there', async () => {
+    vi.mocked(getBalancesForPart).mockResolvedValue([
+      {
+        location_id: 'shelf-a',
+        location_name: 'Shelf A',
+        path: ['Cabinet 3', 'Shelf A'],
+        quantity: 40,
+        kind: null,
+        lot_id: 'lot-1',
+        lot_code: 'H-4471',
+        heat_number: 'H-4471',
+      },
+      {
+        location_id: 'shelf-a',
+        location_name: 'Shelf A',
+        path: ['Cabinet 3', 'Shelf A'],
+        quantity: 12,
+        kind: null,
+        lot_id: 'lot-2',
+        lot_code: 'H-8823',
+        heat_number: 'H-8823',
+      },
+    ]);
+    setup();
+
+    // Distinct PLACES, not balance rows: two heats on one shelf is one location.
+    expect(await screen.findByText(/52 ea across 1 location/i)).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /count all/i })).not.toBeInTheDocument();
+  });
+});
+
 describe('PartPlacesDrawer — also on order (plan §3.10, criterion B4)', () => {
   const onOrder = (over: Partial<PartOnOrder> = {}): PartOnOrder => ({
     partId: 'p-oring',

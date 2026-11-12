@@ -301,11 +301,11 @@ describe('LocationsManager', () => {
    * The company-wide sheet is NOT reached from here, and that is the correction.
    *
    * `Count all parts` opened one list of every stocked part in the shop. Nobody audits a shop that
-   * way — you audit one cabinet, walking bin to bin, which is what `Adjust` on a unit does now that
-   * the worksheet resolves a container to every leaf under it. The shop-wide sheet still exists as
-   * `Count Inventory` on the Parts toolbar, where the noun is the items rather than the places.
+   * way — you audit one cabinet, walking bin to bin, which is what `Bulk Adjust` on a unit does.
+   * The shop-wide sheet still exists as `Count Inventory` on Storage's Inventory tab, where the noun
+   * is the items rather than the places (StorageInventoryTable.test.tsx pins that door).
    */
-  it('no longer offers a company-wide count from Storage', async () => {
+  it('no longer offers a company-wide count from the Places tab', async () => {
     render(<LocationsManager companyId="co1" />);
     await screen.findByRole('button', { name: /^Cabinet 3/ });
 

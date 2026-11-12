@@ -190,8 +190,10 @@ describe('inventory activity', () => {
     expect(item.action).toBe('stock_in');
     expect(item.quantityLabel).toBe('828 ea');
     expect(item.locationName).toBe('Shelf A');
-    // Straight to that part's ledger, which is where you go to ask "why".
-    expect(item.href).toContain('/parts/p1?tab=inventory');
+    // Straight to that part's ledger — its Activity tab, slug `history` — which is where you go
+    // to ask "why". It named the Storage tab's slug until that tab went (2026-09-09), and the
+    // workspace quietly fell back to Workspace, where no movement is shown.
+    expect(item.href).toBe('/dashboard/co1/parts/p1?tab=history');
   });
 
   /** A transfer writes two rows sharing a group id; the feed must not show the event twice. */

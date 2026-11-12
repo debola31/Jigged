@@ -959,7 +959,10 @@ async function fetchInventoryActivity(
       locationName: r.location_name ?? undefined,
       quantityLabel: `${Number(r.quantity ?? 0).toLocaleString(undefined, { maximumFractionDigits: 4 })} ${r.unit}`,
       heatNumber: r.heat_number ?? undefined,
-      href: r.part_id ? `/dashboard/${companyId}/parts/${r.part_id}?tab=inventory` : undefined,
+      // The part's ledger: its Activity tab (slug `history`) lists every movement with the
+      // heat-and-notes correction. It pointed at the Storage tab's slug until that tab went
+      // (2026-09-09), which fell back to Workspace — a page that never shows this movement.
+      href: r.part_id ? `/dashboard/${companyId}/parts/${r.part_id}?tab=history` : undefined,
     });
   }
   return items;

@@ -260,6 +260,17 @@ async def test_schema_context_describes_only_real_readable_columns():
             ghosts = sorted(described[table] - real)
             if ghosts:
                 problems.append(f"{table}: described column(s) do not exist: {', '.join(ghosts)}")
+            # Per COLUMN, not only per table: shipments and the outside-processing slips are
+            # granted by column list with the actor columns withheld, so a table the role can
+            # read may still hold a described column it cannot.
+            withheld = [
+                col for col in sorted(described[table] & real)
+                if not await conn.fetchval(
+                    "SELECT has_column_privilege('jigged_ai_readonly', $1, $2, 'SELECT')",
+                    f"public.{table}", col)
+            ]
+            if withheld:
+                problems.append(f"{table}: described column(s) withheld from the AI role: {', '.join(withheld)}")
     finally:
         await conn.close()
 
@@ -491,6 +502,40 @@ def test_semantics_defines_the_purchasing_terms_with_reference_sql():
     for name in ("part_on_order", "vendor_purchase_order_status", "is_vendor_purchase_order_late",
                  "part_vendor_last_purchase"):
         assert name in sql, f"no reference query in semantics.md uses {name}"
+
+
+# ===========================================================================
+# Outside processing: the vendor packing slips, and what comes back on them
+# ===========================================================================
+
+OUTSIDE_SLIP_TABLES = {"outside_shipments", "outside_shipment_receipts"}
+# 20260903203741 grants both by column list; these columns are never granted, so never described.
+OUTSIDE_SLIP_WITHHELD = {
+    "created_by", "received_by", "voided_by", "closed_by", "notes", "note",
+    "ship_to_address", "ship_to_contact", "vendor_address_id", "vendor_contact_id",
+}
+
+
+def test_schema_context_describes_the_outside_slips():
+    """Readable by the AI role since 20260903203741, and never described until 2026-11-12 -- so
+    "what is out at the plater?" had no table to query. Both sections exist, say to drop voided
+    rows, and name no withheld column; test_schema_context_describes_only_real_readable_columns
+    then holds every column they do name to the grant itself."""
+    import re
+
+    sections = _context_sections()
+    missing = sorted(OUTSIDE_SLIP_TABLES - set(sections))
+    assert not missing, f"SCHEMA_CONTEXT does not describe: {missing}"
+
+    column = re.compile(r"(?:^-\s*|,\s*)([a-z_][a-z0-9_]*)\s*:", re.MULTILINE)
+    for table in sorted(OUTSIDE_SLIP_TABLES):
+        assert "voided_at IS NULL" in sections[table], f"{table} does not say to drop voided rows"
+        leaked = sorted(set(column.findall(sections[table])) & OUTSIDE_SLIP_WITHHELD)
+        assert not leaked, f"{table} describes columns the AI role is not granted: {leaked}"
+
+    for col in ("quantity", "due_back_on", "closed_at", "voided_at", "vendor_purchase_order_line_id"):
+        assert re.search(rf"\b{col}:", sections["outside_shipments"]), f"outside_shipments omits {col}"
+    assert re.search(r"\bquantity_good:", sections["outside_shipment_receipts"])
 
 
 def test_the_quickbooks_purchasing_tables_are_sensitive():

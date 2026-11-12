@@ -383,7 +383,7 @@ export default function LocationsManager({
     onAdjust: (node: InventoryLocationNode) => {
       // A DRAWER, not a page. It was the last control on Storage that navigated, and it did it for
       // the operation you are most likely to run while looking at the cabinet. The shop-wide
-      // worksheet still exists and is still reached from Parts as `Count Inventory`; what moved
+      // worksheet still exists, reached as `Count Inventory` on the Inventory tab; what moved
       // here is its place-scoped half.
       setDrawerPlaceId(null);
       setAdjustUnitId(node.id);
@@ -534,8 +534,8 @@ export default function LocationsManager({
             It opened the company-wide count sheet — every stocked part across the shop in one
             list. Nobody audits a shop that way: you audit one cabinet, walking bin to bin, which
             is what `Bulk Adjust` on a unit does. A shop-wide sheet still exists for whoever wants
-            one; it is `Count Inventory` on the Parts toolbar, where the noun is the items rather
-            than the places.
+            one; it is `Count Inventory` on the Inventory tab's toolbar, where the noun is the
+            items rather than the places.
           */}
           <Button
             variant="outlined"

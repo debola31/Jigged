@@ -996,7 +996,8 @@ describe('count runs are attributed', () => {
 });
 
 /**
- * One part at one place, reached from the part page's "Count here".
+ * One part at one place — reached from the part page's "Count here" until that page's Storage tab
+ * went (2026-09-09). A side-rail row's `Adjust` does this job now; the mode is kept and tested.
  */
 describe('counting one part at one place', () => {
   const LOC4 = 'loc-shelf-a';
@@ -1033,23 +1034,28 @@ describe('counting one part at one place', () => {
 
   /**
    * Found in the browser, not by a test: step 0 is suppressed in part-scope, so the footer's
-   * "Back" rendered a blank page under the header. The only way out is back to the part.
+   * "Back" rendered a blank page under the header. The only way out is the page's own back link.
    */
   it('offers no step-back into a picker that is not there', async () => {
     renderPage();
     await screen.findByText('4140 bar');
 
     expect(screen.queryByRole('button', { name: /^Back$/ })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /back to part/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /back to storage/i })).toBeInTheDocument();
   });
 
-  it('sends you back to the part it came from', async () => {
+  /**
+   * It went "Back to part" at `?tab=inventory` — a tab removed 2026-09-09, so it landed on the
+   * part's Workspace. No part tab holds stock now; Storage does.
+   */
+  it('sends you back to storage, not to a part tab that no longer exists', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('4140 bar');
 
-    await user.click(screen.getByRole('button', { name: /back to part/i }));
-    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts/p1?tab=inventory');
+    expect(screen.queryByRole('button', { name: /back to part/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /back to storage/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations');
   });
 
   it('surfaces a part that cannot be counted here instead of an empty sheet', async () => {
@@ -1155,13 +1161,17 @@ describe('counting one part everywhere', () => {
     ]);
   });
 
-  it('goes back to the part, not to storage', async () => {
+  /**
+   * Its door is `Count all N locations` in the part's side rail on Storage → Inventory, so back
+   * is Storage. It used to be the part's Storage tab, gone since 2026-09-09.
+   */
+  it('goes back to storage, where its door is', async () => {
     const user = userEvent.setup();
     renderPage();
     await screen.findByText('Shelf A');
 
-    await user.click(screen.getByRole('button', { name: /back to part/i }));
-    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/parts/p-split?tab=inventory');
+    await user.click(screen.getByRole('button', { name: /back to storage/i }));
+    expect(mockPush).toHaveBeenCalledWith('/dashboard/co1/inventory/locations');
   });
 });
 

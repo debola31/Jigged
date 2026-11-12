@@ -293,6 +293,22 @@ SCHEMA_CONTEXT = """
   are already invisible to this connection)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
+### outside_shipments (vendor packing slips: one send of a job operation's parts to an outside vendor)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- job_id: UUID, job_part_id: UUID, job_operation_id: UUID, vendor_id: UUID
+- vendor_name: TEXT, service_name: TEXT (as printed on the slip), slip_number: TEXT
+- quantity: NUMERIC (pieces sent), shipped_at: TIMESTAMPTZ, due_back_on: DATE, carrier: TEXT
+- closed_at: TIMESTAMPTZ -- short-closed: nothing more is coming back on this slip
+- vendor_purchase_order_line_id: UUID -- the outside-service PO line it ships against, or NULL
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any count or total.
+- NOTE: still at the vendor = quantity - SUM(its live receipts' quantity_good), on slips with closed_at IS NULL.
+
+### outside_shipment_receipts (parts back from an outside vendor against one slip)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- outside_shipment_id: UUID (FK -> outside_shipments.id), job_operation_id: UUID, job_part_id: UUID
+- quantity_good: NUMERIC, received_at: TIMESTAMPTZ
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any count or total.
+
 ### routings (1:1 with manufacturable parts)
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1

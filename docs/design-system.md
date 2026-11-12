@@ -692,10 +692,11 @@ can't tell what it's *for* — they see the controls, not the purpose. That's ho
 review: Add storage, Subdivide, Rename, Print labels, and no answer to "what am I supposed to do
 here?" Two fixes, prefer the first:
 
-1. **Give it the recurring job it's missing.** Storage's is counting and putting away — so `Count all
-   parts` is in the toolbar, `Count here` is the sheet's first action and the only one offered for
-   the `Unassigned` bucket. Better than explaining: it makes the page worth returning to rather than
-   merely legible.
+1. **Give it the recurring job it's missing.** Storage's is counting — `Count Inventory` on its
+   Inventory tab, `Bulk Adjust` on a unit, `Adjust` on a place. Better than explaining: it makes
+   the page worth returning to rather than merely legible. *(This named `Count all parts` and
+   `Count here`, both gone by 2026-09-09 — and with them, until 2026-11-12, every door to the count
+   worksheet.)*
 2. **Say plainly what the page is and isn't** — one or two sentences: what you're looking at, and
    where the adjacent thing happens instead ("adding and removing stock happens on the part itself").
    Naming what a page *doesn't* do is often the more useful half.

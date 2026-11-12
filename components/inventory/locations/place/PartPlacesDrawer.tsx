@@ -61,6 +61,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ButtonBase from '@mui/material/ButtonBase';
 import CloseIcon from '@mui/icons-material/Close';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -473,14 +474,30 @@ function PartPlacesBody({
           not do without navigating away and re-finding the part in a bin.
         */}
         {!loading && !error && (
-          <Button
-            startIcon={<PlaceOutlinedIcon />}
-            onClick={() => setPickerOpen(true)}
-            disabled={moveDestinations.length === 0}
-            sx={{ mt: 1.5 }}
-          >
-            Add at another location&hellip;
-          </Button>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+            <Button
+              startIcon={<PlaceOutlinedIcon />}
+              onClick={() => setPickerOpen(true)}
+              disabled={moveDestinations.length === 0}
+            >
+              Add at another location&hellip;
+            </Button>
+            {/*
+              One sheet with a row per location, each committing to its own shelf — the door the
+              part page's Storage tab carried until 2026-09-09, and nothing did after it.
+              Only once the part is actually split: in one place, that row's `Adjust` already IS
+              counting it everywhere, and two controls doing one thing is worse than one.
+            */}
+            {placeCount > 1 && (
+              <Button
+                component={NextLink}
+                href={`/dashboard/${companyId}/inventory/count?part=${part.id}`}
+                startIcon={<FactCheckOutlinedIcon />}
+              >
+                Count all {placeCount} locations
+              </Button>
+            )}
+          </Stack>
         )}
 
         {/*

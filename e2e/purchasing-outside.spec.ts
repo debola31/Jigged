@@ -132,14 +132,16 @@ test('sending from the job links the slip to the line, and the slip, drawer and 
   await expect(drawerRow.getByTitle(`${SERVICE} · ${poNumber}`)).toBeVisible();
   const receiveInDrawer = drawerRow.getByRole('button', { name: 'Receive', exact: true });
   await receiveInDrawer.scrollIntoViewIfNeeded();
-  const paper = await page.locator('.MuiDrawer-paper').boundingBox();
+  // The drawer that holds the row: the docked sidebar is a MUI Drawer too, so a bare
+  // `.MuiDrawer-paper` matches both and strict mode refuses it.
+  const paper = await drawerRow.locator('xpath=ancestor::div[contains(@class, "MuiDrawer-paper")]').boundingBox();
   const receiveBox = await receiveInDrawer.boundingBox();
   expect(receiveBox!.x + receiveBox!.width).toBeLessThanOrEqual(paper!.x + paper!.width);
 
   // And the PO line lists the slip, with what it says is out.
   await page.goto(poUrl);
   const line = lineRow(page, JOB);
-  await expect(line.getByRole('button', { name: slipNumber })).toBeVisible();
+  await expect(line.getByRole('button', { name: slipNumber, exact: true })).toBeVisible();
   await expect(line).toContainText('Sent 10 · back 0 · at vendor 10');
 });
 
@@ -161,7 +163,7 @@ test("after the send, the outside line's quantity is edited — a new revision o
   await expect(lineRow(page, JOB)).toContainText('$54.00');
   await expect(page.getByText('Rev 1 not sent')).toBeVisible();
   // Still linked: the edit changed the order, not the slip.
-  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber })).toBeVisible();
+  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber, exact: true })).toBeVisible();
 });
 
 test('a short receipt closes the slip and, when asked, the PO line: the line reads what came back and the step advances', async ({
@@ -226,7 +228,7 @@ test('archiving the PO unlinks the slip; a new PO for the step relinks it, and t
   await expect(page).toHaveURL(/\/purchasing\/orders\/[0-9a-f-]{36}$/);
   await page.reload();
   // The new line picked up the slip already sent for its step.
-  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber })).toBeVisible();
+  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber, exact: true })).toBeVisible();
   await expect(lineRow(page, JOB)).toContainText('Sent 10 · back 9');
 
   // The explicit correction, under the line's slips. Unlink asks first and says what changes…
@@ -248,6 +250,6 @@ test('archiving the PO unlinks the slip; a new PO for the step relinks it, and t
   await link.getByRole('button', { name: `Link ${slipNumber}` }).click();
   await expect(page.getByText(`${slipNumber} now counts toward line 1.`)).toBeVisible();
   await page.reload();
-  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber })).toBeVisible();
+  await expect(lineRow(page, JOB).getByRole('button', { name: slipNumber, exact: true })).toBeVisible();
   await expect(lineRow(page, JOB)).toContainText('Sent 10 · back 9');
 });

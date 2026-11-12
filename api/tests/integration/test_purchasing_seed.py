@@ -81,6 +81,21 @@ def test_the_seed_has_something_on_order(db, seeded):
     assert most is not None and Decimal(most) > 0
 
 
+def test_every_seeded_po_holds_the_hash_its_content_version_counts(db, seeded):
+    """[S6, QB9] The seed builds its POs through the RPCs -- create, award, receipts, a slip receipt
+    on a linked line -- and every one of them ends by settling, so each PO's content_hash is the md5
+    of what a push would send now. A writer that skipped it would leave a PO here whose next
+    unrelated save reads "Out of date in QuickBooks"."""
+    stale = [r["po_number"] for r in ps.rows(db, """
+        SELECT po_number FROM vendor_purchase_orders
+         WHERE company_id = %s
+           AND content_hash IS DISTINCT FROM md5(public.vendor_purchase_order_pushed_projection(id)::text)""",
+        (seeded,))]
+    assert stale == []
+    assert ps.scalar(db, "SELECT count(*) FROM vendor_purchase_orders WHERE company_id = %s AND vendor_rfq_id IS NOT NULL",
+                     (seeded,)) >= 1, "the seed no longer awards an RFQ, so this no longer covers award_vendor_rfq"
+
+
 def test_the_seeds_po_numbers_fit_quickbooks_desktop(db, seeded):
     """[S6, N2] Whatever series the seed sets, its numbers are ≤ 11 characters and unique."""
     numbers = [r["po_number"] for r in ps.rows(db, "SELECT po_number FROM vendor_purchase_orders WHERE company_id = %s",

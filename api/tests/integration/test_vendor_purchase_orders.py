@@ -13,7 +13,8 @@ line, and a status nobody stores. Each rule below is one a careless writer break
   * **The revision bumps once per send cycle**, on the md5 of what the vendor sees. Drafts never
     bump; internal notes, promised dates and closing never bump (P3). `content_version` is the
     separate counter of what QuickBooks holds, and it moves exactly when one of those fields
-    does, including close and reopen (QB9).
+    does, including close and reopen -- and "closed" is the derived status the push acts on, so
+    the delivery that leaves nothing outstanding beside a line closed short moves it too (QB9).
   * **Edit guards** keep a PO consistent with what already happened: an existing line's kind
     and routing step, received quantities, the vendor once sent, closed and archived POs, and
     stale saves (P4). Archive is never blocked and lets go of its outside slips (P5).
@@ -979,6 +980,34 @@ def _receive_three(db, c: SentPo, **kw):
     ps.receive(c.shop.user, c.po.id, [ps.entry(c.bar_line, 3, location=c.shop.shelf, **kw)])
 
 
+def _close_screw_line(db, c: SentPo):
+    """Line 2 closed short with nothing received: QuickBooks Desktop closes that line, and the
+    PO stays open while the bar is still owed."""
+    ps.set_lines(c.shop.user, c.po.id, [c.screw_line], "close", reason="Vendor is out")
+
+
+def _receive_all_bar(db, c: SentPo):
+    """All 10 ft. Beside the closed screw line (and the no-receipt line) nothing is outstanding,
+    so the derived status becomes closed -- the status the push closes the QuickBooks PO from."""
+    ps.receive(c.shop.user, c.po.id, [ps.entry(c.bar_line, 10, location=c.shop.shelf)])
+
+
+def _close_screw_then_receive_all_bar(db, c: SentPo):
+    _close_screw_line(db, c)
+    _receive_all_bar(db, c)
+    assert ps.po_status(db, c.po.id)["status"] == ps.CLOSED
+
+
+def _void_the_bar_receipt(db, c: SentPo):
+    receipt = next(r for r in ps.receipts_of(db, c.po.id) if r["vendor_purchase_order_line_id"] == c.bar_line)
+    ps.void_receipt(c.shop.user, receipt["id"])
+
+
+def _receive_every_line_in_full(db, c: SentPo):
+    ps.receive(c.shop.user, c.po.id, [ps.entry(c.bar_line, 10, location=c.shop.shelf),
+                                      ps.entry(c.screw_line, 2.5, location=c.shop.shelf)])
+
+
 def _open_rev_1(db, c: SentPo):
     """A vendor-visible change has already opened Rev 1, so the revision -- which the pushed
     projection carries too -- cannot move again this cycle: only the field itself can move
@@ -1001,16 +1030,15 @@ def _anodize_line(db, c: SentPo) -> str:
 
 
 def _as_any_writer(column: str, value, line: Callable[[object, SentPo], str]):
-    """ONE line column changed the way every PO writer brackets its change: the md5 of the pushed
-    projection first, then the change, then the settle step every writer ends with
-    (vendor_purchase_order_settle_versions). For the snapshots no RPC moves on their own: an
-    existing line's step is fixed, so its service name never moves by itself, and its stock unit
-    and factor move only with its unit or its part."""
+    """ONE line column changed the way every PO writer makes its change: the change, then the
+    settle step every writer ends with (vendor_purchase_order_settle_versions, which compares the
+    pushed projection's md5 with the stored content_hash). For the snapshots no RPC moves on their
+    own: an existing line's step is fixed, so its service name never moves by itself, and its
+    stock unit and factor move only with its unit or its part."""
     def act(db, c: SentPo):
         target = line(db, c)
-        before = ps.scalar(db, "SELECT md5(public.vendor_purchase_order_pushed_projection(%s)::text)", (c.po.id,))
         ps.execute(db, f"UPDATE public.vendor_purchase_order_lines SET {column} = %s WHERE id = %s", (value, target))
-        ps.scalar(db, "SELECT public.vendor_purchase_order_settle_versions(%s, %s, false)", (c.po.id, before))
+        ps.scalar(db, "SELECT public.vendor_purchase_order_settle_versions(%s, false)", (c.po.id,))
     return act
 
 
@@ -1054,20 +1082,63 @@ CONTENT_CASES = [
     ("receive_closing_the_rest", True, None, lambda db, c: _receive_three(db, c, close_remaining=True)),
     ("void_a_receipt", False, _receive_three,
      lambda db, c: ps.void_receipt(c.shop.user, ps.receipts_of(db, c.po.id)[0]["id"])),
+    # The DERIVED status is what the push closes from, so a delivery is a QuickBooks change
+    # exactly when it moves the PO into or out of closed.
+    ("receive_part_beside_a_line_closed_short", False, _close_screw_line, _receive_three),
+    ("receive_the_rest_beside_a_line_closed_short", True, _close_screw_line, _receive_all_bar),
+    ("void_the_receipt_that_left_nothing_outstanding", True, _close_screw_then_receive_all_bar,
+     _void_the_bar_receipt),
+    ("receive_every_line_in_full", False, None, _receive_every_line_in_full),
+    ("void_a_receipt_on_a_po_received_in_full", False, _receive_every_line_in_full, _void_the_bar_receipt),
+    ("close_po_already_closed_by_its_receipts", False, _close_screw_then_receive_all_bar,
+     lambda db, c: ps.set_state(c.shop.user, c.po.id, "close")),
 ]
 
 
 @pytest.mark.parametrize("name, bumps, setup, act", CONTENT_CASES, ids=[case[0] for case in CONTENT_CASES])
 def test_content_version_moves_exactly_when_a_field_quickbooks_holds_changes(db, sent, name, bumps, setup, act):
     """[QB9] Writer × field. Every pushed field bumps it — close and reopen included, at the
-    PO and at the line, and a receipt that closes the remainder is a line close. Receipts,
-    voids, internal notes and promised dates never do, so "Out of date in QuickBooks" is exact."""
+    PO and at the line, and a receipt that closes the remainder is a line close. "Closed" is the
+    derived status the push acts on, so the delivery that leaves nothing outstanding beside a
+    line closed short bumps it, and so does voiding that delivery; an ordinary receipt or void,
+    internal notes and promised dates never do, so "Out of date in QuickBooks" is exact."""
     if setup is not None:
         setup(db, sent)
     before = ps.po_row(db, sent.po.id)["content_version"]
     act(db, sent)
     after = ps.po_row(db, sent.po.id)["content_version"]
     assert (after > before) is bumps, f"{name}: content_version {before} → {after}"
+
+
+def test_the_pushed_projection_closes_with_the_derived_status_the_push_acts_on(db, sent):
+    """[QB9] The route closes the QuickBooks PO when vendor_purchase_order_status reads closed
+    (projection_from_rows), so the database's projection -- the one content_version counts -- must
+    say closed at the same moment. Here a delivery closes the PO while closed_at is still NULL, and
+    voiding it opens it again; reading closed_at would have the two disagree twice."""
+    from services.accounting.purchase_order import projection_from_rows
+
+    def closed_in_both() -> tuple[bool, bool]:
+        status = ps.po_status(db, sent.po.id)["status"]
+        pushed = projection_from_rows(ps.po_row(db, sent.po.id), ps.lines_of(db, sent.po.id), status=status)
+        counted = ps.scalar(db, "SELECT public.vendor_purchase_order_pushed_projection(%s)", (sent.po.id,))
+        return counted["closed"], pushed.closed
+
+    assert closed_in_both() == (False, False)
+    _close_screw_then_receive_all_bar(db, sent)
+    assert ps.po_row(db, sent.po.id)["closed_at"] is None, "closed by its receipts, not by hand"
+    assert closed_in_both() == (True, True)
+    _void_the_bar_receipt(db, sent)
+    assert closed_in_both() == (False, False)
+
+
+def test_a_new_po_starts_at_version_0_with_the_hash_it_counts_from(db, shop):
+    """[QB9] create_vendor_purchase_order ends like every writer, by settling, which records the
+    md5 version 0 describes; the first change after it is the first one counted."""
+    po = ps.make_po(db, shop, [ps.part_line(shop.bar, 10, "feet")])
+    row = ps.po_row(db, po.id)
+    assert row["content_version"] == 0
+    assert row["content_hash"] == ps.scalar(
+        db, "SELECT md5(public.vendor_purchase_order_pushed_projection(%s)::text)", (po.id,))
 
 
 def test_the_pushed_projection_carries_every_line_field_the_quickbooks_push_reads(db, sent):

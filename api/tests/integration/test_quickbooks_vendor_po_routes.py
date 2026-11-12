@@ -923,6 +923,60 @@ async def test_a_desktop_po_received_in_full_cannot_be_reopened(db, shop, people
     assert res.json()["detail"]["code"] == "qb_cannot_reopen"
 
 
+@pytest.mark.parametrize("provider", ["qbo", "qbd"])
+async def test_the_delivery_that_closes_the_po_is_pushed_as_a_close_and_its_void_as_a_reopen(
+        db, shop, people, supabase_admin, monkeypatch, provider):  # noqa: F811
+    """QB9: with a line closed short, the delivery that brings in the rest closes the PO by its
+    derived status, and the route closes the QuickBooks PO from that status. So the PO reads out of
+    date at once -- not only after some unrelated edit -- and the push sends exactly the close;
+    voiding the delivery reopens it the same way. On Online, which has no line-level close, this is
+    what stops the short line's remainder from reading open in QuickBooks."""
+    connection = (seed_qbo if provider == "qbo" else seed_qbd)(supabase_admin, shop.company)
+    seed_setup(supabase_admin, shop.company, provider, connection)
+    boundary = Boundary(monkeypatch, provider)
+    lines = [ps.other_line("Spindle rebuild", 1, unit_price=2400), ps.other_line("Coolant", 4, unit_price=31)]
+    po = await pushed_once(db, shop, people, boundary, provider, lines)
+    rebuild, coolant = po.lines
+
+    # Line 2 closed short, and that pushed: QuickBooks holds the PO open.
+    ps.set_lines(shop.admin, po.id, [coolant], "close", reason="Bought it locally")
+    boundary.on("read_purchase_order", lambda *a, **k: state_from_links(db, po.id, token="0")) \
+        .on("update_purchase_order", updates(provider, token="1"))
+    res = await push(people.admin["token"], shop.company, po.id)
+    assert res.status_code == 200, res.text
+    assert res.json()["operation"] == "update"
+    assert ps.po_status(db, po.id)["quickbooks_state"] == "in_quickbooks"
+
+    # The rebuild is done: nothing is outstanding beside the short line, so the PO is closed.
+    ps.receive(shop.admin, po.id, [ps.entry(rebuild, 1)])
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    assert ps.po_status(db, po.id)["quickbooks_state"] == "out_of_date"
+
+    boundary.on("read_purchase_order", lambda *a, **k: state_from_links(db, po.id, token="1")) \
+        .on("update_purchase_order", updates(provider, token="2"))
+    closed = await push(people.admin["token"], shop.company, po.id)
+    assert closed.status_code == 200, closed.text
+    assert closed.json()["operation"] == "close"
+    payload = boundary.payloads("update_purchase_order")[-1]
+    if provider == "qbo":
+        assert payload == {"Id": "QB-PO-1", "SyncToken": "1", "sparse": True, "POStatus": "Closed"}
+    else:
+        assert payload == {"revisionNumber": "1", "isManuallyClosed": True}
+    assert _link(db, po.id)["qb_closed"] is True
+    assert ps.po_status(db, po.id)["quickbooks_state"] == "in_quickbooks"
+
+    # Voiding the delivery opens the PO again: out of date, and the push reopens it.
+    ps.void_receipt(shop.admin, ps.receipts_of(db, po.id)[-1]["id"], reason="Booked to the wrong PO")
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert ps.po_status(db, po.id)["quickbooks_state"] == "out_of_date"
+    boundary.on("read_purchase_order", lambda *a, **k: state_from_links(db, po.id, token="2", closed=True))
+    reopened = await push(people.admin["token"], shop.company, po.id)
+    assert reopened.status_code == 200, reopened.text
+    assert reopened.json()["operation"] == "reopen"
+    assert _link(db, po.id)["qb_closed"] is False
+    assert ps.po_status(db, po.id)["quickbooks_state"] == "in_quickbooks"
+
+
 async def test_an_unsent_revision_is_refused_naming_the_vendor(db, shop, people, qbo, monkeypatch):  # noqa: F811
     boundary = Boundary(monkeypatch, "qbo")
     po = await pushed_once(db, shop, people, boundary, "qbo")

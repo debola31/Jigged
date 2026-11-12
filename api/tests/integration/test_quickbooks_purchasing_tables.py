@@ -13,8 +13,9 @@ without a QuickBooks call:
     connection row; the vendor map and the links are realm-scoped history, like the customer
     map (QB11).
   * **"Out of date" needs no QuickBooks call**: the status view derives `quickbooks_state` from
-    the link alone, and only `content_version` moves it — never a receipt or an internal
-    note (QB9).
+    the link alone, and only `content_version` moves it — never an ordinary receipt or an
+    internal note, but the delivery (or its void) that moves the PO into or out of its derived
+    closed status does, because the push closes and reopens from that status (QB9).
 
 Run:
     cd api && pytest -m integration tests/integration/test_quickbooks_purchasing_tables.py
@@ -221,3 +222,44 @@ def test_receipts_internal_notes_and_promises_never_make_a_pushed_po_out_of_date
     ps.save_po(shop.user, po.id, changes={"internal_notes": "Vendor called"})
     ps.save_po(shop.user, po.id, lines=[{"id": po.lines[0], "promised_on": "2026-11-30"}])
     assert _state(db, po) == "in_quickbooks"
+
+
+def _push_recorded(db, link: str, po: ps.Po, *, closed: bool) -> None:
+    """What the route writes after a push: the version it sent, and whether QuickBooks holds the
+    PO closed."""
+    ps.execute(db, """
+        UPDATE quickbooks_purchase_order_links SET pushed_content_version = %s, qb_closed = %s
+         WHERE id = %s""", (ps.po_row(db, po.id)["content_version"], closed, link))
+
+
+def test_the_delivery_that_closes_a_po_beside_a_short_closed_line_makes_it_out_of_date(db, shop):
+    """[QB9] The push closes the QuickBooks PO when the DERIVED status reads closed, and nothing
+    outstanding while a line was closed short is closed. So the delivery that brings in the rest
+    changes what QuickBooks must hold -- on Online, which cannot close a line, it is the only way
+    the remainder of the short line stops reading open there -- and voiding that delivery changes
+    it back. A partial delivery beside the closed line changes nothing."""
+    po = ps.make_po(db, shop, [ps.part_line(shop.bar, 10, "feet"), ps.part_line(shop.screw, 2, "hundred")],
+                    sent=True)
+    bar, screw = po.lines
+    ps.set_lines(shop.admin, po.id, [screw], "close", reason="Vendor is out")
+    link = ps.insert_po_link(db, shop, po.id, pushed_content_version=ps.po_row(db, po.id)["content_version"])
+    assert _state(db, po) == "in_quickbooks"
+
+    ps.receive(shop.admin, po.id, [ps.entry(bar, 4, location=shop.shelf)])
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert _state(db, po) == "in_quickbooks", "an ordinary delivery read as a change QuickBooks must take"
+
+    before = ps.po_row(db, po.id)["content_version"]
+    ps.receive(shop.admin, po.id, [ps.entry(bar, 6, location=shop.shelf)])
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    assert ps.po_row(db, po.id)["closed_at"] is None, "closed by the delivery, not by hand"
+    assert ps.po_row(db, po.id)["content_version"] == before + 1
+    assert _state(db, po) == "out_of_date"
+
+    _push_recorded(db, link, po, closed=True)
+    assert _state(db, po) == "in_quickbooks"
+    completing = ps.receipts_of(db, po.id)[-1]["id"]
+    ps.void_receipt(shop.admin, completing, reason="Counted twice")
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert ps.po_row(db, po.id)["content_version"] == before + 2
+    assert _state(db, po) == "out_of_date", "QuickBooks still holds it closed; the push must reopen it"

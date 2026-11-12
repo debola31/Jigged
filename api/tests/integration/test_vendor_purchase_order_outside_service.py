@@ -15,12 +15,18 @@ test_outside_processing.py — a job part routed through a station and then V1's
     list, receipts and voids still cascade operation → part → job inside the trigger-depth
     budget, and an operator still sends and receives from the phone — `create_outside_shipment`
     keeps its 8 arguments, its grants and no office assertion (O3).
+  * **A slip receipt can close the PO for QuickBooks.** The pieces that bring the last open line
+    back beside a line closed short leave nothing outstanding, which is the derived "closed" the
+    push acts on. Receiving is a plain INSERT, so a trigger settles the linked PO: that receipt,
+    its undo, the slip's void and an unlink each move `content_version`; an ordinary receipt does
+    not (QB9).
 
 Run:
     cd api && pytest -m integration tests/integration/test_vendor_purchase_order_outside_service.py
 """
 from __future__ import annotations
 
+import threading
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -305,3 +311,239 @@ def test_create_outside_shipment_keeps_one_overload_its_grants_and_its_body(db):
     assert (fn["browser"], fn["anon"]) == (True, False)
     assert "'VPS-'" in fn["body"] and "vendor_purchase_order_line_id" in fn["body"]
     assert "assert_office_member" not in fn["body"], "operators send outside work; they must not be refused"
+
+
+# ── QB9: a receipt on a linked slip can close the PO for the push ─────────────────────────────
+
+
+def _closed_short_beside_the_step(db, shop: ps.Shop, quantity=100) -> ps.Po:
+    """Sent to V1: line 1 the anodize step, line 2 bar stock closed short before any came. Once the
+    step is back in full nothing is outstanding, so the PO's derived status is closed."""
+    po = ps.make_po(db, shop, [ps.outside_line(shop.outside_op, quantity), ps.part_line(shop.bar, 10, "feet")],
+                    sent=True)
+    ps.set_lines(shop.admin, po.id, [po.lines[1]], "close", reason="Bought locally")
+    return po
+
+
+def _version(db, po: ps.Po) -> int:
+    return ps.po_row(db, po.id)["content_version"]
+
+
+def _quickbooks_state(db, po: ps.Po) -> str:
+    return ps.po_status(db, po.id)["quickbooks_state"]
+
+
+def _slip_receipts(db, slip: str) -> list[dict]:
+    return ps.rows(db, """
+        SELECT * FROM public.outside_shipment_receipts WHERE outside_shipment_id = %s
+         ORDER BY created_at""", (slip,))
+
+
+def _undo_slip_receipt(user: str, receipt: str) -> None:
+    """The browser's undo (voidOutsideReceipt): its column-scoped UPDATE of voided_at."""
+    ps.sql_as(user, """
+        UPDATE public.outside_shipment_receipts SET voided_at = now(), voided_by = %s
+         WHERE id = %s AND voided_at IS NULL""", (user, receipt))
+
+
+def _production(db, shop: ps.Shop) -> tuple[str, str]:
+    return (ps.scalar(db, "SELECT production_status FROM job_parts WHERE id = %s", (shop.job_part,)),
+            ps.scalar(db, "SELECT production_status FROM jobs WHERE id = %s", (shop.job,)))
+
+
+def _step_back_in_full(db, shop: ps.Shop) -> tuple[ps.Po, str]:
+    """The PO closed by its slip: the station op done, 100 out and 100 back."""
+    po = _closed_short_beside_the_step(db, shop)
+    ps.complete_operation(db, shop, shop.station_op, shop.job_part, 100)
+    slip = ps.send_outside(shop.admin, shop.outside_op, 100)[0]
+    ps.receive_slip(db, shop.admin, slip, 100)
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    assert _production(db, shop) == ("completed", "completed")
+    return po, slip
+
+
+def test_the_slip_receipt_that_brings_the_step_back_closes_the_po_for_quickbooks(db, shop):
+    """[QB9, O3] The last pieces back on the vendor packing slip, beside a line closed short, leave
+    nothing outstanding: the PO reads closed and the push would close it in QuickBooks. Recording
+    them is a plain INSERT -- an operator's, from the phone -- so the trigger behind it settles the
+    PO and it reads out of date. The pieces before them are an ordinary receipt and move nothing,
+    and the operation -> part -> job cascade still reaches the job beside the new trigger."""
+    po = _closed_short_beside_the_step(db, shop)
+    ps.complete_operation(db, shop, shop.station_op, shop.job_part, 100)
+    slip = ps.send_outside(shop.admin, shop.outside_op, 100)[0]
+    assert ps.slip_link(db, slip) == po.lines[0]
+    ps.insert_po_link(db, shop, po.id, pushed_content_version=_version(db, po))
+    version = _version(db, po)
+
+    ps.receive_slip(db, shop.operator, slip, 60)
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert (_version(db, po), _quickbooks_state(db, po)) == (version, "in_quickbooks")
+
+    ps.receive_slip(db, shop.operator, slip, 40)
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    assert ps.po_row(db, po.id)["closed_at"] is None, "closed by the slip receipt, not by hand"
+    assert (_version(db, po), _quickbooks_state(db, po)) == (version + 1, "out_of_date")
+    assert _production(db, shop) == ("completed", "completed"), "the cascade stopped short of the job"
+
+
+def test_undoing_that_slip_receipt_opens_the_po_again_and_counts(db, shop):
+    """[QB9, O3] The browser's undo is a column-scoped UPDATE of voided_at: nothing is back, the PO
+    is no longer closed, content_version moves again, and the part and job step back with it."""
+    po, slip = _step_back_in_full(db, shop)
+    version = _version(db, po)
+
+    _undo_slip_receipt(shop.user, _slip_receipts(db, slip)[-1]["id"])
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert _version(db, po) == version + 1
+    assert _production(db, shop) == ("in_progress", "in_progress")
+
+
+def test_voiding_the_slip_opens_the_po_again_and_counts(db, shop):
+    """[QB9, O3] void_outside_shipment voids the receipts first, as two top-level statements, and
+    the receipts' void is what settles the PO; the void cascade still reaches the job."""
+    po, slip = _step_back_in_full(db, shop)
+    version = _version(db, po)
+
+    ps.void_slip(shop.admin, slip)
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert _version(db, po) == version + 1
+    assert _production(db, shop) == ("in_progress", "in_progress"), (
+        "the job froze: the cascade was suppressed at trigger depth 3")
+
+
+def test_unlinking_a_slip_with_parts_back_opens_its_po_again_and_counts(db, shop):
+    """[QB9, O1] What came back on a slip counts toward the line it is linked to, so unlinking it
+    takes the PO out of closed. The relink locks and settles the PO the slip leaves, and still
+    leaves the operation alone."""
+    po, slip = _step_back_in_full(db, shop)
+    version = _version(db, po)
+    operation_before = ps.operation_row(db, shop.outside_op)
+
+    ps.relink(shop.user, slip, None)
+    assert ps.po_status(db, po.id)["status"] == ps.PARTLY_RECEIVED
+    assert _version(db, po) == version + 1
+    assert ps.operation_row(db, shop.outside_op) == operation_before, "unlinking changed the operation"
+
+
+def test_the_rest_arriving_after_the_step_was_closed_short_takes_the_po_out_of_closed(db, shop):
+    """[QB9] The step was closed short at 60 of 100 and the bar received in full: closed. Then the
+    plater finds the other 40 and they come back on the same slip. The step is received, no line is
+    short any more and the PO reads received -- which the push would reopen in QuickBooks -- so it
+    counts too."""
+    po = ps.make_po(db, shop, [ps.outside_line(shop.outside_op, 100), ps.part_line(shop.bar, 10, "feet")],
+                    sent=True)
+    slip = ps.send_outside(shop.admin, shop.outside_op, 100)[0]
+    ps.receive_slip(db, shop.admin, slip, 60)
+    ps.set_lines(shop.admin, po.id, [po.lines[0]], "close", reason="40 lost at the plater")
+    ps.receive(shop.admin, po.id, [ps.entry(po.lines[1], 10, location=shop.shelf)])
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    version = _version(db, po)
+
+    ps.receive_slip(db, shop.admin, slip, 40)
+    assert ps.po_status(db, po.id)["status"] == ps.RECEIVED
+    assert _version(db, po) == version + 1
+
+
+def _receive_in_open_transaction(db, conn, user: str, slip: str, good) -> None:
+    """The browser's receipt INSERT, left uncommitted on `conn`."""
+    s = ps.slip_row(db, slip)
+    with conn.cursor() as cur:
+        ps.act_as(cur, user)
+        cur.execute("""
+            INSERT INTO public.outside_shipment_receipts
+                (company_id, outside_shipment_id, job_operation_id, job_part_id, quantity_good, received_by)
+            VALUES (%s, %s, %s, %s, %s, %s)""",
+            (s["company_id"], slip, s["job_operation_id"], s["job_part_id"], good, user))
+
+
+def _race(db, hold, then) -> None:
+    """`hold(conn)` runs and stays open; `then(conn)` starts on a second connection and must queue
+    on a lock; the first commits; the second must then finish cleanly -- no deadlock, no error."""
+    first, second = ps.connect(), ps.connect()
+    outcome: dict = {}
+
+    def the_second():
+        try:
+            then(second)
+            second.commit()
+        except Exception as exc:  # noqa: BLE001 - reported below, with its SQLSTATE
+            outcome["error"] = exc
+
+    try:
+        hold(first)
+        worker = threading.Thread(target=the_second)
+        worker.start()
+        assert ps.wait_until_blocked(db, second.get_backend_pid()), "the second transaction did not queue"
+        first.commit()
+        worker.join(timeout=20)
+        assert not worker.is_alive(), "the second transaction never finished"
+        assert "error" not in outcome, f"the second transaction failed: {outcome.get('error')!r}"
+    finally:
+        first.close()
+        second.close()
+
+
+def test_two_slip_receipts_that_close_the_po_only_together_count_it_once(db, shop):
+    """[QB9] The write skew a before-and-after hash would miss. Two steps on one PO, a third line
+    closed short, and the last pieces of each step come back at the same moment: neither receipt
+    alone leaves nothing outstanding, both together do. The trigger takes the PO lock before it
+    reads, so the second receipt queues, then reads both, and the close is counted exactly once."""
+    _, second_op = ps.add_outside_job_part(db, shop, shop.anodize)
+    po = ps.make_po(db, shop, [ps.outside_line(shop.outside_op, 100), ps.outside_line(second_op, 40),
+                               ps.part_line(shop.bar, 10, "feet")], sent=True)
+    ps.set_lines(shop.admin, po.id, [po.lines[2]], "close", reason="Bought locally")
+    first_slip = ps.send_outside(shop.admin, shop.outside_op, 100)[0]
+    second_slip = ps.send_outside(shop.admin, second_op, 40)[0]
+    assert (ps.slip_link(db, first_slip), ps.slip_link(db, second_slip)) == (po.lines[0], po.lines[1])
+    version = _version(db, po)
+
+    _race(db,
+          lambda conn: _receive_in_open_transaction(db, conn, shop.operator, first_slip, 100),
+          lambda conn: _receive_in_open_transaction(db, conn, shop.operator, second_slip, 40))
+    assert ps.po_status(db, po.id)["status"] == ps.CLOSED
+    assert _version(db, po) == version + 1
+
+
+def test_a_receipt_racing_a_relink_of_its_slip_settles_the_po_the_slip_moved_to(db, shop):
+    """[QB9, O1] The relink holds both POs while the receipt's trigger waits for the one the slip
+    was on. When it gets the lock the slip has moved, so it reads the link again and settles the
+    PO the receipt now counts toward -- here the receipt is what closes that PO."""
+    old = _outside_po(db, shop, sent=True)
+    slip = ps.send_outside(shop.admin, shop.outside_op, 100)[0]
+    ps.receive_slip(db, shop.admin, slip, 60)
+    ps.set_lines(shop.admin, old.id, [old.lines[0]], "close", reason="Moving it to the right PO")
+    new = _closed_short_beside_the_step(db, shop)
+    assert ps.slip_link(db, slip) == old.lines[0], "a linked slip was stolen by a new line"
+    versions = (_version(db, old), _version(db, new))
+
+    def relink_and_hold(conn):
+        with conn.cursor() as cur:
+            ps.act_as(cur, shop.admin)
+            ps.rpc(cur, "set_outside_shipment_vendor_purchase_order_line", **ps.relink_args(slip, new.lines[0]))
+
+    _race(db, relink_and_hold, lambda conn: _receive_in_open_transaction(db, conn, shop.operator, slip, 40))
+    assert ps.slip_link(db, slip) == new.lines[0]
+    assert ps.po_status(db, new.id)["status"] == ps.CLOSED
+    assert (_version(db, old), _version(db, new)) == (versions[0], versions[1] + 1)
+
+
+def test_the_receipt_trigger_is_a_sibling_of_the_cascade_and_fires_before_it(db):
+    """[QB9, O3] The settle triggers on outside_shipment_receipts are AFTER, their function is
+    SECURITY DEFINER (the browser cannot write the PO header) and not browser-executable, and they
+    sort before the operation -> part -> job cascade trigger, so the PO lock is taken before the
+    cascade locks a job row."""
+    triggers = ps.rows(db, """
+        SELECT tgname, tgtype FROM pg_trigger
+         WHERE tgrelid = 'public.outside_shipment_receipts'::regclass AND NOT tgisinternal
+         ORDER BY tgname""")
+    before = 2  # pg_trigger.tgtype bit
+    settles = [t["tgname"] for t in triggers if "settle_vendor_po" in t["tgname"]]
+    cascades = [t["tgname"] for t in triggers if t["tgname"].startswith("trigger_recompute_op_status_on_outside_receipt")]
+    assert len(settles) == 2 and cascades, triggers
+    assert not any(t["tgtype"] & before for t in triggers if t["tgname"] in settles), "the settle must be AFTER"
+    assert max(settles) < min(cascades), "the settle trigger must fire before the cascade"
+    fn = ps.row(db, """
+        SELECT p.prosecdef, has_function_privilege('authenticated', p.oid, 'EXECUTE') AS browser
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname = 'public' AND p.proname = 'outside_receipt_settles_vendor_purchase_order'""")
+    assert fn == {"prosecdef": True, "browser": False}

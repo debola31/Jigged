@@ -337,8 +337,10 @@ CREATE TABLE public.vendor_purchase_orders (
     issued_at                     timestamptz,
     issued_by                     uuid REFERENCES auth.users(id) ON DELETE SET NULL,
     last_sent_at                  timestamptz,
-    -- Bumped by every writer that changes a field the QuickBooks push sends.
+    -- Bumped whenever a field the QuickBooks push sends changes; content_hash is the md5 of
+    -- that projection at this version (vendor_purchase_order_settle_versions compares them).
     content_version               integer NOT NULL DEFAULT 0,
+    content_hash                  text,
     -- Line numbers are printed and never reused, so the counter lives here.
     last_line_number              integer NOT NULL DEFAULT 0,
 
@@ -406,7 +408,9 @@ COMMENT ON COLUMN public.vendor_purchase_orders.revision IS
 COMMENT ON COLUMN public.vendor_purchase_orders.sent_revision IS
   'The revision the vendor last received (Mark as sent). revision > sent_revision means "Rev N not sent". NULL while a draft.';
 COMMENT ON COLUMN public.vendor_purchase_orders.content_version IS
-  'Bumped by every writer that changes a field the QuickBooks push sends (vendor_purchase_order_pushed_projection), including close and reopen. Receipts, internal notes and promised dates never bump it. "Out of date in QuickBooks" is content_version > the link''s pushed_content_version, which needs no QuickBooks call.';
+  'Bumped whenever a field the QuickBooks push sends changes (vendor_purchase_order_pushed_projection), including close and reopen, at the PO and at a line. "Closed" there is the DERIVED status, the one the push acts on, so a receipt or a void that moves the PO into or out of closed (nothing outstanding while a line was closed short) bumps it, whether it is a PO receipt or a receipt on a linked vendor packing slip. An ordinary receipt, internal notes and promised dates never bump it. "Out of date in QuickBooks" is content_version > the link''s pushed_content_version, which needs no QuickBooks call.';
+COMMENT ON COLUMN public.vendor_purchase_orders.content_hash IS
+  'md5 of vendor_purchase_order_pushed_projection() at the current content_version: every writer ends with vendor_purchase_order_settle_versions, which bumps content_version exactly when the projection no longer hashes to this, so a change is counted whichever writer, trigger or transaction made it. NULL only between the header insert and the end of the RPC that creates the PO (create_vendor_purchase_order, award_vendor_rfq), whose settle records the first value without a bump. A migration that changes what the projection contains must re-record it for every PO in the same migration, deciding on purpose whether existing POs should read out of date. Internal: not AI-readable.';
 COMMENT ON COLUMN public.vendor_purchase_orders.last_line_number IS
   'The highest line number ever issued on this PO. Line numbers are printed and never reused, so a removed line 3 is not given to the next line.';
 COMMENT ON COLUMN public.vendor_purchase_orders.internal_notes IS

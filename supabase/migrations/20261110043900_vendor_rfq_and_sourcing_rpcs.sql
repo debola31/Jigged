@@ -917,6 +917,8 @@ BEGIN
          WHERE r.id = ANY (v_ids) AND i.vendor_id = v_vendor.vendor_id;
 
         v_written := public.vendor_purchase_order_write_lines(v_po_id, v_lines);
+        -- Records the new PO's first content_hash, as create_vendor_purchase_order does.
+        PERFORM public.vendor_purchase_order_settle_versions(v_po_id, false);
 
         -- Stamp each award with the PO line it became (same order as v_lines).
         v_i := 0;

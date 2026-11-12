@@ -317,7 +317,7 @@ GRANT  EXECUTE ON FUNCTION public.next_purchasing_document_number(uuid, text) TO
 
 
 -- ============================================================================
--- 5. The vendor-visible document, and the QuickBooks-pushed projection
+-- 5. The vendor-visible document (the QuickBooks-pushed projection is 8b, after the views)
 -- ============================================================================
 -- WHAT THE VENDOR SEES, and nothing else. Its md5 decides the revision bump: after a send,
 -- the first save that changes it bumps the revision once. Deliberately OUT: the revision
@@ -400,71 +400,6 @@ COMMENT ON FUNCTION public.vendor_purchase_order_document_hash(uuid) IS
 
 REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_document_hash(uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_document_hash(uuid) TO service_role;
-
-
--- WHAT THE QUICKBOOKS PUSH SENDS (plan section 3.11), as Jigged data. Every writer hashes
--- this before and after and bumps content_version when it moved, so "out of date in
--- QuickBooks" is exact without a trigger and without asking QuickBooks. In: the number, the
--- revision (PrivateNote "Jigged PO-1042 Rev 2"), vendor, TxnDate, the header need-by
--- (QBD expectedDate), terms, ship via, notes to vendor (Memo / vendorMessage), the ship-to
--- block, closed, and per line its kind (-> setup item), quantity, unit, rate, line close and
--- EVERY field the QuickBooks line description is built from (describe_line in
--- api/services/accounting/purchase_order.py, which hashes the same fields): part_name (the
--- shop's part number; the line has no other part-number snapshot), description, vendor P/N,
--- service_name, work_center_name (the machine), job_number, operation_label, and the unit
--- label's stock_unit and stock_factor ("bar (= 144 inches)"). A field missing here could
--- change what a push sends while the PO still read "In QuickBooks";
--- test_the_pushed_projection_carries_every_line_field_the_quickbooks_push_reads pins it.
--- Out: receipts, internal notes, promised dates, T&Cs (they reach QuickBooks only through
--- the revision they bump).
-CREATE OR REPLACE FUNCTION public.vendor_purchase_order_pushed_projection(p_vendor_purchase_order_id uuid)
-RETURNS jsonb
-LANGUAGE sql
-STABLE
-SET search_path TO 'public', 'pg_temp'
-AS $fn$
-  SELECT jsonb_build_object(
-           'po_number',       h.po_number,
-           'revision',        h.revision,
-           'vendor_id',       h.vendor_id,
-           'ordered_on',      h.ordered_on,
-           'need_by_on',      h.need_by_on,
-           'payment_terms',   h.payment_terms,
-           'ship_via',        h.ship_via,
-           'notes_to_vendor', h.notes_to_vendor,
-           'ship_to_name',    h.ship_to_name,
-           'ship_to_address', h.ship_to_address,
-           'closed',          h.closed_at IS NOT NULL,
-           'lines', COALESCE((
-             SELECT jsonb_agg(jsonb_build_object(
-                      'id',                 l.id,
-                      'line_number',        l.line_number,
-                      'line_kind',          l.line_kind,
-                      'part_name',          l.part_name,
-                      'description',        l.description,
-                      'vendor_part_number', l.vendor_part_number,
-                      'service_name',       l.service_name,
-                      'work_center_name',   l.work_center_name,
-                      'quantity',           trim_scale(l.quantity),
-                      'unit',               l.unit,
-                      'stock_unit',         l.stock_unit,
-                      'stock_factor',       trim_scale(l.stock_factor),
-                      'unit_price',         trim_scale(l.unit_price),
-                      'job_number',         l.job_number,
-                      'operation_label',    l.operation_label,
-                      'closed',             l.closed_at IS NOT NULL
-                    ) ORDER BY l.line_number)
-               FROM public.vendor_purchase_order_lines l
-              WHERE l.vendor_purchase_order_id = h.id), '[]'::jsonb))
-    FROM public.vendor_purchase_orders h
-   WHERE h.id = p_vendor_purchase_order_id;
-$fn$;
-
-COMMENT ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) IS
-  'The Jigged fields a QuickBooks PO push sends: number, revision, vendor, ordered_on, need_by_on, terms, ship via, notes to vendor, ship-to, closed; per line id, number, kind, quantity, unit, price, closed, and every field the QuickBooks line description is built from: part name (the shop''s part number), description, vendor P/N, service name, work centre name, job number, operation label, stock unit and stock factor (the unit label). Every purchasing writer compares its md5 before and after and bumps vendor_purchase_orders.content_version when it moved. Receipts, internal notes, promised dates and T&Cs are not in it. Internal.';
-
-REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) TO service_role;
 
 
 -- ============================================================================
@@ -799,6 +734,88 @@ LEFT JOIN LATERAL (
 
 COMMENT ON VIEW public.vendor_purchase_order_status IS
   'Every vendor PO''s derived status (draft / sent / partially_received / received / closed, first match), plus line_count, outstanding_line_count, next_expected_on (earliest expected date over outstanding lines; late = is_vendor_purchase_order_late(status, next_expected_on, today)), ordered_amount (sum of line amounts), open_amount (value still to arrive at the PO price), has_unpriced_lines, has_unsent_changes (revision > sent_revision), quickbooks_state, job_ids / job_numbers, and search_text (number, vendor, part numbers, vendor part numbers, job numbers). Lists filter is_archived. security_invoker; no actor columns.';
+
+
+-- ============================================================================
+-- 8b. vendor_purchase_order_pushed_projection -- what the QuickBooks push sends
+-- ============================================================================
+-- Defined after the status view because its `closed` reads that view's status (a LANGUAGE
+-- sql body is checked when it is created, so it cannot name a view that does not exist yet).
+-- WHAT THE QUICKBOOKS PUSH SENDS (plan section 3.11), as Jigged data. Every writer ends with
+-- vendor_purchase_order_settle_versions, which bumps content_version when this no longer
+-- hashes to vendor_purchase_orders.content_hash, so "out of date in QuickBooks" is exact
+-- without asking QuickBooks. In: the number, the revision (PrivateNote "Jigged PO-1042
+-- Rev 2"), vendor, TxnDate, the header need-by (QBD expectedDate), terms, ship via, notes to
+-- vendor (Memo / vendorMessage), the ship-to block, closed, and per line its kind (-> setup
+-- item), quantity, unit, rate, line close and EVERY field the QuickBooks line description is
+-- built from (describe_line in api/services/accounting/purchase_order.py, which hashes the
+-- same fields): part_name (the shop's part number; the line has no other part-number
+-- snapshot), description, vendor P/N, service_name, work_center_name (the machine),
+-- job_number, operation_label, and the unit label's stock_unit and stock_factor ("bar (=
+-- 144 inches)"). A field missing here could change what a push sends while the PO still read
+-- "In QuickBooks"; test_the_pushed_projection_carries_every_line_field_the_quickbooks_push_reads
+-- pins it.
+--
+-- THE HEADER'S `closed` IS THE DERIVED STATUS, vendor_purchase_order_status.status =
+-- 'closed', never closed_at alone: the push closes the QuickBooks PO from that status (the
+-- route's projection_from_rows), and it also covers "nothing outstanding and a line closed
+-- short", which a RECEIPT can reach: the last delivery of the other lines, a PO receipt or one
+-- on a linked vendor packing slip. Reading closed_at here would let such a receipt close the
+-- PO for the push while the PO still read "In QuickBooks" -- and on QuickBooks Online, which
+-- has no line-level close, leave the QuickBooks PO open with an unbilled remainder. A line's
+-- `closed` stays its own closed_at: QuickBooks Desktop closes exactly those lines.
+-- Out: receipts as such, internal notes, promised dates, T&Cs (they reach QuickBooks only
+-- through the revision they bump). A receipt moves this only by moving the derived status.
+CREATE OR REPLACE FUNCTION public.vendor_purchase_order_pushed_projection(p_vendor_purchase_order_id uuid)
+RETURNS jsonb
+LANGUAGE sql
+STABLE
+SET search_path TO 'public', 'pg_temp'
+AS $fn$
+  SELECT jsonb_build_object(
+           'po_number',       h.po_number,
+           'revision',        h.revision,
+           'vendor_id',       h.vendor_id,
+           'ordered_on',      h.ordered_on,
+           'need_by_on',      h.need_by_on,
+           'payment_terms',   h.payment_terms,
+           'ship_via',        h.ship_via,
+           'notes_to_vendor', h.notes_to_vendor,
+           'ship_to_name',    h.ship_to_name,
+           'ship_to_address', h.ship_to_address,
+           'closed',          COALESCE((SELECT s.status = 'closed'
+                                          FROM public.vendor_purchase_order_status s
+                                         WHERE s.id = h.id), false),
+           'lines', COALESCE((
+             SELECT jsonb_agg(jsonb_build_object(
+                      'id',                 l.id,
+                      'line_number',        l.line_number,
+                      'line_kind',          l.line_kind,
+                      'part_name',          l.part_name,
+                      'description',        l.description,
+                      'vendor_part_number', l.vendor_part_number,
+                      'service_name',       l.service_name,
+                      'work_center_name',   l.work_center_name,
+                      'quantity',           trim_scale(l.quantity),
+                      'unit',               l.unit,
+                      'stock_unit',         l.stock_unit,
+                      'stock_factor',       trim_scale(l.stock_factor),
+                      'unit_price',         trim_scale(l.unit_price),
+                      'job_number',         l.job_number,
+                      'operation_label',    l.operation_label,
+                      'closed',             l.closed_at IS NOT NULL
+                    ) ORDER BY l.line_number)
+               FROM public.vendor_purchase_order_lines l
+              WHERE l.vendor_purchase_order_id = h.id), '[]'::jsonb))
+    FROM public.vendor_purchase_orders h
+   WHERE h.id = p_vendor_purchase_order_id;
+$fn$;
+
+COMMENT ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) IS
+  'The Jigged fields a QuickBooks PO push sends: number, revision, vendor, ordered_on, need_by_on, terms, ship via, notes to vendor, ship-to, closed (the DERIVED status from vendor_purchase_order_status, which the push acts on: closed by hand, or nothing outstanding and a line closed short); per line id, number, kind, quantity, unit, price, closed (the line''s own closed_at), and every field the QuickBooks line description is built from: part name (the shop''s part number), description, vendor P/N, service name, work centre name, job number, operation label, stock unit and stock factor (the unit label). vendor_purchase_order_settle_versions bumps vendor_purchase_orders.content_version when its md5 no longer matches content_hash. Receipts move it only by moving the derived status; internal notes, promised dates and T&Cs are not in it. Internal.';
+
+REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_pushed_projection(uuid) TO service_role;
 
 
 -- ============================================================================

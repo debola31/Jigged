@@ -5380,6 +5380,7 @@ export type Database = {
           closed_by: string | null
           closed_reason: string | null
           company_id: string
+          content_hash: string | null
           content_version: number
           created_at: string
           created_by: string | null
@@ -5420,6 +5421,7 @@ export type Database = {
           closed_by?: string | null
           closed_reason?: string | null
           company_id: string
+          content_hash?: string | null
           content_version?: number
           created_at?: string
           created_by?: string | null
@@ -5460,6 +5462,7 @@ export type Database = {
           closed_by?: string | null
           closed_reason?: string | null
           company_id?: string
+          content_hash?: string | null
           content_version?: number
           created_at?: string
           created_by?: string | null
@@ -7478,7 +7481,6 @@ export type Database = {
       vendor_purchase_order_settle_versions: {
         Args: {
           p_may_bump_revision: boolean
-          p_projection_before: string
           p_vendor_purchase_order_id: string
         }
         Returns: Json

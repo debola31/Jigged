@@ -396,7 +396,8 @@ BEGIN
         'vendor_purchase_order_upsert_line', 'vendor_purchase_order_write_lines',
         'vendor_purchase_order_settle_versions', 'vendor_purchase_order_receipt_result',
         'part_vendor_write', 'vendor_rfq_upsert_line', 'vendor_rfq_invite',
-        'ensure_preferred_vendor_is_listed', 'assert_outside_shipment_line_matches'
+        'ensure_preferred_vendor_is_listed', 'assert_outside_shipment_line_matches',
+        'outside_receipt_settles_vendor_purchase_order'
     ] LOOP
         SELECT count(*), min(p.oid::text)::oid INTO v_count, v_oid
           FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
@@ -423,8 +424,8 @@ BEGIN
         'create_vendor_rfq', 'save_vendor_rfq', 'set_vendor_rfq_state',
         'set_vendor_rfq_invitation_state', 'save_vendor_rfq_responses', 'award_vendor_rfq',
         'apply_part_cost_from_vendor', 'quickbooks_purchase_order_state',
-        'ensure_preferred_vendor_is_listed', 'create_outside_shipment',
-        'add_stock_at_location', 'deplete_stock_at_location'];
+        'ensure_preferred_vendor_is_listed', 'outside_receipt_settles_vendor_purchase_order',
+        'create_outside_shipment', 'add_stock_at_location', 'deplete_stock_at_location'];
     v_tables := ARRAY[
         'purchasing_document_series',
         'vendor_rfqs', 'vendor_rfq_lines', 'vendor_rfq_invitations', 'vendor_rfq_responses',

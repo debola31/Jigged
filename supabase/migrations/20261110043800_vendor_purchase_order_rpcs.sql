@@ -19,7 +19,13 @@
 -- LOCK ORDER, everywhere: the PO header FOR UPDATE, then the per-job outside-shipment
 -- advisory locks (sorted by key) for every job an outside line touches, then lines.
 -- create_outside_shipment takes the same job lock and no PO lock, so it cannot deadlock
--- against these, and a slip and a line insert for one job serialise.
+-- against these, and a slip and a line insert for one job serialise. The relink RPC locks
+-- both POs (in id order) before the job lock; a receipt on a linked slip locks its PO from a
+-- trigger, holding no job lock (section 6b).
+--
+-- EVERY WRITER ENDS WITH vendor_purchase_order_settle_versions, header still locked: it bumps
+-- the revision (when allowed) and the QuickBooks content_version (when the pushed projection
+-- no longer hashes to content_hash).
 -- ============================================================================
 
 
@@ -927,14 +933,19 @@ REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_write_lines(uuid, jsonb)
 GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_write_lines(uuid, jsonb) TO service_role;
 
 
--- The revision and the QuickBooks content version, settled at the end of every writer.
+-- The revision and the QuickBooks content version, settled at the end of every writer --
+-- with the PO header locked, which every caller has done first.
 -- REVISION: only when allowed (vendor-visible saves), only once per send cycle -- the PO
 -- was sent, the current revision IS the sent one, and the vendor-visible document no longer
 -- hashes to what was sent. Drafts never bump.
--- CONTENT VERSION: whenever the pushed projection moved.
+-- CONTENT VERSION: whenever the pushed projection no longer hashes to content_hash, the md5
+-- the current content_version was counted for. Compared with what is STORED, not with a
+-- hash the caller took before its change, so a change is counted whoever made it: an RPC, or
+-- the trigger behind a receipt on a linked vendor packing slip (a plain table write with no
+-- RPC around it). The first settle of a new PO (content_hash NULL, inside the RPC that
+-- created it) records the hash and counts nothing.
 CREATE OR REPLACE FUNCTION public.vendor_purchase_order_settle_versions(
     p_vendor_purchase_order_id uuid,
-    p_projection_before        text,
     p_may_bump_revision        boolean)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -943,6 +954,7 @@ AS $fn$
 DECLARE
     v_po        public.vendor_purchase_orders%ROWTYPE;
     v_sent_hash text;
+    v_hash      text;
     v_bumped    boolean := false;
     v_changed   boolean := false;
 BEGIN
@@ -958,9 +970,14 @@ BEGIN
         END IF;
     END IF;
 
-    IF p_projection_before IS DISTINCT FROM
-       md5(public.vendor_purchase_order_pushed_projection(v_po.id)::text) THEN
-        UPDATE public.vendor_purchase_orders SET content_version = content_version + 1 WHERE id = v_po.id;
+    -- After the revision, which the projection carries.
+    v_hash := md5(public.vendor_purchase_order_pushed_projection(v_po.id)::text);
+    IF v_po.content_hash IS NULL THEN
+        UPDATE public.vendor_purchase_orders SET content_hash = v_hash WHERE id = v_po.id;
+    ELSIF v_po.content_hash IS DISTINCT FROM v_hash THEN
+        UPDATE public.vendor_purchase_orders
+           SET content_version = content_version + 1, content_hash = v_hash
+         WHERE id = v_po.id;
         v_changed := true;
     END IF;
 
@@ -975,11 +992,11 @@ BEGIN
 END
 $fn$;
 
-COMMENT ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, text, boolean) IS
-  'End of every PO writer: bumps revision once per send cycle when allowed and the vendor-visible document no longer matches the sent revision''s hash; bumps content_version when the QuickBooks-pushed projection changed from p_projection_before. Returns {revision, sent_revision, revision_bumped, content_version, content_changed, updated_at}. Internal.';
+COMMENT ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, boolean) IS
+  'End of every PO writer, with the header already locked: bumps revision once per send cycle when allowed and the vendor-visible document no longer matches the sent revision''s hash; bumps content_version, and records the new content_hash, when the QuickBooks-pushed projection no longer hashes to the stored content_hash (the first settle of a new PO only records it). Returns {revision, sent_revision, revision_bumped, content_version, content_changed, updated_at}. Internal.';
 
-REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, text, boolean) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, text, boolean) TO service_role;
+REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, boolean) FROM PUBLIC, anon, authenticated;
+GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_settle_versions(uuid, boolean) TO service_role;
 
 
 -- The result of a delivery, built from what is stored, so a replayed receipt_group_id
@@ -1462,6 +1479,8 @@ BEGIN
     PERFORM 1 FROM public.vendor_purchase_orders h WHERE h.id = v_id FOR UPDATE;
     PERFORM public.vendor_purchase_order_lock_jobs(v_id, COALESCE(p_lines, '[]'::jsonb));
     PERFORM public.vendor_purchase_order_write_lines(v_id, COALESCE(p_lines, '[]'::jsonb));
+    -- Records the first content_hash; a new PO starts at content_version 0.
+    PERFORM public.vendor_purchase_order_settle_versions(v_id, false);
 
     SELECT h.po_number INTO v_number FROM public.vendor_purchase_orders h WHERE h.id = v_id;
     RETURN QUERY SELECT v_id, v_number;
@@ -1498,7 +1517,6 @@ DECLARE
                                   WHERE r IS NOT NULL);
     v_restricted boolean;
     v_visible    boolean;
-    v_projection text;
     v_vendor     record;
     v_party      jsonb;
     v_ship       jsonb;
@@ -1563,7 +1581,6 @@ BEGIN
             v_po.po_number USING ERRCODE = 'P0001';
     END IF;
 
-    v_projection := md5(public.vendor_purchase_order_pushed_projection(p_id)::text);
     PERFORM public.vendor_purchase_order_lock_jobs(p_id, v_lines);
 
     -- ---- the vendor (decides what the contact, address and part lines are checked against)
@@ -1709,7 +1726,7 @@ BEGIN
         UPDATE public.vendor_purchase_orders SET updated_at = now() WHERE id = p_id;
     END IF;
 
-    v_versions := public.vendor_purchase_order_settle_versions(p_id, v_projection, true);
+    v_versions := public.vendor_purchase_order_settle_versions(p_id, true);
 
     RETURN jsonb_build_object(
         'id', p_id,
@@ -1741,7 +1758,6 @@ AS $fn$
 DECLARE
     v_company    uuid;
     v_po         public.vendor_purchase_orders%ROWTYPE;
-    v_projection text;
     v_reason     text := NULLIF(btrim(p_reason), '');
     v_doc        jsonb;
     v_conflict   record;
@@ -1763,7 +1779,6 @@ BEGIN
     END IF;
 
     PERFORM public.vendor_purchase_order_lock_jobs(p_id, '[]'::jsonb);
-    v_projection := md5(public.vendor_purchase_order_pushed_projection(p_id)::text);
 
     IF p_action = 'mark_sent' THEN
         IF v_po.deleted_at IS NOT NULL THEN
@@ -1848,7 +1863,7 @@ BEGIN
         END IF;
     END IF;
 
-    v_versions := public.vendor_purchase_order_settle_versions(p_id, v_projection, false);
+    v_versions := public.vendor_purchase_order_settle_versions(p_id, false);
 
     RETURN jsonb_build_object(
         'id', p_id,
@@ -1883,7 +1898,6 @@ DECLARE
     v_ids        uuid[] := ARRAY(SELECT DISTINCT i FROM unnest(COALESCE(p_line_ids, '{}'::uuid[])) i
                                   WHERE i IS NOT NULL);
     v_reason     text := NULLIF(btrim(p_reason), '');
-    v_projection text;
     v_ls         record;
     v_conflict   record;
     v_versions   jsonb;
@@ -1922,7 +1936,6 @@ BEGIN
     END IF;
 
     PERFORM public.vendor_purchase_order_lock_jobs(p_id, '[]'::jsonb);
-    v_projection := md5(public.vendor_purchase_order_pushed_projection(p_id)::text);
 
     IF p_action = 'close' THEN
         FOR v_ls IN
@@ -1977,7 +1990,7 @@ BEGIN
          WHERE id = ANY (v_ids);
     END IF;
 
-    v_versions := public.vendor_purchase_order_settle_versions(p_id, v_projection, false);
+    v_versions := public.vendor_purchase_order_settle_versions(p_id, false);
 
     RETURN jsonb_build_object(
         'id', p_id,
@@ -2025,7 +2038,6 @@ DECLARE
     v_received_at timestamptz := COALESCE(p_received_at, now());
     v_slip        text := NULLIF(btrim(p_vendor_packing_slip), '');
     v_note        text := NULLIF(btrim(p_notes), '');
-    v_projection  text;
     v_e           record;
     v_line        public.vendor_purchase_order_lines%ROWTYPE;
     v_qty         numeric;
@@ -2164,8 +2176,6 @@ BEGIN
         END IF;
     END LOOP;
 
-    v_projection := md5(public.vendor_purchase_order_pushed_projection(p_id)::text);
-
     -- ---- pass 2: per part, heats first; otherwise in the order given --------------
     FOR v_e IN
         SELECT e.value AS entry, (e.ordinality - 1)::integer AS idx
@@ -2257,13 +2267,17 @@ BEGIN
                         WHERE ls.id = l.id AND ls.status IN ('open', 'partially_received'));
     END IF;
 
-    PERFORM public.vendor_purchase_order_settle_versions(p_id, v_projection, false);
+    -- An ordinary delivery changes nothing QuickBooks holds. content_version moves only when
+    -- this one closed lines ("close the remaining"), or moved the PO's derived status into
+    -- closed: the last of what was outstanding arrived while another line was closed short,
+    -- and the push will close the QuickBooks PO.
+    PERFORM public.vendor_purchase_order_settle_versions(p_id, false);
     RETURN public.vendor_purchase_order_receipt_result(p_id, p_receipt_group_id);
 END
 $fn$;
 
 COMMENT ON FUNCTION public.receive_vendor_purchase_order(uuid, uuid, jsonb, timestamptz, text, text) IS
-  'Receives one delivery against a SENT vendor PO, atomically and idempotently (a replayed p_receipt_group_id returns the first result and writes nothing). p_receipts: [{line_id, quantity, quantity_unit purchase|stock, location_id (part lines, a leaf), heat_number | lot_id, notes, close_remaining}]. Part entries go through add_stock_at_location (heats first per part), store exactly what was typed plus the exact stock quantity, stamp a newly created lot with the vendor and receipt date, and link the ledger row. Other lines record quantity only. Outside-service lines are refused: they are received on their vendor packing slips. Over-receipt is allowed and flagged. A draft is refused with "mark it sent first". Office users only.';
+  'Receives one delivery against a SENT vendor PO, atomically and idempotently (a replayed p_receipt_group_id returns the first result and writes nothing). p_receipts: [{line_id, quantity, quantity_unit purchase|stock, location_id (part lines, a leaf), heat_number | lot_id, notes, close_remaining}]. Part entries go through add_stock_at_location (heats first per part), store exactly what was typed plus the exact stock quantity, stamp a newly created lot with the vendor and receipt date, and link the ledger row. Other lines record quantity only. Outside-service lines are refused: they are received on their vendor packing slips. Over-receipt is allowed and flagged. A draft is refused with "mark it sent first". content_version moves only when the delivery closes lines (close_remaining) or moves the PO into its derived closed status (nothing outstanding while a line was closed short); an ordinary delivery never moves it. Office users only.';
 
 REVOKE EXECUTE ON FUNCTION public.receive_vendor_purchase_order(uuid, uuid, jsonb, timestamptz, text, text) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.receive_vendor_purchase_order(uuid, uuid, jsonb, timestamptz, text, text) TO authenticated, service_role;
@@ -2341,6 +2355,11 @@ BEGIN
        SET voided_at = now(), voided_by = auth.uid(), void_reason = v_reason, void_transaction_id = v_txn
      WHERE id = v_r.id;
 
+    -- Like a receipt: content_version moves only when the void moves the derived status out
+    -- of closed (the voided delivery was what left nothing outstanding beside a line closed
+    -- short), so the push reopens the QuickBooks PO.
+    PERFORM public.vendor_purchase_order_settle_versions(v_po_id, false);
+
     RETURN jsonb_build_object(
         'voided', true,
         'receipt_id', v_r.id,
@@ -2352,7 +2371,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.void_vendor_purchase_order_receipt(uuid, text) IS
-  'Voids one vendor PO receipt. A part receipt is reversed through deplete_stock_at_location from its own place and lot, linking void_transaction_id; refused (nothing changes) when the place is gone, when the part started heat tracking after a lot-less receipt, or when less than the received stock is still there. Never switches tracking off. Idempotent: a second void returns voided false. Office users only.';
+  'Voids one vendor PO receipt. A part receipt is reversed through deplete_stock_at_location from its own place and lot, linking void_transaction_id; refused (nothing changes) when the place is gone, when the part started heat tracking after a lot-less receipt, or when less than the received stock is still there. Never switches tracking off. Bumps content_version only when the void moves the PO out of its derived closed status. Idempotent: a second void returns voided false. Office users only.';
 
 REVOKE EXECUTE ON FUNCTION public.void_vendor_purchase_order_receipt(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.void_vendor_purchase_order_receipt(uuid, text) TO authenticated, service_role;
@@ -2362,8 +2381,13 @@ GRANT  EXECUTE ON FUNCTION public.void_vendor_purchase_order_receipt(uuid, text)
 -- 6. A slip's PO line, by hand
 -- ============================================================================
 -- The rare correction: relink a vendor packing slip to a line, or unlink it (NULL). Office
--- only. The slip's job lock first, the same lock create_outside_shipment and the PO writers
--- take; the PO is read, not locked, so the lock order stays one way round.
+-- only. Moving a slip moves what came back on it from one line's received figure to the
+-- other's, which can move either PO into or out of its derived closed status, so BOTH POs
+-- are locked and settled. The lock order is every PO writer's: the PO headers first (the one
+-- the slip leaves and the one it joins, in id order), then the slip's job lock -- the same
+-- lock create_outside_shipment and the PO writers take -- then the slip, FOR NO KEY UPDATE:
+-- a receipt being recorded on this slip holds KEY SHARE on it (its foreign key) while its
+-- trigger waits for a PO lock, and FOR UPDATE would wait on that receipt in turn.
 CREATE OR REPLACE FUNCTION public.set_outside_shipment_vendor_purchase_order_line(
     p_outside_shipment_id           uuid,
     p_vendor_purchase_order_line_id uuid DEFAULT NULL)
@@ -2377,6 +2401,8 @@ DECLARE
     v_job     uuid;
     v_slip    public.outside_shipments%ROWTYPE;
     v_line    record;
+    v_pos     uuid[];
+    v_po      uuid;
 BEGIN
     SELECT s.company_id, s.job_id INTO v_company, v_job
       FROM public.outside_shipments s WHERE s.id = p_outside_shipment_id;
@@ -2384,8 +2410,30 @@ BEGIN
     IF NOT public.company_can_write(v_company) THEN
         RAISE EXCEPTION 'Your subscription is not active (billing_gate_update)' USING ERRCODE = '42501';
     END IF;
+
+    -- The PO the slip leaves and the PO it joins (a line of another company names none).
+    v_pos := ARRAY(
+        SELECT DISTINCT l.vendor_purchase_order_id
+          FROM public.vendor_purchase_order_lines l
+         WHERE l.company_id = v_company
+           AND l.id IN (SELECT s.vendor_purchase_order_line_id FROM public.outside_shipments s
+                         WHERE s.id = p_outside_shipment_id
+                        UNION ALL
+                        SELECT p_vendor_purchase_order_line_id)
+         ORDER BY 1);
+    PERFORM 1 FROM public.vendor_purchase_orders h WHERE h.id = ANY (v_pos) ORDER BY h.id FOR UPDATE;
     PERFORM pg_advisory_xact_lock(hashtext('outside_shipment:' || v_job::text));
-    SELECT * INTO v_slip FROM public.outside_shipments WHERE id = p_outside_shipment_id FOR UPDATE;
+    SELECT * INTO v_slip FROM public.outside_shipments WHERE id = p_outside_shipment_id FOR NO KEY UPDATE;
+
+    -- Every writer of the link holds the PO lock of the line it moves the slip off, or the job
+    -- lock, so the link is fixed from here on. It moved only if a writer got in between the
+    -- read above and these locks, and then the PO it moved to is not locked here.
+    IF v_slip.vendor_purchase_order_line_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM public.vendor_purchase_order_lines l
+         WHERE l.id = v_slip.vendor_purchase_order_line_id AND l.vendor_purchase_order_id = ANY (v_pos)) THEN
+        RAISE EXCEPTION '% was just linked to another purchase order line. Reload it and try again.',
+            v_slip.slip_number USING ERRCODE = 'P0001';
+    END IF;
 
     IF v_slip.voided_at IS NOT NULL THEN
         RAISE EXCEPTION '% is void.', v_slip.slip_number USING ERRCODE = 'P0001';
@@ -2426,6 +2474,10 @@ BEGIN
        SET vendor_purchase_order_line_id = p_vendor_purchase_order_line_id
      WHERE id = p_outside_shipment_id;
 
+    FOREACH v_po IN ARRAY v_pos LOOP
+        PERFORM public.vendor_purchase_order_settle_versions(v_po, false);
+    END LOOP;
+
     RETURN jsonb_build_object(
         'outside_shipment_id', p_outside_shipment_id,
         'slip_number', v_slip.slip_number,
@@ -2434,10 +2486,105 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.set_outside_shipment_vendor_purchase_order_line(uuid, uuid) IS
-  'Relinks a live vendor packing slip to an outside-service line of an open, unarchived PO for the same step and vendor, or unlinks it (NULL). Office users only (operators send and receive, and the slip auto-links at send). Changes no status.';
+  'Relinks a live vendor packing slip to an outside-service line of an open, unarchived PO for the same step and vendor, or unlinks it (NULL). Office users only (operators send and receive, and the slip auto-links at send). Changes no operation, part or job status. Locks and settles both POs: a slip with parts back can move either one into or out of its derived closed status, which bumps its content_version.';
 
 REVOKE EXECUTE ON FUNCTION public.set_outside_shipment_vendor_purchase_order_line(uuid, uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.set_outside_shipment_vendor_purchase_order_line(uuid, uuid) TO authenticated, service_role;
+
+
+-- ============================================================================
+-- 6b. A receipt on a linked vendor packing slip settles its PO
+-- ============================================================================
+-- Outside work comes back on its vendor packing slip, and recording that is the browser's
+-- plain INSERT into outside_shipment_receipts -- operators included, from the phone -- while
+-- an undo is its column-scoped UPDATE of voided_at, and void_outside_shipment voids a slip's
+-- receipts the same way. No purchasing RPC runs, yet the receipt that brings back the last
+-- pieces of a PO's last open line while another line was closed short CLOSES the PO for the
+-- push (its derived status), and voiding that receipt reopens it. So this trigger settles the
+-- linked PO the way every PO writer ends: lock its header, then
+-- vendor_purchase_order_settle_versions, which bumps content_version only when the pushed
+-- projection no longer hashes to content_hash. An ordinary receipt moves nothing.
+--
+-- WHY IT IS SAFE BESIDE THE OPERATION -> PART -> JOB CASCADE (docs/modules/
+-- outside-processing.md, "The trigger-depth trap"):
+--   * It is a SIBLING of trigger_recompute_op_status_on_outside_receipt_*, fired by the same
+--     receipt write at the same depth, not a link in that chain. It writes only
+--     vendor_purchase_orders.content_version / content_hash, and that table's one trigger is
+--     the BEFORE updated_at stamp, which writes nothing. The cascade's depth is untouched.
+--   * Still no trigger on a purchasing table writes another table: this one sits on outside
+--     processing's receipts and writes only the PO header, as ensure_preferred_vendor_is_listed
+--     sits on parts and writes only part_vendors.
+--   * AFTER, so the row has passed RLS, the billing gate and its foreign key first: it locks
+--     and settles only a PO of the company the receipt was written for.
+--   * Named to fire BEFORE the cascade (triggers fire in name order), so it waits for the PO
+--     lock before the cascade has locked an operation, part or job row; and a PO writer
+--     holding that lock waits on nothing a receipt holds (it takes KEY SHARE on job rows and
+--     NO KEY UPDATE on slips, both compatible with the receipt's locks). FOR NO KEY UPDATE on
+--     the header, so a QuickBooks link row being inserted for the PO (KEY SHARE) is not held up.
+--   * After the lock it reads the slip's link again: the writer it waited for may have relinked
+--     the slip, and the PO the receipt now counts toward is locked and settled too.
+--   * A receipt with no good pieces changes no received figure, so the WHEN clauses skip it.
+--     DELETE is not watched: the app voids receipts and never deletes one, and the only
+--     deletes (with the company, or a demo reset after the POs are gone) leave no PO to settle.
+-- SECURITY DEFINER because the browser has no write on vendor_purchase_orders. No
+-- company_can_write of its own: the receipt write that fired it was gated, the
+-- definer_writers_missing_write_gate() reasoning for every trigger on its list.
+CREATE OR REPLACE FUNCTION public.outside_receipt_settles_vendor_purchase_order()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $fn$
+DECLARE
+    v_slips  uuid[] := ARRAY[NEW.outside_shipment_id];
+    v_locked uuid[] := '{}';
+    v_pos    uuid[];
+    v_po     uuid;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        v_slips := v_slips || OLD.outside_shipment_id;
+    END IF;
+
+    LOOP
+        v_pos := ARRAY(
+            SELECT DISTINCT l.vendor_purchase_order_id
+              FROM public.outside_shipments s
+              JOIN public.vendor_purchase_order_lines l ON l.id = s.vendor_purchase_order_line_id
+             WHERE s.id = ANY (v_slips)
+               AND NOT (l.vendor_purchase_order_id = ANY (v_locked))
+             ORDER BY 1);
+        EXIT WHEN cardinality(v_pos) = 0;
+        PERFORM 1 FROM public.vendor_purchase_orders h
+          WHERE h.id = ANY (v_pos) ORDER BY h.id FOR NO KEY UPDATE;
+        v_locked := v_locked || v_pos;
+    END LOOP;
+
+    FOREACH v_po IN ARRAY v_locked LOOP
+        PERFORM public.vendor_purchase_order_settle_versions(v_po, false);
+    END LOOP;
+    RETURN NULL;
+END
+$fn$;
+
+COMMENT ON FUNCTION public.outside_receipt_settles_vendor_purchase_order() IS
+  'AFTER trigger on outside_shipment_receipts: a receipt (or its void) on a vendor packing slip linked to a PO line locks that PO''s header and settles it (vendor_purchase_order_settle_versions), so content_version moves when the receipt moved the PO into or out of its derived closed status -- the status the QuickBooks push closes and reopens from -- and never for an ordinary receipt. Re-reads the link after the lock and settles a PO it was relinked to. Writes only vendor_purchase_orders.content_version / content_hash: a sibling of the operation -> part -> job cascade at the same trigger depth, never part of it.';
+
+REVOKE EXECUTE ON FUNCTION public.outside_receipt_settles_vendor_purchase_order() FROM PUBLIC, anon, authenticated;
+
+CREATE TRIGGER outside_shipment_receipts_settle_vendor_po_ins
+    AFTER INSERT ON public.outside_shipment_receipts
+    FOR EACH ROW
+    WHEN (NEW.quantity_good <> 0 AND NEW.voided_at IS NULL)
+    EXECUTE FUNCTION public.outside_receipt_settles_vendor_purchase_order();
+
+CREATE TRIGGER outside_shipment_receipts_settle_vendor_po_upd
+    AFTER UPDATE OF quantity_good, voided_at, outside_shipment_id ON public.outside_shipment_receipts
+    FOR EACH ROW
+    WHEN ((OLD.quantity_good <> 0 OR NEW.quantity_good <> 0)
+          AND (OLD.quantity_good IS DISTINCT FROM NEW.quantity_good
+               OR OLD.voided_at IS DISTINCT FROM NEW.voided_at
+               OR OLD.outside_shipment_id IS DISTINCT FROM NEW.outside_shipment_id))
+    EXECUTE FUNCTION public.outside_receipt_settles_vendor_purchase_order();
 
 
 -- ============================================================================

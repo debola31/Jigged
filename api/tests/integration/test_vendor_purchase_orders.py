@@ -735,6 +735,40 @@ def test_lines_close_and_reopen_in_one_batch(db, sent):
     assert ps.po_status(db, sent.po.id)["status"] == ps.SENT
 
 
+def _close_lines_refused(ctx: SentPo, line_ids: list[str], **kw):
+    return ps.refuse(ctx.shop.user, "set_vendor_purchase_order_line_state",
+                     p_id=ctx.po.id, p_line_ids=line_ids, p_action="close", **kw)
+
+
+def test_closing_a_line_received_in_full_is_refused_in_the_exact_sentence(db, sent):
+    """[P5] P0001, "Line 2 has nothing left to receive." -- the whole sentence, naming the line that
+    was received in full, not the batch's first line. `isNothingLeftToReceiveRefusal`
+    (utils/vendorPoAccess.ts) matches exactly that sentence for one line's number, so that closing a
+    line after a full receipt reads as the line done rather than a failure; reworded, the UI would
+    quietly report it as an error again. The refused batch closes nothing."""
+    ps.receive(sent.shop.admin, sent.po.id, [ps.entry(sent.screw_line, 2.5, location=sent.shop.shelf)])
+    assert ps.line_row(db, sent.screw_line)["line_number"] == 2
+
+    err = _close_lines_refused(sent, [sent.bar_line, sent.screw_line])
+    ps.assert_state_refusal(err)
+    assert ps.message(err) == "Line 2 has nothing left to receive."
+    assert ps.line_row(db, sent.bar_line)["closed_at"] is None, "a refused batch closed a line"
+
+
+def test_closing_a_line_already_closed_is_refused_in_the_exact_sentence(db, sent):
+    """[P5] P0001, "Line 2 is already closed." -- checked before "nothing left to receive", which a
+    closed line would also satisfy, so the two sentences never stand in for each other. The refused
+    batch closes nothing, and the first close's reason stands."""
+    ps.set_lines(sent.shop.user, sent.po.id, [sent.screw_line], "close", reason="Cancelled by phone")
+    assert ps.line_row(db, sent.screw_line)["line_number"] == 2
+
+    err = _close_lines_refused(sent, [sent.bar_line, sent.screw_line], p_reason="Closing it again")
+    ps.assert_state_refusal(err)
+    assert ps.message(err) == "Line 2 is already closed."
+    assert ps.line_row(db, sent.bar_line)["closed_at"] is None, "a refused batch closed a line"
+    assert ps.line_row(db, sent.screw_line)["closed_reason"] == "Cancelled by phone"
+
+
 def test_archive_is_never_blocked_and_lets_go_of_its_slips(db, shop):
     """[P5] Archive works on a PO with receipts and a linked slip, and unlinks the slip so a
     re-created PO can claim it."""

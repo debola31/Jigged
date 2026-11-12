@@ -93,14 +93,18 @@ def test_no_ai_readable_table_still_shows_archived_rows(supabase_admin):
 
     apply_ai_read_access() now appends the clause for any table with a deleted_at
     column, so the supported path cannot reintroduce this. A hand-written
-    parent-scoped policy still can, which is what this catches.
+    parent-scoped policy still can, and so can a company-only policy on a table
+    whose rows belong to a soft-deletable parent, which is what this catches.
     """
     res = supabase_admin.rpc("ai_policies_missing_soft_delete_filter", {}).execute()
     assert res.data == [], (
         f"AI-readable tables whose policy does not filter deleted_at: {res.data}. "
         "Archived rows are visible to the model there, and it will eventually "
         "report them as live. Re-run public.apply_ai_read_access() on the table, "
-        "or add the clause by hand if it is parent-scoped."
+        "or add the clause by hand if it is parent-scoped -- and if a NOT NULL "
+        "key names a soft-deletable parent the row belongs to, require that "
+        "parent live in the policy, through that key. A key that only REFERS to "
+        "its parent goes on the guard's reference_keys list, with its reason."
     )
 
 
@@ -245,6 +249,260 @@ async def test_the_soft_delete_guard_reads_the_parent_a_policy_scopes_through():
             }
             assert "vendor_contacts" in flagged, (
                 "a child policy that ignores its parent's deleted_at is invisible to the guard")
+        finally:
+            await tr.rollback()
+    finally:
+        await admin.close()
+
+
+@_needs_ro
+async def test_an_archived_quotes_lines_and_an_archived_parts_tiers_are_invisible():
+    """A quote's lines go with the quote, and a part's price tiers with the part.
+
+    quote_line_items and part_pricing_tiers carry their own company_id, so until 20261112193919
+    their policies said "this company" and never read the parent at all -- which also kept them
+    out of the guard's sight, since its second branch judges only the tables a policy reads.
+    "What was on the quotes we lost?" would have summed the lines of quotes no screen shows.
+
+    The live quote's lines and the live part's tiers are the control. So is the live quote's line
+    that names the ARCHIVED part: a line belongs to its quote, and part_id only refers.
+    """
+    import uuid
+
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    company_id = None
+    try:
+        tag = uuid.uuid4().hex[:8]
+        company_id = await admin.fetchval(
+            "INSERT INTO public.companies (name) VALUES ($1) RETURNING id",
+            f"ai-archived-quote-{tag}",
+        )
+        parts, tiers, quotes = {}, {}, {}
+        for label, archived in (("live", False), ("archived", True)):
+            parts[label] = await admin.fetchval(
+                "INSERT INTO public.parts (company_id, part_name, primary_unit, deleted_at) "
+                "VALUES ($1, $2, 'ea', CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"{label} bracket {tag}", archived,
+            )
+            tiers[label] = await admin.fetchval(
+                "INSERT INTO public.part_pricing_tiers "
+                "(company_id, part_id, sequence, quantity, markup_percent) "
+                "VALUES ($1, $2, 1, 10, 25) RETURNING id",
+                company_id, parts[label],
+            )
+            quotes[label] = await admin.fetchval(
+                "INSERT INTO public.quotes (company_id, quote_number, deleted_at) "
+                "VALUES ($1, $2, CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"Q-{label}-{tag}", archived,
+            )
+
+        line = (
+            "INSERT INTO public.quote_line_items "
+            "(company_id, quote_id, part_id, sequence, quantity, unit_price) "
+            "VALUES ($1, $2, $3, $4, 5, 12.50) RETURNING id"
+        )
+        # The archived quote's line names the LIVE part, so only the quote can hide it.
+        archived_quote_line = await admin.fetchval(line, company_id, quotes["archived"], parts["live"], 1)
+        live_quote_line = await admin.fetchval(line, company_id, quotes["live"], parts["live"], 1)
+        live_quote_archived_part_line = await admin.fetchval(
+            line, company_id, quotes["live"], parts["archived"], 2)
+
+        await ro.execute(f"SET jigged.company_id = '{company_id}'")
+        seen = {r["id"] for r in await ro.fetch("SELECT id FROM public.quote_line_items")}
+        assert archived_quote_line not in seen, "the sandbox can see an archived quote's lines"
+        assert live_quote_line in seen, (
+            "the sandbox cannot see a live quote's lines -- the policy hides too much")
+        assert live_quote_archived_part_line in seen, (
+            "a live quote's line naming an archived part is hidden -- part_id is a reference, "
+            "and the line belongs to its quote")
+
+        seen = {r["id"] for r in await ro.fetch("SELECT id FROM public.part_pricing_tiers")}
+        assert tiers["archived"] not in seen, "the sandbox can see an archived part's pricing tiers"
+        assert tiers["live"] in seen, (
+            "the sandbox cannot see a live part's pricing tiers -- the policy hides too much")
+    finally:
+        if company_id is not None:
+            # Parts, quotes, lines and tiers all cascade from the company.
+            await admin.execute("DELETE FROM public.companies WHERE id = $1", company_id)
+        await admin.close()
+        await ro.close()
+
+
+# The other rows that belong to a soft-deletable parent through a NOT NULL key, found by the
+# guard's third branch the day it was written. Each case is the child, its parent, and one query
+# of (child_id, parent_id) pairs, run as the sandbox to find a live parent whose children it can
+# see and as postgres to list every child that parent has.
+#
+# The cases after `shipments` are GRANDCHILDREN, reaching the archived row through a table in
+# between. Each is hidden either by reading the grandparent itself (the slip receipts, the PO
+# receipts, the RFQ responses) or by reading the table in between and letting that table's policy
+# do it (routing_operations, the price breaks, the packing-slip lines), since RLS applies inside a
+# policy's subquery too. Where the table in between has no deleted_at of its own -- all but
+# part_vendors -- the guard cannot see the chain, and this list is the only thing that says so;
+# see "The soft-delete guard sees one level of ownership" in docs/modules/ai-insights.md.
+_CHILDREN_OF_ARCHIVED_PARENTS = [
+    ("routings", "parts",
+     "SELECT r.id AS child_id, r.part_id AS parent_id FROM public.routings r"),
+    ("vendor_services", "vendors",
+     "SELECT s.id AS child_id, s.vendor_id AS parent_id FROM public.vendor_services s"
+     " WHERE s.deleted_at IS NULL"),
+    ("part_vendors", "parts",
+     "SELECT pv.id AS child_id, pv.part_id AS parent_id FROM public.part_vendors pv"
+     " WHERE pv.deleted_at IS NULL"),
+    ("part_vendors", "vendors",
+     "SELECT pv.id AS child_id, pv.vendor_id AS parent_id FROM public.part_vendors pv"
+     " WHERE pv.deleted_at IS NULL"),
+    ("material_lots", "parts",
+     "SELECT l.id AS child_id, l.part_id AS parent_id FROM public.material_lots l"
+     " WHERE l.deleted_at IS NULL"),
+    ("outside_shipments", "jobs",
+     "SELECT s.id AS child_id, s.job_id AS parent_id FROM public.outside_shipments s"),
+    ("shipments", "jobs",
+     "SELECT s.id AS child_id, s.job_id AS parent_id FROM public.shipments s"),
+    ("routing_operations", "parts",
+     "SELECT o.id AS child_id, r.part_id AS parent_id FROM public.routing_operations o"
+     " JOIN public.routings r ON r.id = o.routing_id"),
+    ("part_vendor_price_breaks", "vendors",
+     "SELECT b.id AS child_id, pv.vendor_id AS parent_id FROM public.part_vendor_price_breaks b"
+     " JOIN public.part_vendors pv ON pv.id = b.part_vendor_id WHERE pv.deleted_at IS NULL"),
+    ("outside_shipment_receipts", "jobs",
+     "SELECT x.id AS child_id, s.job_id AS parent_id FROM public.outside_shipment_receipts x"
+     " JOIN public.outside_shipments s ON s.id = x.outside_shipment_id"),
+    ("shipment_line_items", "jobs",
+     "SELECT li.id AS child_id, s.job_id AS parent_id FROM public.shipment_line_items li"
+     " JOIN public.shipments s ON s.id = li.shipment_id"),
+    ("vendor_purchase_order_receipts", "vendor_purchase_orders",
+     "SELECT x.id AS child_id, x.vendor_purchase_order_id AS parent_id"
+     " FROM public.vendor_purchase_order_receipts x"),
+    ("vendor_rfq_responses", "vendor_rfqs",
+     "SELECT x.id AS child_id, i.vendor_rfq_id AS parent_id FROM public.vendor_rfq_responses x"
+     " JOIN public.vendor_rfq_invitations i ON i.id = x.vendor_rfq_invitation_id"),
+]
+
+
+@_needs_ro
+@pytest.mark.parametrize(
+    "child, parent, pairs", _CHILDREN_OF_ARCHIVED_PARENTS,
+    ids=[f"{c}-of-{p}" for c, p, _ in _CHILDREN_OF_ARCHIVED_PARENTS],
+)
+async def test_a_child_is_archived_with_its_parent(child, parent, pairs):
+    """Archive a seeded parent, and the sandbox loses every child it could see a moment before.
+
+    The before-count is the control: it proves the rows were reachable, so a policy that hides
+    everything cannot pass. Committed and put back in `finally`, like the archived-job test above,
+    because the sandbox reads on its own connection.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    parent_id = None
+    archived = False
+    try:
+        live: dict = {}
+        for r in await admin.fetch(
+            f"SELECT DISTINCT x.parent_id, p.company_id FROM ({pairs}) x "
+            f"JOIN public.{parent} p ON p.id = x.parent_id WHERE p.deleted_at IS NULL"
+        ):
+            live.setdefault(r["company_id"], []).append(r["parent_id"])
+        for company_id, parent_ids in live.items():
+            await ro.execute(f"SET jigged.company_id = '{company_id}'")
+            parent_id = await ro.fetchval(
+                f"SELECT x.parent_id FROM ({pairs}) x WHERE x.parent_id = ANY($1::uuid[]) LIMIT 1",
+                parent_ids,
+            )
+            if parent_id is not None:
+                break
+        if parent_id is None:
+            pytest.skip(f"the seed has no {child} row the sandbox can see under a live {parent}")
+
+        children = [
+            r["child_id"] for r in await admin.fetch(
+                f"SELECT x.child_id FROM ({pairs}) x WHERE x.parent_id = $1", parent_id)
+        ]
+        count = f"SELECT count(*) FROM public.{child} WHERE id = ANY($1::uuid[])"
+        assert await ro.fetchval(count, children) >= 1, (
+            f"the sandbox cannot see {child} of a live {parent} -- the policy hides too much")
+
+        await admin.execute(f"UPDATE public.{parent} SET deleted_at = now() WHERE id = $1", parent_id)
+        archived = True
+        assert await ro.fetchval(count, children) == 0, (
+            f"the sandbox can still see {child} of an archived {parent}")
+    finally:
+        if archived:
+            await admin.execute(f"UPDATE public.{parent} SET deleted_at = NULL WHERE id = $1", parent_id)
+        await admin.close()
+        await ro.close()
+
+
+@_needs_ro
+async def test_the_soft_delete_guard_flags_a_child_whose_policy_never_reads_its_parent():
+    """The guard's third branch: rows that BELONG to a soft-deletable parent need a policy that reads it.
+
+    The second branch judges only the tables a policy reads, so a policy that reads none -- "this
+    company" and nothing else -- passed whatever its parent's state, which is how
+    quote_line_items and part_pricing_tiers did. A NOT NULL foreign key says a row belongs to its
+    parent; pg_depend says whether the policy reads that parent THROUGH that key. A synthetic child
+    of parts with two such keys, inside a transaction that is rolled back.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    probe = "zz_soft_delete_guard_probe"
+    company = "company_id = (current_setting('jigged.company_id', true))::uuid"
+
+    def live_through(key: str) -> str:
+        return (f"EXISTS (SELECT 1 FROM public.parts p "
+                f"WHERE p.id = {probe}.{key} AND p.deleted_at IS NULL)")
+
+    async def with_policy(using: str) -> bool:
+        """Put this policy on the probe; is the probe flagged?"""
+        await admin.execute(f"DROP POLICY IF EXISTS ai_readonly_select ON public.{probe}")
+        await admin.execute(
+            f"CREATE POLICY ai_readonly_select ON public.{probe} "
+            f"FOR SELECT TO jigged_ai_readonly USING ({using})")
+        flagged = await admin.fetch(
+            "SELECT table_name FROM public.ai_policies_missing_soft_delete_filter()")
+        return probe in {r["table_name"] for r in flagged}
+
+    try:
+        tr = admin.transaction()
+        await tr.start()
+        try:
+            await admin.execute(
+                f"CREATE TABLE public.{probe} ("
+                " id uuid PRIMARY KEY DEFAULT gen_random_uuid(),"
+                " company_id uuid NOT NULL,"
+                " part_id uuid NOT NULL REFERENCES public.parts(id),"
+                " component_id uuid NOT NULL REFERENCES public.parts(id))")
+            await admin.execute(f"ALTER TABLE public.{probe} ENABLE ROW LEVEL SECURITY")
+
+            assert await with_policy(company), (
+                "a company-only policy on a child of a soft-deletable parent passes the guard")
+            assert await with_policy(f"{company} AND {live_through('component_id')}"), (
+                "reading the parent through one key satisfies the guard for the other key too")
+            assert not await with_policy(
+                f"{company} AND {live_through('part_id')} AND {live_through('component_id')}"
+            ), "the guard flags a policy that requires the parent live through every key"
+
+            # The boundary: a nullable key names a reference, never an owner.
+            await admin.execute(
+                f"ALTER TABLE public.{probe} ALTER COLUMN part_id DROP NOT NULL, "
+                "ALTER COLUMN component_id DROP NOT NULL")
+            assert not await with_policy(company), (
+                "the guard flags a nullable key -- a row can exist without that parent")
         finally:
             await tr.rollback()
     finally:

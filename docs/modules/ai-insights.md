@@ -43,7 +43,7 @@ thing that rots, and the one that used to sit here did:
    `current_setting('jigged.company_id')`, which the executor sets per query. **This is the layer
    that decides**, not the grant — see below
 5. **Archived rows filtered in that same policy** — every readable table with a `deleted_at`
-   column carries `AND deleted_at IS NULL`, and a child read through a soft-deletable parent
+   column carries `AND deleted_at IS NULL`, and a row that belongs to a soft-deletable parent
    requires the parent live. Not prose the model is asked to honour; see below
 6. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
 7. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
@@ -145,9 +145,10 @@ the grant and policy layers on every CI run.
 ([`20261110043600`](../../supabase/migrations/20261110043600_purchasing_tables.sql) §13,
 [purchasing.md](purchasing.md#mcp-tools-and-the-insights-ai)). The PO, approved-vendor and RFQ
 headers go through `apply_ai_read_access` with column lists; their children through hand-written
-policies that inherit the parent's `deleted_at`. **Withheld everywhere:** actor columns, internal
-notes, contact and address snapshots, terms and conditions, notes and void reasons — no business
-question needs who signed for a delivery. The status views, `is_vendor_purchase_order_late()` and
+policies that inherit the parent's `deleted_at`. The approved-vendor row's policy has been
+hand-written too since `20261112193919`, which requires its part and its vendor live.
+**Withheld everywhere:** actor columns, internal notes, contact and address snapshots, terms and
+conditions, notes and void reasons — no business question needs who signed for a delivery. The status views, `is_vendor_purchase_order_late()` and
 `vendor_po_line_amount()` are readable, so "late" and "open value" have one definition here too.
 **Exempt, each with its reason in `tenant_tables_missing_ai_decision()`:**
 `vendor_purchase_order_revisions` (a superseded price or quantity would be quoted as current),
@@ -270,9 +271,14 @@ once.
 `apply_ai_read_access()` now appends the clause for any table that has a `deleted_at` column, so the
 supported path cannot reintroduce this, and `ai_policies_missing_soft_delete_filter()` fails CI on a
 hand-written policy that skips it. **The consequence, stated rather than discovered:** the AI cannot
-answer questions about archived work at all — nor, since 2026-11-12, about an archived parent's
-children: an archived job's parts and operations, an archived vendor's contacts and addresses. It is told to say so rather than report zero. The
-prompt no longer asks for the filter — writing it is now redundant.
+answer questions about archived work at all — nor, since 2026-11-12, about what belonged to an
+archived parent: an archived job's parts, operations and packing slips (to customers and to
+vendors), an archived quote's lines, an archived part's price tiers, routing, lots and approved
+vendors, an archived vendor's contacts, addresses, services and approved parts. It is told to say
+so rather than report zero. The prompt no longer asks for the filter — writing it is now redundant.
+**It reaches one live document:** `vendor_purchase_order_line_status` is `security_invoker`, so an
+outside PO line whose slips are on a job archived since reads to the model as not yet sent, where
+the PO page, a by-id read, still counts them.
 
 **A join caveat that comes with it.** Hiding archived parents changes JOIN *results*: an inner join
 from `jobs` to an archived `customers` row drops the job, under-counting silently. `SCHEMA_CONTEXT`
@@ -492,7 +498,10 @@ all of them at once.
 
 The helper also appends `AND deleted_at IS NULL` when the table has that column, decided from the
 table rather than from an argument — so the next soft-deletable table cannot be made readable
-without it.
+without it. **What it cannot see is a parent.** A table whose rows belong to a soft-deletable
+parent through a `NOT NULL` foreign key needs that parent live in its policy too, and the helper
+writes `company_id` and nothing more: write that policy by hand, as `20261112193919` does for
+`quote_line_items` and `shipments`, and never re-run the helper over it.
 
 For a **child table** (no `company_id`, scoped through a parent) the helper raises and you write
 both halves by hand in the same migration — see `customer_contacts`, or `shipment_line_items`.
@@ -501,20 +510,33 @@ baseline's default privileges give this role `SELECT` on every new public table,
 column list and silently makes it decorative. The helper does that revoke itself when given
 `p_columns`; by hand, `REVOKE SELECT ON TABLE … FROM jigged_ai_readonly` goes first, as the
 purchasing migration does for every table it creates.
-**A hand-written policy must filter `deleted_at` on every soft-deletable table it reads — its own
-and its parent's:** `customer_contacts` requires the contact live AND its customer live, or an
-archived contact of a live customer stays visible; `vendor_addresses`, with no `deleted_at` of its
-own, still requires its vendor live, or an archived vendor's addresses stay visible.
-`ai_policies_missing_soft_delete_filter()` fails CI on either — it is the only half of this the
-helper cannot do for you. For the parent it reads `pg_depend`, where a policy records every column
-its expression reads, so it names the table read without its `deleted_at` rather than matching a
-substring.
+**A hand-written policy must filter `deleted_at` on every soft-deletable table it reads, and read
+every soft-deletable parent its rows belong to:** `customer_contacts` requires the contact live AND
+its customer live, or an archived contact of a live customer stays visible; `vendor_addresses`, with
+no `deleted_at` of its own, still requires its vendor live; `quote_line_items`, with a `company_id`
+of its own, still requires its quote live. `ai_policies_missing_soft_delete_filter()` fails CI on
+each, in three branches — the half of this the helper cannot do for you:
+
+| Branch | Flags a policy that | How it knows |
+|---|---|---|
+| (1) | never mentions its own table's `deleted_at` | the policy's text |
+| (2) | reads a soft-deletable table without reading that table's `deleted_at` | `pg_depend`, where a policy records every column its expression reads — so it names the table, rather than matching a substring |
+| (3) | does not read, through the key, a soft-deletable parent its rows belong to by a `NOT NULL` foreign key | `pg_constraint` for the key, `pg_depend` for the read of the parent **and** of the key's own columns, so `parts_bom` reading `parts` through `parent_part_id` does not also clear `child_part_id`. `company_id` in a composite key is the tenant, never the owner; a nullable key refers, and is out of scope |
+
+**A `NOT NULL` key that only refers is listed in the guard's `reference_keys`, each with its
+reason** — a job's or a quote's line naming an archived part, a document naming an archived vendor
+or customer (`shipments.customer_id`: revenue groups by the `customer_name` snapshot, and hiding the
+slip would take an archived customer's shipped history with it). Keyed on the table *and* the key, so
+a table's owning key stays checked beside an exempt reference. An entry is a decision for review,
+like the exempt list in `tenant_tables_missing_ai_decision()`.
 
 **Withdrawn:** *the guard catches a hand-written policy that skips the filter* — true until
 2026-11-12 only of a table's own `deleted_at`, so `vendor_contacts`, `vendor_addresses`,
 `customer_addresses`, `job_parts`, `job_operations`, `job_materials`, `parts_bom` and
-`parts_unit_conversions` showed archived parents' children with CI green
-([`20261112193919`](../../supabase/migrations/20261112193919_ai_hides_children_of_archived_parents.sql)).
+`parts_unit_conversions` showed archived parents' children with CI green; and a policy reading no
+other table at all passed branch (2) vacuously, so `quote_line_items`, `part_pricing_tiers`,
+`routings`, `material_lots`, `vendor_services`, `part_vendors`, `outside_shipments` and `shipments`
+did too ([`20261112193919`](../../supabase/migrations/20261112193919_ai_hides_children_of_archived_parents.sql)).
 
 To keep a new tenant table **out** of AI scope, add it to the exempt list in
 `tenant_tables_missing_ai_decision()` with a line saying why. Doing neither fails CI, which is the
@@ -1254,6 +1276,7 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
 - [ ] **Given** a table the role holds no grant on, **then** the database refuses it rather than the validator — *verified by `api/tests/integration/test_ai_read_access.py`*.
 - [ ] **Given** a query referencing **any** `SENSITIVE_TABLES` entry anywhere, **then** it is rejected regardless of join syntax; and even if it were not, no `GRANT` or `ai_readonly_select` policy exists for those tables — *verified by `api/tests/unit/test_sql_validator.py`; the grant/policy half is automation-pending (#367)*.
 - [ ] **Given** a validated query, **when** it executes, **then** `company_id` is bound as `$1`, the statement times out at 5,000 ms, and no more than 200 rows return — *verified by `api/tests/integration/test_sql_executor.py`*.
+- [ ] **Given** an archived row, or a row that belongs to an archived parent through a `NOT NULL` key, **then** `jigged_ai_readonly` cannot read it, and a live parent's rows stay readable — *enforced by `ai_policies_missing_soft_delete_filter()`; verified by `api/tests/integration/test_ai_read_access.py`*.
 - [ ] **Given** a new `company_id` table, **then** it is either AI-readable or on the reviewed exempt list — *enforced by `tenant_tables_missing_ai_decision()`*. **This closes the gap that used to sit here**: the doc no longer copies the readable-table list at all, so it cannot drift from it, and `SENSITIVE_TABLES` is read from the code rather than duplicated.
 
 **Chart decisioning**
@@ -1300,12 +1323,13 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.
 - **No E2E covers the chat path** — validation and chart selection are unit-tested, the browser
   round-trip is not.
-- **A child whose policy never reads its parent is outside the soft-delete guard.**
-  `quote_line_items` and `part_pricing_tiers` scope on their own `company_id`, so an archived
-  quote's lines and an archived part's tiers stay readable, and
-  `ai_policies_missing_soft_delete_filter()` — which judges only the tables a policy reads — cannot
-  see it. Closing it means a parent clause in each policy, as the children fixed in
-  `20261112193919` now carry.
+- **The soft-delete guard sees one level of ownership.** Branch (3) follows a key to a table with a
+  `deleted_at`; a grandchild keyed to a parent with none — `outside_shipment_receipts` to its slip,
+  which belongs to a job — is hidden only if its policy reads the grandparent, or reads the parent
+  and lets that parent's policy do it (RLS applies inside a policy's subquery). Every grandchild
+  today does one or the other, pinned in
+  [`test_ai_read_access.py`](../../api/tests/integration/test_ai_read_access.py); nothing flags the
+  next one that does neither.
 - **`CHAT_TOOLS` has one data tool, and adding another has a precondition.** Predefined Python
   tools alongside `execute_sql` are a reasonable answer for questions too error-prone for generated
   SQL. Seven of them already existed and were deleted (see *Withdrawn* above) because each was a

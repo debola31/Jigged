@@ -36,6 +36,20 @@ def test_state_roundtrips_company_and_user(monkeypatch):
     assert claims["user_id"] == "user1"
 
 
+def test_an_invoice_item_conflict_is_a_409_the_shop_can_fix():
+    """The invoice item posting to another income account is setup, fixable in QuickBooks or in
+    Settings: a 409 carrying its own code and sentence. Not a 502 -- QuickBooks rejected nothing
+    -- and so never a Sentry report."""
+    import services.quickbooks_desktop as qbd
+
+    mapped = qr._map_qb_error(qbd.QbdInvoiceItemConflict("Change the item in QuickBooks."))
+    assert mapped.status_code == 409
+    assert mapped.detail == {
+        "code": "qbd_invoice_item_conflict",
+        "message": "Change the item in QuickBooks.",
+    }
+
+
 def test_state_rejects_tampered(monkeypatch):
     import jwt
 

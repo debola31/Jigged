@@ -551,7 +551,9 @@ fills all three**, with *"Use different items for parts, outside services and ot
 secondary choice. An item must post to an expense, cost-of-goods-sold or other-expense account —
 verified; **the invoice item is refused by id and by its name "Machined Parts"**, since it posts to
 income and would book a cost as negative revenue. A same-named item is reused only when it already
-posts to the chosen account (the invoice path's lookup does not check; this must). Only the kinds on
+posts to the chosen account — as Desktop's invoice item has been since 2026-11-12
+([quickbooks-desktop.md](quickbooks-desktop.md#changing-the-income-account)); Online's invoice lookup
+still reuses by name, having no chosen account to check against. Only the kinds on
 the PO are required. The AP account is picked automatically when Online has exactly one — Desktop
 POs carry none. **Check QuickBooks** stores two answers: are POs on, and are custom transaction
 numbers on — off, QuickBooks numbers the PO itself, and the page shows *In QuickBooks as 1043* with a

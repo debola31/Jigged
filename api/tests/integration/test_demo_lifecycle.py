@@ -328,6 +328,118 @@ def test_seeded_job_statuses_come_from_the_triggers(supabase_admin, demo):
             )
 
 
+# Outside steps travel on vendor packing slips (20261112194119). The template marks some outside
+# steps `sent` and some `completed`; until that migration the seeder wrote those statuses straight
+# onto job_operations with no slip behind them -- a fix 20260903203741 had made and a later rebuild
+# silently reverted. compute_job_operation_status reads only slips and receipts, so each such step
+# disagreed with its own derivation and the first part-quantity edit dropped it to `pending`.
+def _outside_steps(supabase_admin, company_id: str) -> tuple[list[dict], dict, dict]:
+    """-> (the demo's outside operations, their live slips by operation with each slip's live
+    good quantity, ordered quantity by job_part id)."""
+    job_ids = _ids(supabase_admin, "jobs", company_id)
+    ops = (
+        supabase_admin.table("job_operations")
+        .select("id, job_part_id, status, sent_at")
+        .in_("job_id", job_ids).not_.is_("vendor_service_id", "null").execute()
+    ).data
+    slips = (
+        supabase_admin.table("outside_shipments")
+        .select("id, job_operation_id, slip_number, quantity, shipped_at, due_back_on, "
+                "vendor_name, service_name, closed_at, voided_at")
+        .eq("company_id", company_id).execute()
+    ).data
+    good: dict[str, float] = {}
+    for r in (
+        supabase_admin.table("outside_shipment_receipts")
+        .select("outside_shipment_id, quantity_good, voided_at")
+        .eq("company_id", company_id).execute()
+    ).data:
+        if r["voided_at"] is None:
+            good[r["outside_shipment_id"]] = good.get(r["outside_shipment_id"], 0.0) + float(r["quantity_good"])
+    by_op: dict[str, list[dict]] = {}
+    for s in slips:
+        if s["voided_at"] is None:
+            by_op.setdefault(s["job_operation_id"], []).append({**s, "good": good.get(s["id"], 0.0)})
+    ordered = {
+        jp["id"]: float(jp["quantity"]) for jp in (
+            supabase_admin.table("job_parts").select("id, quantity").eq("company_id", company_id).execute()
+        ).data
+    }
+    return ops, by_op, ordered
+
+
+def _assert_outside_steps_agree_with_their_slips(supabase_admin, company_id: str) -> None:
+    ops, by_op, ordered = _outside_steps(supabase_admin, company_id)
+    sent = [o for o in ops if o["status"] == "sent"]
+    back = [o for o in ops if o["status"] == "completed"]
+    assert sent, "the demo shows no outside step at a vendor, so this proves nothing"
+    assert back, "the demo shows no outside step that came back, so this proves nothing"
+
+    for op in sent:
+        open_slips = [s for s in by_op.get(op["id"], []) if s["closed_at"] is None]
+        at_vendor = sum(float(s["quantity"]) - s["good"] for s in open_slips)
+        assert open_slips and at_vendor > 0, (
+            f"operation {op['id']} reads sent with no live slip holding pieces at the vendor")
+        for s in open_slips:
+            assert s["slip_number"].startswith("VPS-"), s["slip_number"]
+            assert s["vendor_name"] and s["service_name"], "the slip froze no vendor or service name"
+            assert s["due_back_on"] >= s["shipped_at"][:10], "due back before it left"
+        first_out = min(s["shipped_at"] for s in by_op[op["id"]])
+        assert datetime.fromisoformat(op["sent_at"]) == datetime.fromisoformat(first_out), (
+            "sent_at must mirror the first live slip")
+
+    for op in back:
+        returned = sum(s["good"] for s in by_op.get(op["id"], []))
+        assert returned >= ordered[op["job_part_id"]], (
+            f"operation {op['id']} reads completed with {returned} of "
+            f"{ordered[op['job_part_id']]} back on its slips")
+
+
+def test_seeded_outside_steps_are_backed_by_slips(supabase_admin, demo):
+    """Every demo step at a vendor has a live VPS- slip with pieces outstanding, and every one that
+    came back has receipts covering the part -- the rows the status is derived from."""
+    _assert_outside_steps_agree_with_their_slips(supabase_admin, demo["demo_id"])
+
+
+def test_a_part_quantity_edit_leaves_a_seeded_send_at_the_vendor(supabase_admin, demo):
+    """The symptom that was reported. recompute_job_ops_status_from_part_qty() re-derives every
+    operation on the part; with no slip behind it a seeded `sent` step came back `pending`."""
+    demo_id = demo["demo_id"]
+    ops, _, ordered = _outside_steps(supabase_admin, demo_id)
+    op = next(o for o in ops if o["status"] == "sent")
+
+    supabase_admin.table("job_parts").update(
+        {"quantity": ordered[op["job_part_id"]] + 1}
+    ).eq("id", op["job_part_id"]).execute()
+
+    after = (
+        supabase_admin.table("job_operations").select("status, sent_at").eq("id", op["id"])
+        .single().execute()
+    ).data
+    assert after["status"] == "sent", f"a quantity edit moved a step at the vendor to {after['status']}"
+    assert after["sent_at"] == op["sent_at"], "a quantity edit rewrote the send stamp"
+
+
+def test_reset_twice_sends_the_outside_steps_on_fresh_slips(supabase_admin, demo):
+    """Reset deletes receipts, then slips, before the operations they belong to -- and the
+    re-seeded jobs reuse their numbers, so a slip left behind would collide on VPS-{job}-1. Twice,
+    for #675's reason: only the second reset runs against slips the seeder itself wrote."""
+    demo_id, client, user = demo["demo_id"], demo["client"], demo["user"]
+    args = {"p_source_company_id": demo["source_id"], "p_user_id": user["user_id"]}
+
+    client.rpc("reset_demo_company", args).execute()
+    client.rpc("reset_demo_company", args).execute()
+
+    _assert_outside_steps_agree_with_their_slips(supabase_admin, demo_id)
+    numbers = [
+        s["slip_number"] for s in (
+            supabase_admin.table("outside_shipments").select("slip_number")
+            .eq("company_id", demo_id).execute()
+        ).data
+    ]
+    assert len(numbers) == len(set(numbers)), f"a reset stacked slips: {sorted(numbers)}"
+
+
 def test_reset_is_repeatable(supabase_admin, demo):
     """#675. The FIRST reset is not the interesting one — the second is, because by then the demo
     holds the shipments and per-location stock the seeder wrote, and those are RESTRICT parents of

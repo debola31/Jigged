@@ -312,7 +312,7 @@ def _reuse_or_refuse(item: dict, item_type: str, name: str, account_id: str) -> 
 def create_purchase_item(end_user_id: str, name: str, account_id: str) -> dict:
     """A ONE-WAY non-inventory item (salesOrPurchaseDetails.postingAccountId) -- or a
     same-named item, only when it already posts to `account_id`. The invoice path's
-    resolve_default_item reuses by name without checking the account; this must not."""
+    resolve_default_item checks its income account the same way since 2026-11-12."""
     clean = (name or "").strip()
     if not clean or len(clean) > pom.QBD_ITEM_NAME_MAX or ":" in clean:
         raise ValueError(

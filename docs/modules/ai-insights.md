@@ -43,7 +43,8 @@ thing that rots, and the one that used to sit here did:
    `current_setting('jigged.company_id')`, which the executor sets per query. **This is the layer
    that decides**, not the grant — see below
 5. **Archived rows filtered in that same policy** — every readable table with a `deleted_at`
-   column carries `AND deleted_at IS NULL`. Not prose the model is asked to honour; see below
+   column carries `AND deleted_at IS NULL`, and a child read through a soft-deletable parent
+   requires the parent live. Not prose the model is asked to honour; see below
 6. **Statement timeout** — `STATEMENT_TIMEOUT_MS = 5000`
 7. **Row limit** — `MAX_ROWS = 200`, appended as a `LIMIT` programmatically
 8. **Self-correction** — a failed query comes back as `SQL_ERROR: <cause>` *plus what to do about
@@ -269,7 +270,8 @@ once.
 `apply_ai_read_access()` now appends the clause for any table that has a `deleted_at` column, so the
 supported path cannot reintroduce this, and `ai_policies_missing_soft_delete_filter()` fails CI on a
 hand-written policy that skips it. **The consequence, stated rather than discovered:** the AI cannot
-answer questions about archived work at all. It is told to say so rather than report zero. The
+answer questions about archived work at all — nor, since 2026-11-12, about an archived parent's
+children: an archived job's parts and operations, an archived vendor's contacts and addresses. It is told to say so rather than report zero. The
 prompt no longer asks for the filter — writing it is now redundant.
 
 **A join caveat that comes with it.** Hiding archived parents changes JOIN *results*: an inner join
@@ -499,10 +501,20 @@ baseline's default privileges give this role `SELECT` on every new public table,
 column list and silently makes it decorative. The helper does that revoke itself when given
 `p_columns`; by hand, `REVOKE SELECT ON TABLE … FROM jigged_ai_readonly` goes first, as the
 purchasing migration does for every table it creates.
-**A hand-written policy on a soft-deletable table must filter `deleted_at` itself, on both sides:**
-`customer_contacts` requires the contact to be live AND its customer to be live, or an archived
-contact of a live customer stays visible. `ai_policies_missing_soft_delete_filter()` fails CI if you
-forget — it is the only half of this the helper cannot do for you.
+**A hand-written policy must filter `deleted_at` on every soft-deletable table it reads — its own
+and its parent's:** `customer_contacts` requires the contact live AND its customer live, or an
+archived contact of a live customer stays visible; `vendor_addresses`, with no `deleted_at` of its
+own, still requires its vendor live, or an archived vendor's addresses stay visible.
+`ai_policies_missing_soft_delete_filter()` fails CI on either — it is the only half of this the
+helper cannot do for you. For the parent it reads `pg_depend`, where a policy records every column
+its expression reads, so it names the table read without its `deleted_at` rather than matching a
+substring.
+
+**Withdrawn:** *the guard catches a hand-written policy that skips the filter* — true until
+2026-11-12 only of a table's own `deleted_at`, so `vendor_contacts`, `vendor_addresses`,
+`customer_addresses`, `job_parts`, `job_operations`, `job_materials`, `parts_bom` and
+`parts_unit_conversions` showed archived parents' children with CI green
+([`20261112193919`](../../supabase/migrations/20261112193919_ai_hides_children_of_archived_parents.sql)).
 
 To keep a new tenant table **out** of AI scope, add it to the exempt list in
 `tenant_tables_missing_ai_decision()` with a line saying why. Doing neither fails CI, which is the
@@ -1288,6 +1300,12 @@ Convention stated once in [modules/README.md](README.md#the-acceptance-criteria-
   the frozensets would have caught it; that is the shape of guard this repo already uses elsewhere.
 - **No E2E covers the chat path** — validation and chart selection are unit-tested, the browser
   round-trip is not.
+- **A child whose policy never reads its parent is outside the soft-delete guard.**
+  `quote_line_items` and `part_pricing_tiers` scope on their own `company_id`, so an archived
+  quote's lines and an archived part's tiers stay readable, and
+  `ai_policies_missing_soft_delete_filter()` — which judges only the tables a policy reads — cannot
+  see it. Closing it means a parent clause in each policy, as the children fixed in
+  `20261112193919` now carry.
 - **`CHAT_TOOLS` has one data tool, and adding another has a precondition.** Predefined Python
   tools alongside `execute_sql` are a reasonable answer for questions too error-prone for generated
   SQL. Seven of them already existed and were deleted (see *Withdrawn* above) because each was a

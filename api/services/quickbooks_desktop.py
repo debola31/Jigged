@@ -100,6 +100,14 @@ class QbdUnknownOutcome(RuntimeError):
     what was being written (the `noun` passed to _request)."""
 
 
+class QbdInvoiceItemConflict(RuntimeError):
+    """The QuickBooks item every invoice line posts under exists but cannot be used as it
+    stands: it posts to an income account other than the one an admin chose, or it is
+    inactive. HTTP 409 with a sentence saying how to fix it, in QuickBooks or in Settings;
+    never reported to Sentry -- QuickBooks rejected nothing, and Jigged never edits the item
+    itself (see resolve_default_item)."""
+
+
 class QbdApiError(RuntimeError):
     """QuickBooks rejected the request -> HTTP 502."""
 
@@ -408,6 +416,15 @@ def list_income_accounts(end_user_id: str) -> list[dict]:
     return [{"id": a["id"], "full_name": a.get("fullName")} for a in rows]
 
 
+def _invoice_item_account(item: dict) -> dict:
+    """The account an INVOICE line on this item posts to: a one-way item's posting account,
+    a two-way item's income account. The purchasing path reads a two-way item's EXPENSE
+    account instead, because a purchase posts there."""
+    one_way = (item.get("salesOrPurchaseDetails") or {}).get("postingAccount")
+    two_way = (item.get("salesAndPurchaseDetails") or {}).get("incomeAccount")
+    return one_way or two_way or {}
+
+
 def resolve_default_item(db: Client, company_id: str, conn: dict) -> str:
     """The one QuickBooks service item every pushed line posts under.
 
@@ -416,23 +433,60 @@ def resolve_default_item(db: Client, company_id: str, conn: dict) -> str:
     an ADMIN chose; unlike QBO's resolve_income_account we do not take
     accounts[0], because revenue landing in the wrong account is invisible until
     month end.
+
+    A same-named item is reused ONLY when it is active and posts to that account,
+    and otherwise the push is refused with a sentence (QbdInvoiceItemConflict).
+    Until 2026-11-12 it was reused by name alone, so changing the account in
+    Settings -- which clears the cached item precisely so it re-resolves here --
+    moved nothing: revenue kept landing in the old account. Jigged never edits the
+    item to match. Conductor can (updateExistingTransactionsAccount=false keeps
+    past invoices where they are), but the item may be the shop's own, carrying
+    its hand-keyed invoices, and Jigged changes nothing in QuickBooks but the POs
+    it sent there. Moving an item's revenue is a decision a person takes in
+    QuickBooks, where QuickBooks itself asks about existing transactions. See
+    docs/modules/quickbooks-desktop.md, "Changing the income account".
     """
     if conn.get("default_service_item_id"):
         return conn["default_service_item_id"]
 
     end_user_id = _end_user_id(conn)
+    # Asked BEFORE the lookup, not only before a create: reusing an existing item
+    # with no account chosen posts to whatever that item carries, which is a guess.
+    account_id = conn.get("default_income_account_id")
+    if not account_id:
+        raise QbdNotConnected(
+            "Choose which QuickBooks income account Jigged invoices should post to, "
+            "in Settings, before creating an invoice."
+        )
+
     name = DEFAULT_ITEM_NAME[:ITEM_NAME_MAX]
-    for item in _list("/service-items", end_user_id, {"nameContains": name, "limit": 10}):
+    # status=all: QuickBooks names are unique across inactive items too, so an
+    # inactive namesake must be found and explained, not collided with on create.
+    for item in _list("/service-items", end_user_id,
+                      {"nameContains": name, "status": "all", "limit": 10}):
         if (item.get("name") or "").strip().casefold() == name.casefold():
+            if item.get("isActive") is False:
+                raise QbdInvoiceItemConflict(
+                    f"QuickBooks' “{name}” item, which every Jigged invoice line posts "
+                    "under, is inactive, so Jigged sent nothing. Make it active in "
+                    "QuickBooks (Lists → Item List, with Include inactive ticked), then "
+                    "send the invoice again."
+                )
+            account = _invoice_item_account(item)
+            if str(account.get("id") or "") != str(account_id):
+                where = account.get("fullName") or account.get("name") or "a different account"
+                raise QbdInvoiceItemConflict(
+                    f"QuickBooks' “{name}” item, which every Jigged invoice line posts "
+                    f"under, posts to {where}, not to the income account chosen in "
+                    "Settings → QuickBooks, so Jigged sent nothing. An admin can change "
+                    "that item's income account in QuickBooks (Lists → Item List) — if "
+                    "QuickBooks asks whether to update existing transactions, No leaves "
+                    f"past invoices where they are — or choose {where} in Settings "
+                    "instead. Then send the invoice again."
+                )
             item_id = item["id"]
             break
     else:
-        account_id = conn.get("default_income_account_id")
-        if not account_id:
-            raise QbdNotConnected(
-                "Choose which QuickBooks income account Jigged invoices should post to, "
-                "in Settings, before creating an invoice."
-            )
         created = _request(
             "POST", "/service-items", end_user_id=end_user_id, is_write=True,
             json_body={

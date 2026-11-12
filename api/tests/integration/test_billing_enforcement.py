@@ -12,6 +12,7 @@ TEST_SUPABASE_PUBLISHABLE_KEY / TEST_SUPABASE_SECRET_KEY). Skipped without it.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -372,6 +373,117 @@ def test_no_tenant_table_left_ungated(supabase_admin):
     explicitly exempt. A new tenant table left un-gated fails this test."""
     res = supabase_admin.rpc("tenant_tables_missing_write_gate", {}).execute()
     assert res.data == [], f"tenant tables missing the billing write-gate: {res.data}"
+
+
+# ── vendor_addresses: a child gated through its vendor (20261112194019) ────────────
+# Created ungated in 20260824022226 on the theory that a lapsed shop "cannot create the parent
+# to hang one on" -- true, and beside the point: its EXISTING vendors took new addresses, edits
+# and deletes. The gate resolves the vendor's company, the way vendor_contacts' always has.
+LAPSED = {"subscription_status": "canceled", "ended_at": _iso(-30)}
+
+
+def _seed_vendor_address(admin, company_id: str) -> tuple[str, str]:
+    """A vendor and one default address, written with the service role so they exist whatever
+    the billing state. -> (vendor_id, address_id)"""
+    vendor = admin.table("vendors").insert(
+        {"company_id": company_id, "name": f"gate-vendor-{os.urandom(3).hex()}"}
+    ).execute().data[0]
+    address = admin.table("vendor_addresses").insert(
+        {"vendor_id": vendor["id"], "address_line1": "1 Dock St", "city": "Akron",
+         "is_default": True}
+    ).execute().data[0]
+    return vendor["id"], address["id"]
+
+
+def test_a_lapsed_company_cannot_write_a_vendor_address(supabase_admin, billing_user):
+    """INSERT and UPDATE raise naming their policy -- the contract isBillingWriteBlocked keys on
+    -- and DELETE is filtered to nothing, the shape test_delete_is_silently_filtered_when_lapsed
+    pins. Either way the rows are exactly as they were."""
+    company_id, client = billing_user["company_id"], billing_user["client"]
+    vendor_id, address_id = _seed_vendor_address(supabase_admin, company_id)
+    _set_billing(supabase_admin, company_id, **LAPSED)
+
+    with pytest.raises(Exception) as exc:
+        client.table("vendor_addresses").insert(
+            {"vendor_id": vendor_id, "address_line1": "2 Mill Rd", "city": "Kent"}
+        ).execute()
+    _assert_rls_blocked(exc.value)
+    assert "billing_gate_insert" in str(exc.value), f"INSERT must name its policy: {exc.value}"
+
+    with pytest.raises(Exception) as exc:
+        client.table("vendor_addresses").update({"city": "Elsewhere"}).eq("id", address_id).execute()
+    _assert_rls_blocked(exc.value)
+    assert "billing_gate_update" in str(exc.value), f"UPDATE must name its policy: {exc.value}"
+
+    deleted = client.table("vendor_addresses").delete().eq("id", address_id).execute()
+    assert deleted.data == [], "a lapsed delete is filtered to zero rows, not raised"
+
+    rows = supabase_admin.table("vendor_addresses").select("id, city").eq(
+        "vendor_id", vendor_id).execute().data
+    assert rows == [{"id": address_id, "city": "Akron"}], (
+        f"a lapsed company changed its vendor's addresses: {rows}")
+
+
+@pytest.mark.parametrize("fields", [{"subscription_status": "active"}, {"billing_exempt": True}],
+                         ids=["active", "exempt"])
+def test_an_active_or_exempt_company_can_write_a_vendor_address(supabase_admin, billing_user, fields):
+    """The control. Without it the lapsed test passes when the gate refuses everyone."""
+    company_id, client = billing_user["company_id"], billing_user["client"]
+    vendor_id, _ = _seed_vendor_address(supabase_admin, company_id)
+    _set_billing(supabase_admin, company_id, **fields)
+
+    created = client.table("vendor_addresses").insert(
+        {"vendor_id": vendor_id, "address_line1": "2 Mill Rd", "city": "Kent"}
+    ).execute().data
+    assert created and created[0]["city"] == "Kent"
+    updated = client.table("vendor_addresses").update({"city": "Ravenna"}).eq(
+        "id", created[0]["id"]).execute().data
+    assert updated and updated[0]["city"] == "Ravenna"
+    deleted = client.table("vendor_addresses").delete().eq("id", created[0]["id"]).execute().data
+    assert [r["id"] for r in deleted] == [created[0]["id"]]
+
+
+def test_a_vendor_address_cannot_move_to_another_vendor(supabase_admin, billing_user):
+    """vendor_id is the gate key for this child, so it is immutable from the browser -- what
+    makes USING (true) on its UPDATE gate equivalent to the old filtering shape."""
+    company_id, client = billing_user["company_id"], billing_user["client"]
+    _, address_id = _seed_vendor_address(supabase_admin, company_id)
+    other_vendor, _ = _seed_vendor_address(supabase_admin, company_id)
+    _set_billing(supabase_admin, company_id, subscription_status="active")
+
+    with pytest.raises(Exception) as exc:
+        client.table("vendor_addresses").update({"vendor_id": other_vendor}).eq(
+            "id", address_id).execute()
+    assert "immutable" in str(exc.value).lower(), (
+        f"expected the gate-key immutability trigger to fire, got: {exc.value}")
+
+
+def test_the_write_gate_guard_sees_an_ungated_child_table():
+    """The guard has to catch this class, not just this table.
+
+    Until 20261112194019 tenant_tables_missing_write_gate() read only tables WITH a company_id,
+    so vendor_addresses shipped ungated with CI green. Take its gate away inside a transaction
+    that is rolled back, and the guard must name it.
+    """
+    import psycopg2
+
+    dsn = os.getenv("TEST_SUPABASE_DB_URL",
+                    "postgresql://postgres:postgres@127.0.0.1:54322/postgres")
+    try:
+        conn = psycopg2.connect(dsn)
+    except psycopg2.OperationalError as exc:  # pragma: no cover - environment guard
+        pytest.skip(f"No local Postgres at {dsn}: {exc}")
+    try:
+        with conn.cursor() as cur:
+            for policy in ("billing_gate_insert", "billing_gate_update", "billing_gate_delete"):
+                cur.execute(f"DROP POLICY {policy} ON public.vendor_addresses")
+            cur.execute("SELECT table_name FROM public.tenant_tables_missing_write_gate()")
+            flagged = {row[0] for row in cur.fetchall()}
+        assert "vendor_addresses" in flagged, (
+            "a parent-resolved child with no billing gate is invisible to the guard")
+    finally:
+        conn.rollback()
+        conn.close()
 
 
 def test_no_definer_function_walks_past_the_gate(supabase_admin):

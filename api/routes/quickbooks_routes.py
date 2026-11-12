@@ -142,6 +142,14 @@ def _map_qb_error(exc: Exception) -> HTTPException:
         return HTTPException(
             status_code=409, detail={"code": "qbd_not_connected", "message": str(exc)}
         )
+    if isinstance(exc, qbd.QbdInvoiceItemConflict):
+        # The invoice item posts to another income account, or is inactive. Setup the shop
+        # fixes in QuickBooks or in Settings, so a 409 with a sentence -- not a 502, since
+        # QuickBooks rejected nothing, and so never a Sentry report.
+        return HTTPException(
+            status_code=409,
+            detail={"code": "qbd_invoice_item_conflict", "message": str(exc)},
+        )
     if isinstance(exc, qb.QuickBooksNotConnected):
         return HTTPException(status_code=409, detail=str(exc))
 

@@ -327,8 +327,13 @@ async def set_income_account(company_id: str, request: Request, body: IncomeAcco
     db.table("quickbooks_desktop_connections").update(
         {
             "default_income_account_id": body.income_account_id,
-            # The shared service item posts to this account, so a change must
-            # re-resolve it rather than keep pointing at the old one.
+            # Cleared so the next push re-resolves the shared item against THIS
+            # account. Clearing alone moved no revenue until 2026-11-12: the
+            # re-resolve reused "Machined Parts" by name whatever it posted to. It
+            # now refuses an item posting elsewhere (409 qbd_invoice_item_conflict,
+            # saying how to fix it) and never edits the item -- see
+            # resolve_default_item. No QuickBooks call here, so saving works with
+            # the shop PC off.
             "default_service_item_id": None,
         }
     ).eq("company_id", company_id).execute()

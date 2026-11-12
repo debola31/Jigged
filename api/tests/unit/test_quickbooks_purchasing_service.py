@@ -8,8 +8,9 @@ Conductor.
 Rules pinned:
   * A purchase item must post to an expense, cost-of-goods-sold or other-expense
     account, VERIFIED, not assumed. A same-named item is reused only when it posts to
-    the chosen account (the invoice path's resolve_default_item does not check, which
-    is a known bug this code must not copy).
+    the chosen account -- the rule the invoice path's resolve_default_item also follows
+    since 2026-11-12, when reusing by name alone was found to strand revenue in the old
+    income account.
   * The invoice item ("Machined Parts", or the connection's own invoice item id) is
     never a purchase item: it posts to income.
   * Vendor names are refused, never truncated; QuickBooks Online's 6240 is resolved by

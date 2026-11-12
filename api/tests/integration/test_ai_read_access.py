@@ -161,6 +161,97 @@ async def test_the_sandbox_cannot_see_an_archived_job():
 
 
 @_needs_ro
+async def test_an_archived_vendors_contacts_and_addresses_are_invisible():
+    """The children of an archived parent are archived too, as far as the model can tell.
+
+    vendor_contacts and vendor_addresses have no deleted_at of their own, and until
+    20261112193919 their policies scoped the vendor's company and nothing else -- so "who do we
+    call at Thermal One?" answered for a vendor no screen shows. A live vendor's rows are the
+    control: without them this passes when the policy hides everything.
+    """
+    import uuid
+
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    company_id = None
+    try:
+        company_id = await admin.fetchval(
+            "INSERT INTO public.companies (name) VALUES ($1) RETURNING id",
+            f"ai-archived-vendor-{uuid.uuid4().hex[:8]}",
+        )
+        vendors = {}
+        for label, archived in (("live", False), ("archived", True)):
+            vendor_id = await admin.fetchval(
+                "INSERT INTO public.vendors (company_id, name, deleted_at) "
+                "VALUES ($1, $2, CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"{label} plating", archived,
+            )
+            await admin.execute(
+                "INSERT INTO public.vendor_contacts (vendor_id, name, role) "
+                "VALUES ($1, 'Pat Dock', 'shipping_receiving')", vendor_id)
+            await admin.execute(
+                "INSERT INTO public.vendor_addresses (vendor_id, address_line1, city, is_default) "
+                "VALUES ($1, '1 Dock St', 'Akron', true)", vendor_id)
+            vendors[label] = vendor_id
+
+        await ro.execute(f"SET jigged.company_id = '{company_id}'")
+        for table in ("vendor_contacts", "vendor_addresses"):
+            seen = {r["vendor_id"] for r in await ro.fetch(f"SELECT vendor_id FROM public.{table}")}
+            assert vendors["archived"] not in seen, (
+                f"the sandbox can see an archived vendor's {table}")
+            assert vendors["live"] in seen, (
+                f"the sandbox cannot see a live vendor's {table} -- the policy hides too much")
+    finally:
+        if company_id is not None:
+            # vendors cascade from the company, and contacts and addresses from the vendor.
+            await admin.execute("DELETE FROM public.companies WHERE id = $1", company_id)
+        await admin.close()
+        await ro.close()
+
+
+@_needs_ro
+async def test_the_soft_delete_guard_reads_the_parent_a_policy_scopes_through():
+    """The guard has to catch this class, not just this instance.
+
+    Until 20261112193919 ai_policies_missing_soft_delete_filter() looked only at a table's OWN
+    deleted_at, so vendor_contacts -- which has none -- passed while its vendor was archived.
+    Put back the old policy, inside a transaction that is rolled back, and the guard must name it.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    try:
+        tr = admin.transaction()
+        await tr.start()
+        try:
+            await admin.execute("DROP POLICY ai_readonly_select ON public.vendor_contacts")
+            await admin.execute(
+                "CREATE POLICY ai_readonly_select ON public.vendor_contacts "
+                "FOR SELECT TO jigged_ai_readonly USING (vendor_id IN ("
+                "SELECT v.id FROM public.vendors v "
+                "WHERE v.company_id = (current_setting('jigged.company_id', true))::uuid))"
+            )
+            flagged = {
+                r["table_name"] for r in await admin.fetch(
+                    "SELECT table_name FROM public.ai_policies_missing_soft_delete_filter()")
+            }
+            assert "vendor_contacts" in flagged, (
+                "a child policy that ignores its parent's deleted_at is invisible to the guard")
+        finally:
+            await tr.rollback()
+    finally:
+        await admin.close()
+
+
+@_needs_ro
 async def test_the_ship_date_helper_runs_as_the_ai_role():
     """schema_context.py names public.job_last_ship_date() as THE way to get a
     ship date now that jobs.shipped_at is gone. It is SECURITY INVOKER, so its

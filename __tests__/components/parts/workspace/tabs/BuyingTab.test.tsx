@@ -383,6 +383,23 @@ describe('BuyingTab — inline editing (V2)', () => {
     expect(await screen.findByText(/Gamma Tube was on this list before/)).toBeInTheDocument();
     // Left blank, so the earlier sheet is kept rather than wiped.
     expect(m.savePartVendor.mock.calls[0][0]).not.toHaveProperty('priceBreaks');
+    // ...AND ITS UNIT. The form opens on the stock unit; sending that unasked re-read a kept
+    // "$60 per bar" sheet as $60 per inch (found end to end: purchasing-vendors-sourcing.spec.ts).
+    expect(m.savePartVendor.mock.calls[0][0].changes).toEqual({ status: 'approved' });
+  });
+
+  it('a unit the person picks, or prices typed in the unit on screen, are sent with that unit', async () => {
+    m.savePartVendor.mockResolvedValue({ partVendorId: 'pv-9', created: true, revived: false, preferred: false });
+    renderTab();
+    await user.click(await screen.findByRole('button', { name: 'Add vendor' }));
+    const editor = screen.getByRole('group', { name: /New vendor/ });
+    await user.click(within(editor).getByRole('combobox', { name: /Vendor/ }));
+    await user.click(await screen.findByRole('option', { name: 'Gamma Tube' }));
+    await user.click(within(editor).getByRole('combobox', { name: 'Bought in' }));
+    await user.click(await screen.findByRole('option', { name: 'bar' }));
+    await user.click(within(editor).getByRole('button', { name: 'Add vendor' }));
+    await waitFor(() => expect(m.savePartVendor).toHaveBeenCalled());
+    expect(m.savePartVendor.mock.calls[0][0].changes).toEqual({ status: 'approved', purchaseUnit: 'bar' });
   });
 
   it('will not add a vendor that is already on the list', async () => {

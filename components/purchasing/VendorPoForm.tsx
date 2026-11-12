@@ -343,14 +343,17 @@ export default function VendorPoForm(props: VendorPoFormProps) {
   const prefillOpId = useRef(prefill?.jobOperationId ?? null);
 
   // Hydrate a prefilled part (ids only reach this form, never names from the URL).
+  // The ref is consumed only when the part LANDS: Strict Mode runs this effect twice, cancelling
+  // the first read, and a ref cleared up front left the second run nothing to fetch — the
+  // part-line prefill ("New PO" on a part's vendor, "Buy it" on a job) opened with no part.
   useEffect(() => {
     const partId = prefillPartId.current;
     if (!partId) return;
-    prefillPartId.current = null;
     let cancelled = false;
     getPartsForSelectByIds([partId])
       .then((rows) => {
         if (cancelled || !rows[0]) return;
+        prefillPartId.current = null;
         const part: PartSelectOption = rows[0];
         setLines((current) => current.map((l, i) => (i === 0 && l.lineKind === 'part' && !l.part ? { ...l, part } : l)));
       })

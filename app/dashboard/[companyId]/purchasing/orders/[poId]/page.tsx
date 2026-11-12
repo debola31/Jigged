@@ -271,11 +271,19 @@ export default function VendorPoDetailPage() {
   const headerClosed = header.closedAt !== null;
   const closed = headerClosed || summary.status === 'closed';
   const currentSent = header.sentRevision !== null && header.revision === header.sentRevision;
+  // A DRAFT line counts as outstanding: the view reports open_quantity 0 until the PO is sent
+  // (nothing is "on order" yet), but a delivery can still arrive first — the receive dialog
+  // then asks once to mark the PO sent today (plan §3.7). Gating on openQuantity alone hid
+  // Receive on every draft and made that path unreachable.
   const canReceive =
     !archived &&
     !closed &&
     summary.status !== 'received' &&
-    lines.some((l) => l.closedAt === null && (l.lineKind === 'outside_service' || (l.expectsReceipt && l.openQuantity > 0)));
+    lines.some(
+      (l) =>
+        l.closedAt === null &&
+        (l.lineKind === 'outside_service' || (l.expectsReceipt && (l.openQuantity > 0 || l.status === 'draft'))),
+    );
   const canEdit = !archived && !headerClosed;
   const canMarkSent = !archived && !headerClosed && lines.length > 0 && !currentSent;
   const canClose = !archived && header.issuedAt !== null && !headerClosed && lines.some(isClosableLine);

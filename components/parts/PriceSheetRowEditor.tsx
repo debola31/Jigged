@@ -170,6 +170,8 @@ export default function PriceSheetRowEditor({
   const editing = Boolean(row);
   const [initial] = useState(() => seed(row, stockUnit));
   const [draft, setDraft] = useState<Draft>(initial);
+  /** The person picked "Bought in" themselves (rather than leaving the stock unit it opens on). */
+  const [unitChosen, setUnitChosen] = useState(false);
   const set = (change: Partial<Draft>) => setDraft((d) => ({ ...d, ...change }));
 
   const dirty = fingerprint(draft) !== fingerprint(initial);
@@ -275,8 +277,13 @@ export default function PriceSheetRowEditor({
       const before = parsedBreaks(seed(row, stockUnit).breaks);
       if (JSON.stringify(breaks) !== JSON.stringify(before)) out.priceBreaks = breaks;
     } else {
-      // A re-added vendor keeps what its old row had wherever this form was left blank.
-      const changes: PartVendorChanges = { status: next.status, purchaseUnit: next.purchaseUnit };
+      // A re-added vendor keeps what its old row had wherever this form was left blank — its UNIT
+      // included, because the sheet and the minimum it keeps are in that unit. The form opens on
+      // the stock unit, so sending that unasked turned a revived "$72 per bar" into "$72 per inch".
+      // The unit goes only when the person chose it, or typed prices or a minimum in it; left out,
+      // the database keeps a revived row's unit and gives a new row the stock unit.
+      const unitStated = unitChosen || custom || breaks.length > 0 || next.minimumOrderQuantity !== null;
+      const changes: PartVendorChanges = { status: next.status, ...(unitStated ? { purchaseUnit: next.purchaseUnit } : {}) };
       if (next.statusNote !== null) changes.statusNote = next.statusNote;
       if (next.vendorPartNumber !== null) changes.vendorPartNumber = next.vendorPartNumber;
       if (next.leadTimeDays !== null) changes.leadTimeDays = next.leadTimeDays;
@@ -368,7 +375,10 @@ export default function PriceSheetRowEditor({
           label="Bought in"
           size="small"
           value={draft.unit}
-          onChange={(e) => set({ unit: e.target.value })}
+          onChange={(e) => {
+            setUnitChosen(true);
+            set({ unit: e.target.value });
+          }}
           disabled={saving}
           helperText={
             currentMissing

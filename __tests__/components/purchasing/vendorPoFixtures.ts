@@ -298,11 +298,21 @@ export function poDetail(over: Partial<VendorPoDetail> = {}): VendorPoDetail {
 }
 
 /** A PO never marked sent. */
+/**
+ * A line on a never-sent PO, AS THE VIEW REPORTS IT: vendor_purchase_order_line_status gives a
+ * draft line no open quantity, open stock or open value (nothing is on order until the PO is
+ * sent). A fixture that kept them non-zero let the page's Receive gate pass a test it failed in
+ * the browser.
+ */
+export function asDraftLine(line: VendorPoLine): VendorPoLine {
+  return { ...line, status: 'draft', openQuantity: 0, openStockQuantity: line.lineKind === 'part' ? 0 : null, openAmount: 0 };
+}
+
 export function draftPoDetail(over: Partial<VendorPoDetail> = {}): VendorPoDetail {
   return poDetail({
     header: poHeader({ sentRevision: null, issuedAt: null, lastSentAt: null }),
     summary: poSummary({ status: 'draft' }),
-    lines: [poLine({ status: 'draft' }), otherLine({ status: 'draft' })],
+    lines: [asDraftLine(poLine()), asDraftLine(otherLine())],
     revisionCount: 0,
     ...over,
   });

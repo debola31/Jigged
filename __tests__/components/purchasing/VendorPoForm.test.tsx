@@ -373,6 +373,16 @@ describe('VendorPoForm — prefilled from another screen', () => {
     expect(listOpenOutsideOpsForVendor).not.toHaveBeenCalled();
   });
 
+  it('fills the prefilled part under Strict Mode, whose second effect run must not lose it', async () => {
+    // The app router runs Strict Mode in development: effects run twice and the first run's
+    // fetch is cancelled. The prefill once cleared its "run once" ref before the fetch landed,
+    // so in the browser "New PO" on a part's vendor opened with no part (purchasing-vendors-sourcing.spec.ts).
+    render(<VendorPoForm mode="create" companyId="test-company-id" prefill={{ partId: 'p1', vendorId: 'v1' }} />, {
+      reactStrictMode: true,
+    });
+    await waitFor(() => expect(within(formLine(1)).getByLabelText('Part')).toHaveValue('p1'));
+  });
+
   it('starts a part line for a bought job part (the job page’s "Buy it"), keeping its job and job part', async () => {
     const user = userEvent.setup();
     render(<VendorPoForm mode="create" companyId="test-company-id" prefill={{ partId: 'p1', jobId: 'j1', jobPartId: 'jp1' }} />);

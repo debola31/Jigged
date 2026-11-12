@@ -412,6 +412,16 @@ export const PRODUCTION_STATUS_CONFIG: Record<
 };
 
 /**
+ * A production status in words, from a read that types it as a plain string (the operator
+ * traveler's). An unknown value prints as it came rather than as nothing.
+ */
+export function productionStatusLabel(status: string): string {
+  return status in PRODUCTION_STATUS_CONFIG
+    ? PRODUCTION_STATUS_CONFIG[status as ProductionStatus].label
+    : status;
+}
+
+/**
  * Fulfillment-status display configuration.
  */
 export const FULFILLMENT_STATUS_CONFIG: Record<

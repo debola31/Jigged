@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getJobLifecycleStage,
+  productionStatusLabel,
   isJobClosed,
   isJobDone,
   isJobOverdue,
@@ -248,5 +249,19 @@ describe('stagesToStatusPairs', () => {
 
   it('returns nothing for an empty selection — "None" matches no jobs', () => {
     expect(stagesToStatusPairs([])).toEqual([]);
+  });
+});
+
+/** The operator traveler's read types the status as a string, and its chip printed it raw. */
+describe('productionStatusLabel', () => {
+  it('names each production status in words', () => {
+    expect(productionStatusLabel('not_started')).toBe('Not Started');
+    expect(productionStatusLabel('in_progress')).toBe('In Progress');
+    expect(productionStatusLabel('completed')).toBe('Completed');
+    expect(productionStatusLabel('cancelled')).toBe('Cancelled');
+  });
+
+  it('prints an unknown value as it came, rather than as nothing', () => {
+    expect(productionStatusLabel('on_hold')).toBe('on_hold');
   });
 });

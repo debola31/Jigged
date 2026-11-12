@@ -66,17 +66,21 @@ test.describe('Storage — the Inventory tab', () => {
     await openStorage(page);
 
     await page.getByRole('textbox', { name: /Filter parts/ }).fill(SPLIT_PART);
+    // The footer counts the filtered rows, so this waits for the filter to land. Before it does,
+    // E2E-COUNT-SPLIT is on screen too, also in two places, and an exact "2" below matched both
+    // cells: strict mode fails that at once rather than retrying, so a slow filter failed the test.
+    await expect(page.getByText('1 part', { exact: true })).toBeVisible();
 
     // Split across two shelves and shown as ONE line: the list says what the shop holds, and the
     // side rail is where a part comes apart by place and heat.
     await expect(page.getByRole('gridcell', { name: SPLIT_PART })).toHaveCount(1);
-    await expect(page.getByRole('gridcell', { name: '52 each' })).toBeVisible();
+    const row = page.getByRole('row').filter({ hasText: SPLIT_PART });
+    await expect(row.getByRole('gridcell', { name: '52 each' })).toBeVisible();
     // How many places, never which — one column cannot show two shelves.
-    await expect(page.getByRole('gridcell', { name: '2', exact: true })).toBeVisible();
+    await expect(row.getByRole('gridcell', { name: '2', exact: true })).toBeVisible();
     // Twice: the part's own Value cell and the footer total, which are the same number when one
     // part is all that is showing.
     await expect(page.getByText('$130')).toHaveCount(2);
-    await expect(page.getByText('1 part', { exact: true })).toBeVisible();
   });
 
   test('an uncosted part is shown, excluded from the total, and said so in words', async ({

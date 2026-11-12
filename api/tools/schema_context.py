@@ -513,7 +513,7 @@ otherwise pick.
   Divide by 60 before multiplying by an hourly labor_rate.
 - Cost inputs for internal routing/job operations:
     labor_rate = COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate)
-  For external operations the inputs are external_unit_price and external_setup_cost.
+  For external operations the input is external_unit_price (per piece; there is no setup cost).
   What to USE for a cost or profit answer is in the semantics section -- prefer the
   frozen job_parts.true_cost_per_unit over recomputing from current rates.
 

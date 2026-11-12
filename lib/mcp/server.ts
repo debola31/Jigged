@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { defineAccountTool, registerAccountTool, type ToolTarget } from '@/lib/mcp/defineTool';
 import { OFFICE_ROLES, isOfficeRole } from '@/lib/mcp/roles';
 import { registerArchiveTools } from '@/lib/mcp/tools/archive';
+import { registerChatUploadTools } from '@/lib/mcp/tools/chatUploads';
 import { registerCustomerTools } from '@/lib/mcp/tools/customers';
 import { registerCustomerWriteTools } from '@/lib/mcp/tools/customersWrites';
 import { registerImportTools } from '@/lib/mcp/tools/imports';
@@ -127,5 +128,6 @@ export function registerJiggedTools(server: ToolTarget): void {
   registerInvoiceWriteTools(server);
   registerPurchasingWriteTools(server);
   registerImportTools(server);
+  registerChatUploadTools(server);
   registerArchiveTools(server);
 }

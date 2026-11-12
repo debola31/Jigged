@@ -1,5 +1,7 @@
 import { getSupabase } from '@/lib/supabase';
 import type { ChartConfig, ReportSummary } from '@/utils/insightsAccess';
+import { chatUploadRefSchema, type ChatUploadRef } from '@/lib/chatUploads';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
 // ============================================================
 // Insights conversations — direct Supabase queries under RLS
@@ -29,6 +31,8 @@ export type ReportTurn = Pick<ReportSummary, 'report' | 'dropped' | 'tool_call_c
 
 /** A displayed turn. Summary rows are the model's own notes and are never shown. */
 export interface ThreadMessage {
+  uploads?: ChatUploadRef[];
+  quoteDraftUrl?: string | null;
   id: string;
   seq: number;
   role: 'user' | 'assistant';
@@ -74,7 +78,7 @@ export async function createThread(companyId: string, title: string): Promise<Ch
     .select('id, title, created_at, updated_at')
     .single();
 
-  if (error) throw new Error(`Failed to start a conversation: ${error.message}`);
+  if (error) throw toFriendlyError(error, { fallback: 'Could not start a conversation. Please try again.' });
   return data;
 }
 
@@ -123,7 +127,7 @@ function chartConfigOf(raw: unknown): ChartConfig | null {
 export async function listThreadMessages(threadId: string): Promise<ThreadMessage[]> {
   const { data, error } = await getSupabase()
     .from('ai_chat_messages')
-    .select('id, seq, role, content, chart_config, report, follow_ups, job_id, created_at')
+    .select('id, seq, role, content, chart_config, report, follow_ups, job_id, created_at, tool_trace, job:ai_jobs(uploads:payload->uploads)')
     .eq('thread_id', threadId)
     .in('role', ['user', 'assistant'])
     .order('seq', { ascending: true });
@@ -135,7 +139,15 @@ export async function listThreadMessages(threadId: string): Promise<ThreadMessag
     // `role` is text with a CHECK, so it arrives as string; narrow it rather than
     // assert, so a row the CHECK does not know about is dropped, not rendered.
     if (row.role !== 'user' && row.role !== 'assistant') continue;
+    const uploads = chatUploadRefSchema.array().safeParse(row.job?.uploads);
+    const trace = Array.isArray(row.tool_trace) ? row.tool_trace : [];
+    const draft = trace.find((entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+      && entry.tool === 'setup_parts_from_upload' && typeof entry.quote_draft_url === 'string');
+    const draftUrl = draft && typeof draft === 'object' && !Array.isArray(draft)
+      && typeof draft.quote_draft_url === 'string' ? draft.quote_draft_url : null;
     out.push({
+      uploads: uploads.success ? uploads.data : [],
+      quoteDraftUrl: draftUrl,
       id: row.id,
       seq: row.seq,
       role: row.role,

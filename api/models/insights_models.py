@@ -7,6 +7,17 @@ from uuid import UUID
 from pydantic import BaseModel, Field
 
 
+class ChatUpload(BaseModel):
+    """A reference to private Storage, with locally extracted drawing context. No file bytes."""
+
+    id: UUID
+    name: str = Field(min_length=1, max_length=255)
+    manifest_path: str = Field(max_length=500)
+    file_count: int = Field(ge=1, le=150)
+    part_count: int = Field(ge=1, le=50)
+    summary: str = Field(max_length=24_000)
+
+
 class ChatRequest(BaseModel):
     """Request to submit a natural language question.
 
@@ -25,6 +36,7 @@ class ChatRequest(BaseModel):
     # id; the route loads the replay set from it and never writes a message --
     # the trigger on ai_jobs does that when the job succeeds.
     thread_id: UUID | None = Field(default=None, description="ai_chat_threads.id this question continues")
+    uploads: list[ChatUpload] = Field(default_factory=list, max_length=3)
 
 
 class ReportRequest(BaseModel):

@@ -95,6 +95,9 @@ importers:
       browser-image-compression:
         specifier: ^2.0.2
         version: 2.0.2
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
       jspdf:
         specifier: ^4.2.1
         version: 4.2.1
@@ -117,8 +120,8 @@ importers:
         specifier: ^1.427.2
         version: 1.427.2(@types/react@19.2.14)(react@19.2.3)
       posthog-node:
-        specifier: ^5.46.1
-        version: 5.46.1
+        specifier: ^5.68.2
+        version: 5.68.2(@opentelemetry/api@1.9.1)
       postprocessing:
         specifier: 6.39.5
         version: 6.39.5(three@0.186.1)
@@ -1145,17 +1148,17 @@ packages:
   '@posthog/browser-common@0.7.2':
     resolution: {integrity: sha512-ukDmETXy6fTBE4ZpaO8ccscrNz5SvTaUnhQ0Ze2JX/oYILa89rrNwqUH7lDAuhFKa+NY6EoJ9kZMuOvuu4WwLQ==}
 
-  '@posthog/core@1.45.2':
-    resolution: {integrity: sha512-OhEHkojFkqEFbtm/wUtLYgomN1gFNU9IyufvNsuZvpIOh8TZ9tnAvI81Sej/2zu+vyDExs9JroQB5SW3y5QyOw==}
-
   '@posthog/core@1.50.5':
     resolution: {integrity: sha512-afEchuShDaVIoxAIj76kDZQ1DhfesDmgfVp+mtTzsA3wlc8DF5uoz8YjuTjnxOicWkpP5HCDqYidK/1kT125Cg==}
 
-  '@posthog/types@1.399.0':
-    resolution: {integrity: sha512-/WDwBzqIPko8VJ1B+0rlso2XQEz9+2sqtsY9Tqy3p1GhgTqsFakcz/PmMpAnA321LTEZVRcO6x5hAwABV4yrDw==}
+  '@posthog/core@1.67.1':
+    resolution: {integrity: sha512-Fq8YySx3G2ggxKV/dLf5nfbQocB3/yU6TNSGIyRvVynizrIW8tZfB2HQ/13cY61PoU+cNzvKch+B7Ac+OUkORw==}
 
   '@posthog/types@1.409.0':
     resolution: {integrity: sha512-239umoaZVb2GBaXeEyJpwFvjhrrChJH8NHCwiao23EBSu3NA6EN0MTMoaHSmMEf4yjiXEFFoYJA6FjJAXF5HGA==}
+
+  '@posthog/types@1.424.0':
+    resolution: {integrity: sha512-58RE0+Lt4vMLYmty2MlyAyfxFJvlM3Fp0tgRT25Klky7FSQvpznX+W9xKyVESB5oIAEJDxfHKX0cwEBHROZKqw==}
 
   '@react-spring/animated@9.7.5':
     resolution: {integrity: sha512-Tqrwz7pIlsSDITzxoLS3n/v/YCUHQdOIKtOJf4yL6kYVSDTSmVK1LI1Q3M/uu2Sx4X3pIWF3xLUhlsA6SPNTNg==}
@@ -3854,12 +3857,15 @@ packages:
       react:
         optional: true
 
-  posthog-node@5.46.1:
-    resolution: {integrity: sha512-WjCqExq44pBdyg9MSsH6UAE0tNZ88p4aIuVFicgqhjf2Fbws6IhS4ioYUa4aBrbUPS9EDRXtBTtF5DpP1ml8Pw==}
+  posthog-node@5.68.2:
+    resolution: {integrity: sha512-i8vfineDlIc0BQaN/G0m5zgAcP88ECwYS43QsEShZGWGYvYrfddAUnFwiljfyySPUK+RrKJWFJUJGHeYkThZoQ==}
     engines: {node: ^20.20.0 || >=22.22.0}
     peerDependencies:
+      '@opentelemetry/api': ^1.2.0
       rxjs: ^7.0.0
     peerDependenciesMeta:
+      '@opentelemetry/api':
+        optional: true
       rxjs:
         optional: true
 
@@ -5708,17 +5714,17 @@ snapshots:
       '@posthog/core': 1.50.5
       '@posthog/types': 1.409.0
 
-  '@posthog/core@1.45.2':
-    dependencies:
-      '@posthog/types': 1.399.0
-
   '@posthog/core@1.50.5':
     dependencies:
       '@posthog/types': 1.409.0
 
-  '@posthog/types@1.399.0': {}
+  '@posthog/core@1.67.1':
+    dependencies:
+      '@posthog/types': 1.424.0
 
   '@posthog/types@1.409.0': {}
+
+  '@posthog/types@1.424.0': {}
 
   '@react-spring/animated@9.7.5(react@19.2.3)':
     dependencies:
@@ -8532,9 +8538,11 @@ snapshots:
     transitivePeerDependencies:
       - preact-render-to-string
 
-  posthog-node@5.46.1:
+  posthog-node@5.68.2(@opentelemetry/api@1.9.1):
     dependencies:
-      '@posthog/core': 1.45.2
+      '@posthog/core': 1.67.1
+    optionalDependencies:
+      '@opentelemetry/api': 1.9.1
 
   postprocessing@6.39.5(three@0.186.1):
     dependencies:

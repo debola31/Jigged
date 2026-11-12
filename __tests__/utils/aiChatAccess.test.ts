@@ -4,6 +4,7 @@
  * message, and nothing here has an insert for one.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { isBillingWriteBlocked } from '@/lib/supabaseErrors';
 
 function buildQueryStub(initial?: { data?: unknown; error?: unknown }) {
   const builder: Record<string, unknown> = {};
@@ -74,9 +75,13 @@ describe('createThread', () => {
     expect(thread.id).toBe('t-1');
   });
 
-  it('surfaces a refused insert as an error, never a silent null', async () => {
-    queueBuilders([buildQueryStub({ error: { message: 'permission denied' } })]);
-    await expect(createThread('co-1', 'q')).rejects.toThrow(/permission denied/);
+  it('keeps a billing refusal classifiable without exposing database policy details', async () => {
+    const raw = { code: '42501', message: 'new row violates row-level security policy "billing_gate_insert" for table "ai_chat_threads"' };
+    queueBuilders([buildQueryStub({ error: raw })]);
+    const error = await createThread('co-1', 'q').catch((err: unknown) => err);
+    expect(error).toBeInstanceOf(Error);
+    expect(isBillingWriteBlocked(error)).toBe(true);
+    expect((error as Error).message).not.toMatch(/billing_gate|ai_chat_threads|row-level security/);
   });
 });
 
@@ -128,6 +133,23 @@ describe('listThreadMessages', () => {
     expect(q.order).toHaveBeenCalledWith('seq', { ascending: true });
     expect(messages.map((m) => m.role)).toEqual(['user', 'assistant']);
     expect(messages[1].chart_config).toEqual(chart);
+  });
+
+  it('reloads upload badges and the quote draft link without reading the full job payload', async () => {
+    const upload = {
+      id: '11111111-1111-1111-1111-111111111111', name: 'parts.zip',
+      manifest_path: 'private/manifest.json', part_count: 31, file_count: 93, summary: 'fields',
+    };
+    const q = buildQueryStub({ data: [
+      { id: 'm1', seq: 1, role: 'user', content: 'Set up parts', created_at: 'c', job: { uploads: [upload] } },
+      { id: 'm2', seq: 2, role: 'assistant', content: 'Ready', created_at: 'c',
+        tool_trace: [{ tool: 'setup_parts_from_upload', quote_draft_url: 'https://jigged.app/dashboard/co-1/quotes/new?parts=p1' }] },
+    ] });
+    queueBuilders([q]);
+    const [user, assistant] = await listThreadMessages('t-1');
+    expect(user.uploads).toEqual([upload]);
+    expect(assistant.quoteDraftUrl).toContain('/quotes/new?parts=p1');
+    expect(q.select).toHaveBeenCalledWith(expect.stringContaining('uploads:payload->uploads'));
   });
 
   it('carries a report turn and the job that made it, and nothing for a plain answer', async () => {

@@ -17,6 +17,30 @@ import posthog from 'posthog-js';
 import { render, screen, resetRouterMocks, within } from '../../test-utils';
 import InsightsChat from '@/components/insights/InsightsChat';
 import { ChatEnqueueError } from '@/utils/insightsAccess';
+import { toFriendlyError } from '@/lib/supabaseErrors';
+import type { useSubscription } from '@/components/providers/SubscriptionProvider';
+
+type Subscription = ReturnType<typeof useSubscription>;
+let subscriptionStub: Subscription;
+let roleStub = { isAdmin: true, loading: false };
+vi.mock('@/components/providers/SubscriptionProvider', () => ({
+  useSubscription: () => subscriptionStub,
+  useOptionalSubscription: () => subscriptionStub,
+}));
+vi.mock('@/hooks/useUserRole', () => ({ useUserRole: () => roleStub }));
+const mockStartCheckout = vi.fn();
+const mockOpenBillingPortal = vi.fn();
+vi.mock('@/lib/billingApi', () => ({
+  startCheckout: (...args: unknown[]) => mockStartCheckout(...args),
+  openBillingPortal: (...args: unknown[]) => mockOpenBillingPortal(...args),
+}));
+
+const mockPrepareChatUpload = vi.fn();
+const mockUploadChatFiles = vi.fn();
+vi.mock('@/utils/chatUploadsAccess', () => ({
+  prepareChatUpload: (...args: unknown[]) => mockPrepareChatUpload(...args),
+  uploadChatFiles: (...args: unknown[]) => mockUploadChatFiles(...args),
+}));
 
 const mockSubmitChatQuery = vi.fn();
 const mockListReports = vi.fn();
@@ -96,6 +120,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetRouterMocks();
   window.sessionStorage.clear();
+  subscriptionStub = {
+    entitlement: 'full', billing: null, isDemo: false, isPastDue: false,
+    isReadOnly: false, mustSubscribe: false, canWrite: true, hasCustomer: false,
+    isLoading: false, refresh: vi.fn().mockResolvedValue(undefined),
+  };
+  roleStub = { isAdmin: true, loading: false };
   mockCreateThread.mockResolvedValue({ id: 'thread-1', title: 't', created_at: 'c', updated_at: 'u' });
   mockListThreadMessages.mockResolvedValue([]);
   mockListThreads.mockResolvedValue([]);
@@ -105,6 +135,206 @@ beforeEach(() => {
   mockListChartTurns.mockResolvedValue([]);
   mockSubmitChatQuery.mockResolvedValue({ job_id: 'job-1', status: 'queued', executor: 'worker' });
   mockUseAiJob.mockReturnValue(IDLE_JOB);
+  mockPrepareChatUpload.mockResolvedValue({ id: 'upload-1', name: 'parts.zip', rows: [{}] });
+  mockUploadChatFiles.mockResolvedValue({
+    id: 'upload-1', name: 'parts.zip', manifest_path: 'private/manifest.json',
+    part_count: 1, file_count: 3, summary: 'drawing fields',
+  });
+});
+
+function blockSubscription(status: 'canceled' | 'paused' | null = null) {
+  subscriptionStub = {
+    ...subscriptionStub, canWrite: false, entitlement: status ? 'read_only' : 'must_subscribe',
+    isReadOnly: !!status, mustSubscribe: !status, hasCustomer: !!status,
+    billing: status ? {
+      company_id: 'co-1', canceled_at: null, trial_end: null,
+      billing_exempt: false, subscription_status: status, current_period_end: null,
+      cancel_at: null, ended_at: null, stripe_customer_id: 'cus-shop',
+      stripe_subscription_id: 'sub-shop', subscription_price_id: null,
+    } : null,
+  };
+}
+
+describe('InsightsChat — subscription access', () => {
+  it.each([
+    [null, /start your subscription/i, 'Start subscription'],
+    ['canceled', /has ended.*reactivate/i, 'Manage subscription'],
+    ['paused', /is paused.*resume/i, 'Manage subscription'],
+  ] as const)('explains %s before typing and offers the admin a billing action', (status, message, label) => {
+    blockSubscription(status);
+    render(<InsightsChat companyId="co-1" />);
+    const notice = screen.getByRole('region', { name: 'Chat subscription' });
+    expect(notice).toHaveTextContent(message);
+    expect(within(notice).getByRole('button', { name: label })).toBeEnabled();
+    expect(notice).toHaveTextContent('You can still view your chat history.');
+    expect(screen.getByLabelText('Your question')).toBeEnabled();
+    expect(screen.getByLabelText('Your question')).toHaveAccessibleDescription(/active subscription/i);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('keeps a typed draft and focuses the subscription explanation on Send or Enter, without writing', async () => {
+    blockSubscription();
+    const user = userEvent.setup();
+    render(<InsightsChat companyId="co-1" />);
+    await ask('How many jobs are late?');
+    const field = screen.getByLabelText('Your question');
+    expect(field).toHaveValue('How many jobs are late?');
+    expect(screen.getByRole('region', { name: 'Chat subscription' })).toHaveFocus();
+    await user.click(field);
+    await user.keyboard('{Enter}');
+    expect(screen.getByRole('region', { name: 'Chat subscription' })).toHaveFocus();
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    expect(posthog.capture).toHaveBeenCalledWith('ai job refused', expect.objectContaining({ reason: 'subscription_required' }));
+  });
+
+  it('keeps a selected starter as a draft and blocks file preparation and upload', async () => {
+    blockSubscription();
+    const user = userEvent.setup();
+    render(<InsightsChat companyId="co-1" />);
+    await user.click(screen.getByRole('button', { name: 'How many jobs are late right now?' }));
+    expect(screen.getByLabelText('Your question')).toHaveValue('How many jobs are late right now?');
+    await user.upload(screen.getByLabelText('Choose chat files'), new File(['zip'], 'parts.zip'));
+    expect(mockPrepareChatUpload).not.toHaveBeenCalled();
+    expect(mockUploadChatFiles).not.toHaveBeenCalled();
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+  });
+
+  it('keeps history readable but blocks follow-ups and approvals in an existing conversation', async () => {
+    blockSubscription('canceled');
+    const user = userEvent.setup();
+    mockListThreads.mockResolvedValue([{ id: 't-1', title: 'Previous conversation', created_at: 'c', updated_at: 'u' }]);
+    mockListThreadMessages.mockResolvedValue(turn(1, 'Old question', 'Saved answer', { follow_ups: ['What about next week?'] }));
+    mockGetPendingActions.mockResolvedValue([{ id: 'a-1', tool: 'create_quote', title: 'Create quote', summary: 'Draft a quote', destructive: false }]);
+    render(<InsightsChat companyId="co-1" />);
+    await user.click(screen.getByRole('button', { name: 'Chat history' }));
+    await user.click(await screen.findByText('Previous conversation'));
+    expect(await screen.findByText('Saved answer')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'What about next week?' }));
+    await user.click(await screen.findByRole('button', { name: 'Approve', exact: true }));
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(mockDecideChatAction).not.toHaveBeenCalled();
+    expect(screen.getByLabelText('Your question')).toHaveValue('What about next week?');
+  });
+
+  it('points a non-admin to their shop admin without offering an inaccessible billing action', () => {
+    blockSubscription('canceled');
+    roleStub = { isAdmin: false, loading: false };
+    render(<InsightsChat companyId="co-1" />);
+    const notice = screen.getByRole('region', { name: 'Chat subscription' });
+    expect(notice).toHaveTextContent(/ask an admin at your shop to reactivate/i);
+    expect(within(notice).queryByRole('button')).not.toBeInTheDocument();
+  });
+
+  it.each(['demo', 'past_due', 'grace'] as const)('preserves entitled %s access', async (access) => {
+    if (access === 'demo') subscriptionStub = { ...subscriptionStub, isDemo: true };
+    if (access === 'past_due') subscriptionStub = { ...subscriptionStub, entitlement: 'past_due', isPastDue: true };
+    if (access === 'grace') {
+      blockSubscription('canceled');
+      subscriptionStub = { ...subscriptionStub, entitlement: 'full', canWrite: true, isReadOnly: false };
+    }
+    render(<InsightsChat companyId="co-1" />);
+    await ask('How many jobs are late?');
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'How many jobs are late?', 'thread-1');
+    expect(screen.queryByRole('region', { name: 'Chat subscription' })).not.toBeInTheDocument();
+  });
+
+  it('waits for entitlement without flashing a subscription notice and preserves typing', async () => {
+    subscriptionStub = { ...subscriptionStub, isLoading: true, canWrite: false };
+    const user = userEvent.setup();
+    const { rerender } = render(<InsightsChat companyId="co-1" />);
+    await user.type(screen.getByLabelText('Your question'), 'My draft');
+    expect(screen.queryByRole('region', { name: 'Chat subscription' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Send question' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'How many jobs are late right now?' })).toBeDisabled();
+    await user.keyboard('{Enter}');
+    expect(mockCreateThread).not.toHaveBeenCalled();
+    subscriptionStub = { ...subscriptionStub, isLoading: false, canWrite: true };
+    rerender(<InsightsChat companyId="co-1" />);
+    await user.click(screen.getByRole('button', { name: 'Send question' }));
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'My draft', 'thread-1');
+  });
+
+  it('translates a billing denial from a stale cache, refreshes billing, and never exposes RLS details', async () => {
+    const raw = { code: '42501', message: 'new row violates row-level security policy "billing_gate_insert" for table "ai_chat_threads"' };
+    mockCreateThread.mockRejectedValueOnce(toFriendlyError(raw));
+    const { rerender } = render(<InsightsChat companyId="co-1" />);
+    await ask('How many jobs are late?');
+    expect(await screen.findByRole('region', { name: 'Chat subscription' })).toBeInTheDocument();
+    expect(subscriptionStub.refresh).toHaveBeenCalledOnce();
+    expect(screen.queryByText(/row-level security|billing_gate|ai_chat_threads/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(Sentry.captureException).not.toHaveBeenCalled();
+    // A new billing snapshot that confirms access restores chat and retains the draft.
+    subscriptionStub = { ...subscriptionStub, billing: {
+      company_id: 'co-1', canceled_at: null, trial_end: null,
+      billing_exempt: true, subscription_status: null, current_period_end: null,
+      cancel_at: null, ended_at: null, stripe_customer_id: null,
+      stripe_subscription_id: null, subscription_price_id: null,
+    } };
+    rerender(<InsightsChat companyId="co-1" />);
+    expect(screen.queryByRole('region', { name: 'Chat subscription' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Your question')).toHaveValue('How many jobs are late?');
+  });
+
+  it('restores the draft after billing navigation and clears it only after a successful send', async () => {
+    blockSubscription();
+    const { unmount } = render(<InsightsChat companyId="co-1" />);
+    await ask('Keep this question');
+    expect(window.sessionStorage.getItem('jigged.aiDraft.co-1')).toBe('Keep this question');
+    unmount();
+    subscriptionStub = { ...subscriptionStub, canWrite: true, mustSubscribe: false };
+    const user = userEvent.setup();
+    render(<InsightsChat companyId="co-1" />);
+    await vi.waitFor(() => expect(screen.getByLabelText('Your question')).toHaveValue('Keep this question'));
+    await user.click(screen.getByRole('button', { name: 'Send question' }));
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'Keep this question', 'thread-1');
+    expect(window.sessionStorage.getItem('jigged.aiDraft.co-1')).toBeNull();
+  });
+});
+
+describe('InsightsChat — uploaded drawings', () => {
+  it('stages a package without an AI call, then sends the uploaded reference with the question', async () => {
+    const user = userEvent.setup();
+    render(<InsightsChat companyId="co-1" />);
+    await user.upload(screen.getByLabelText('Choose chat files'), new File(['zip bytes'], 'parts.zip'));
+    expect(await screen.findByText('parts.zip · 1 part')).toBeInTheDocument();
+    expect(mockSubmitChatQuery).not.toHaveBeenCalled();
+    expect(mockUploadChatFiles).not.toHaveBeenCalled();
+    await ask('Set up these parts and draft a quote for review.');
+    expect(mockUploadChatFiles).toHaveBeenCalledWith('co-1', 'thread-1', expect.objectContaining({ id: 'upload-1' }), expect.any(Function));
+    expect(mockSubmitChatQuery).toHaveBeenCalledWith('co-1', 'Set up these parts and draft a quote for review.', 'thread-1', [expect.objectContaining({ file_count: 3 })]);
+    expect(screen.queryByText('parts.zip · 1 part')).not.toBeInTheDocument();
+  });
+
+  it('keeps the question and successful upload on an enqueue rejection, and reuses the bytes on retry', async () => {
+    const user = userEvent.setup();
+    mockSubmitChatQuery.mockRejectedValueOnce(new ChatEnqueueError('Busy', 409));
+    render(<InsightsChat companyId="co-1" />);
+    await user.upload(screen.getByLabelText('Choose chat files'), new File(['zip bytes'], 'parts.zip'));
+    await screen.findByText('parts.zip · 1 part');
+    await ask('Set up these parts');
+    expect(await screen.findByRole('alert')).toHaveTextContent('Busy');
+    expect(screen.getByLabelText('Your question')).toHaveValue('Set up these parts');
+    await user.click(screen.getByRole('button', { name: 'Send question' }));
+    expect(mockSubmitChatQuery).toHaveBeenCalledTimes(2);
+    expect(mockUploadChatFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a review link from the stored successful action, and refuses another company path', async () => {
+    window.sessionStorage.setItem('jigged.aiThread.co-1', 't-1');
+    mockListThreadMessages.mockResolvedValue([
+      ...turn(1, 'Draft a quote', 'The parts are ready.', { quoteDraftUrl: 'https://jigged.app/dashboard/co-1/quotes/new?parts=p1' }),
+      ...turn(3, 'Again', 'Done.', { quoteDraftUrl: 'https://example.com/dashboard/other/quotes/new' }),
+    ]);
+    render(<InsightsChat companyId="co-1" />);
+    const link = await screen.findByRole('link', { name: 'Review quote draft' });
+    expect(link).toHaveAttribute('href', '/dashboard/co-1/quotes/new?parts=p1');
+    expect(screen.getAllByRole('link', { name: 'Review quote draft' })).toHaveLength(1);
+  });
 });
 
 describe('InsightsChat — what an enqueue refusal looks like', () => {
@@ -305,6 +535,7 @@ describe('InsightsChat — the conversation', () => {
       from_suggestion: false,
       turn_index: 2,
       question_length_bucket: 'under_5w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 
@@ -443,6 +674,7 @@ describe('InsightsChat — what to ask next', () => {
       from_suggestion: true,
       turn_index: 2,
       question_length_bucket: 'under_5w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 
@@ -473,6 +705,7 @@ describe('InsightsChat — a report is an answer, not a mode', () => {
       from_suggestion: false,
       turn_index: 0,
       question_length_bucket: '5w_15w',
+      upload_count: 0, file_count: 0, part_count: 0,
     });
   });
 

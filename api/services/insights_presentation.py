@@ -323,6 +323,16 @@ _NOT_A_FIGURE_RE = re.compile(
 )
 _SCALE = {"k": 1_000.0, "m": 1_000_000.0}
 
+# An explicitly quoted example is an input suggestion, not a claim about the
+# shop. PYTHON-FASTAPI-27 rejected `like "2–3 weeks"` while explaining quotes.
+# Keep the scope narrow: a quoted shop figure, or an unquoted claim after
+# "for example", still has to be supported.
+_INPUT_EXAMPLE_RE = re.compile(
+    r'\b(?:for example|e\.g\.|such as|like)\s*[:,]?\s*(?:"[^"\n]{1,200}"|“[^”\n]{1,200}”)',
+    re.I,
+)
+_LIST_NUMBER_RE = re.compile(r"^\s*\d+[.)]\s+", re.M)
+
 
 def figures_in_text(text: str) -> set[float]:
     """The numbers a reader would take as figures: money, percentages, decimals
@@ -401,7 +411,8 @@ def unsupported_figures(answer: str, sources: set[float]) -> list[float]:
     13". The reader can check it from the sentence. Ratios and percentages are
     not: "3x more" and "a 133 % drop" are where the model went wrong live, and
     the semantics ask for those in SQL."""
-    figures = figures_in_text(answer)
+    claims = _LIST_NUMBER_RE.sub("", _INPUT_EXAMPLE_RE.sub(" ", answer))
+    figures = figures_in_text(claims)
     grounded = [x for x in figures if _supported(x, sources)]
     def derived(x: float) -> bool:
         for i, a in enumerate(grounded):

@@ -1,6 +1,7 @@
 // The shop's light models, as moonshot/web/media.py writes them (gltf-transform optimize: meshopt, no Draco): one
 // load per URL for the page, shared by the shop's canvas and a thing's card. Three's default loading manager, so
 // they count in the shop's load status (ShopCanvas's useProgress).
+import { retryLoad } from './retryLoad';
 import { use } from 'react';
 import type { Object3D } from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -20,7 +21,8 @@ export function lightModel(url: string): Promise<LightModel> {
   let load = loads.get(url);
   if (!load) {
     loader ??= new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
-    load = loader.loadAsync(url).then(
+    const currentLoader = loader;
+    load = retryLoad(() => currentLoader.loadAsync(url)).then(
       (gltf): LightModel => ({ scene: gltf.scene }),
       (error: unknown): LightModel => ({ error }),
     );

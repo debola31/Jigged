@@ -6,11 +6,16 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Chip from '@mui/material/Chip';
 import CircularProgress from '@mui/material/CircularProgress';
+import IconButton from '@mui/material/IconButton';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
+import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import AddIcon from '@mui/icons-material/Add';
 import AddCommentOutlinedIcon from '@mui/icons-material/AddCommentOutlined';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
 import CloudOffIcon from '@mui/icons-material/CloudOff';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import HistoryIcon from '@mui/icons-material/History';
@@ -20,11 +25,15 @@ import ShowChartOutlinedIcon from '@mui/icons-material/ShowChartOutlined';
 import VerifiedUserOutlinedIcon from '@mui/icons-material/VerifiedUserOutlined';
 import ActionApprovalCard from './ActionApprovalCard';
 import AllowedActionsDialog from './AllowedActionsDialog';
+import ChatSubscriptionNotice from './ChatSubscriptionNotice';
 import ConversationTurn from './ConversationTurn';
 import HistoryDrawer, { type HistoryTab } from './HistoryDrawer';
 import ReportPreviewDialog from './ReportPreviewDialog';
 import { useAiJob } from '@/hooks/useAiJob';
 import { useLoad } from '@/hooks/useLoad';
+import { useSubscription } from '@/components/providers/SubscriptionProvider';
+import { writeBlockedState } from '@/lib/billingCopy';
+import { isBillingWriteBlocked } from '@/lib/supabaseErrors';
 import {
   createThread,
   listThreadMessages,
@@ -44,6 +53,8 @@ import {
   type ReportSummary,
 } from '@/utils/insightsAccess';
 import { reportSpecOf } from '@/utils/reportSpec';
+import { CHAT_FILE_ACCEPT, CHAT_MAX_UPLOADS, type ChatUploadRef } from '@/lib/chatUploads';
+import { prepareChatUpload, uploadChatFiles, type PreparedChatUpload } from '@/utils/chatUploadsAccess';
 
 /**
  * Three starters: one that answers in prose, one that draws a chart, one that
@@ -187,6 +198,16 @@ function loadingMessageFor(tick: number): string {
 }
 
 const THREAD_STORAGE_PREFIX = 'jigged.aiThread.';
+const DRAFT_STORAGE_PREFIX = 'jigged.aiDraft.';
+
+/** Display only an internal quote form for this company. */
+function quoteDraftPath(url: string | null, companyId: string): string | null {
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.pathname === `/dashboard/${companyId}/quotes/new` ? `${parsed.pathname}${parsed.search}` : null;
+  } catch { return null; }
+}
 
 /**
  * How the person got to the question they asked. Reported as two booleans rather
@@ -224,6 +245,8 @@ interface InsightsChatProps {
 
 /** A displayed exchange: the question and the answer the trigger stored with it. */
 interface Turn {
+  uploads: ChatUploadRef[];
+  quoteDraftUrl: string | null;
   key: string;
   question: string;
   answer: string;
@@ -249,6 +272,8 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
     const next = messages[i + 1];
     if (!next || next.role !== 'assistant') continue;
     turns.push({
+      uploads: m.uploads ?? [],
+      quoteDraftUrl: next.quoteDraftUrl ?? null,
       key: next.id,
       question: m.content,
       answer: next.content,
@@ -281,6 +306,22 @@ function pairTurns(messages: ThreadMessage[]): Turn[] {
  * settles the thread is simply re-read.
  */
 export default function InsightsChat({ companyId }: InsightsChatProps) {
+  const subscription = useSubscription();
+  const subscriptionNoticeRef = useRef<HTMLDivElement | null>(null);
+  // A denial from Postgres wins over a stale client cache until refresh replaces
+  // that snapshot. A refreshed, entitled shop unlocks without clearing its draft.
+  const [billingDenial, setBillingDenial] = useState<{
+    companyId: string; billing: typeof subscription.billing;
+  } | null>(null);
+  const contextSaysBlocked = !subscription.isLoading && !subscription.canWrite;
+  const serverSaysBlocked = billingDenial?.companyId === companyId && billingDenial.billing === subscription.billing;
+  const subscriptionRequired = contextSaysBlocked || serverSaysBlocked;
+  const [stagedUploads, setStagedUploads] = useState<{
+    companyId: string; prepared: PreparedChatUpload; uploaded?: ChatUploadRef; threadId?: string;
+  }[]>([]);
+  const [uploadStatus, setUploadStatus] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const attachments = stagedUploads.filter((item) => item.companyId === companyId);
   const [question, setQuestion] = useState('');
   const [asking, setAsking] = useState(false);
   // The status rides with the message so the render can tell downtime (503, the
@@ -318,6 +359,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
    */
   const inFlightQuestion = askedQuestion || askedQuestionOf(job.job) || '';
   const storageKey = `${THREAD_STORAGE_PREFIX}${companyId}`;
+  const draftStorageKey = `${DRAFT_STORAGE_PREFIX}${companyId}`;
 
   // Re-attach to the conversation after a reload. Deferred into a microtask for
   // the same two reasons useAiJob gives: a synchronous setState here is a
@@ -329,6 +371,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       try {
         const saved = window.sessionStorage.getItem(storageKey);
         if (saved) setThreadId(saved);
+        const draft = window.sessionStorage.getItem(draftStorageKey);
+        if (draft) setQuestion((current) => current || draft);
       } catch {
         /* private mode, or storage disabled — a lost handle starts a new thread */
       }
@@ -336,7 +380,19 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     return () => {
       cancelled = true;
     };
-  }, [storageKey]);
+  }, [storageKey, draftStorageKey]);
+
+  // Keep a typed question through Checkout/Portal navigation. Only a successful
+  // enqueue consumes the saved draft; a refused attempt must not erase it.
+  const rememberQuestion = (value: string) => {
+    setQuestion(value);
+    try {
+      if (value) window.sessionStorage.setItem(draftStorageKey, value);
+      else window.sessionStorage.removeItem(draftStorageKey);
+    } catch {
+      /* storage disabled — the draft still lives in this tab's React state */
+    }
+  };
 
   const rememberThread = (id: string | null) => {
     setThreadId(id);
@@ -480,6 +536,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   }, [turns.length, pending, hasConversation]);
 
   const startNewConversation = () => {
+    if (uploadStatus || pending) return;
+    setStagedUploads([]);
     job.reset();
     setError(null);
     setAskedQuestion('');
@@ -487,9 +545,43 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
     setHistoryOpen(false);
   };
 
+  const canUseChat = () => {
+    if (subscription.isLoading) return false;
+    if (!subscriptionRequired) return true;
+    subscriptionNoticeRef.current?.focus();
+    return false;
+  };
+
+  const handleAttachFiles = async (files: File[]) => {
+    if (!files.length || pending || uploadStatus) return;
+    if (!canUseChat()) return;
+    setError(null);
+    setUploadStatus('Opening the files…');
+    try {
+      if (attachments.length >= CHAT_MAX_UPLOADS) throw new Error('Attach up to three packages per message.');
+      const prepared = await prepareChatUpload(files, setUploadStatus);
+      setStagedUploads((current) => [...current, { companyId, prepared }]);
+    } catch (err) {
+      setError({ message: err instanceof Error ? err.message : 'Could not open those files.' });
+    } finally { setUploadStatus(null); }
+  };
+
   const handleSubmit = async (input?: string, source: QuestionSource = 'typed') => {
     const q = (input || question).trim();
-    if (!q || pending) return;
+    if (!q || pending || uploadStatus) return;
+    if (!canUseChat()) {
+      if (subscriptionRequired) {
+        posthog.capture('ai job refused', {
+          feature: 'insights',
+          reason: 'subscription_required',
+          turn_index: turns.length,
+          from_example: source === 'example',
+          from_suggestion: source === 'suggestion',
+          question_length_bucket: questionLengthBucket(q),
+        });
+      }
+      return;
+    }
 
     setAsking(true);
     setError(null);
@@ -507,7 +599,20 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // One door. Whether this comes back as prose, a chart or a one-page report
       // is decided by the model from the words, and shows on the job row's `kind`
       // when it settles (`report generated` fires for a report, below).
-      const enqueued = await submitChatQuery(companyId, q, tid);
+      const uploads: ChatUploadRef[] = [];
+      for (const attachment of attachments) {
+        const uploaded = attachment.uploaded && attachment.threadId === tid ? attachment.uploaded
+          : await uploadChatFiles(companyId, tid, attachment.prepared, setUploadStatus);
+        uploads.push(uploaded);
+        setStagedUploads((current) => current.map((item) => item.prepared.id === attachment.prepared.id
+          ? { ...item, uploaded, threadId: tid } : item));
+      }
+      setUploadStatus(null);
+      const enqueued = uploads.length
+        ? await submitChatQuery(companyId, q, tid, uploads)
+        : await submitChatQuery(companyId, q, tid);
+      setStagedUploads([]);
+      rememberQuestion('');
       // Shape, never content: `executor` is the whole point of the rollout -- it
       // says whether the local box or a hosted model served this shop -- and
       // `turn_index` is how many answered turns this thread already had, which is
@@ -519,6 +624,9 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
         from_suggestion: source === 'suggestion',
         turn_index: turns.length,
         question_length_bucket: questionLengthBucket(q),
+        upload_count: uploads.length,
+        file_count: uploads.reduce((n, upload) => n + upload.file_count, 0),
+        part_count: uploads.reduce((n, upload) => n + upload.part_count, 0),
       });
       job.watch(enqueued.job_id);
     } catch (err) {
@@ -530,19 +638,18 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       const message =
         err instanceof Error ? err.message : 'Failed to send your question. Please try again.';
       const status = err instanceof ChatEnqueueError ? err.status : undefined;
+      const billingBlocked = isBillingWriteBlocked(err);
       // A question REFUSED AT THE DOOR never becomes a job row, so `ai job
       // settled` cannot see it -- and until this event existed the refusal was
       // invisible in BOTH tools: this catch captured nothing, and Sentry is
       // skipped for every one of these statuses. That is how "does the shop ever
       // ask and find the box off" stayed unanswerable through the whole pilot.
       //
-      // ONE LIST, TWO OUTCOMES, and it is the SAME list as before: a mapped
-      // status is an expected refusal and becomes a rate in PostHog; anything
-      // unmapped is still ours and still pages. Sentry's behaviour does not
-      // change here -- REFUSAL_REASONS holds exactly the statuses the old
-      // `[403, 404, 409, 429, 503]` array skipped, so the negation it replaced
-      // is now spelled as the map's own absence.
-      const refusal = status === undefined ? undefined : REFUSAL_REASONS[status];
+      // Billing is an expected refusal too, even when it arrives from a direct
+      // Supabase insert rather than an HTTP response. Anything else outside the
+      // known status map still belongs in Sentry.
+      const refusal = billingBlocked ? 'subscription_required'
+        : status === undefined ? undefined : REFUSAL_REASONS[status];
       if (refusal) {
         posthog.capture('ai job refused', {
           feature: 'insights',
@@ -558,8 +665,18 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       // A thread the route no longer recognises (archived elsewhere, or gone) is
       // not worth keeping a handle to; the next question starts a fresh one.
       if (status === 404) rememberThread(null);
-      setError({ message, status });
+      if (billingBlocked) {
+        setBillingDenial({ companyId, billing: subscription.billing });
+        void subscription.refresh();
+      } else {
+        setError({ message, status });
+        // A route's 403 may also be billing. Refresh its state rather than
+        // guessing from a sentence shared with other permission failures.
+        if (status === 403) void subscription.refresh();
+      }
+      rememberQuestion(q);
     } finally {
+      setUploadStatus(null);
       setAsking(false);
     }
   };
@@ -573,6 +690,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const handleDecide = async (decision: ChatDecisionKind) => {
     const actions = pendingActions ?? [];
     if (!lastJobId || actions.length === 0 || pending) return;
+    if (!canUseChat()) return;
 
     const verb = decision === 'decline' ? 'Declined' : 'Approved';
     setAsking(true);
@@ -596,20 +714,26 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       const status = err instanceof ChatEnqueueError ? err.status : undefined;
       // The same expected refusals as a question (busy, capped, offline, gone), which
       // are the shop's state rather than our incident.
-      if (status === undefined || !REFUSAL_REASONS[status]) Sentry.captureException(err);
-      setError({ message, status });
+      if (isBillingWriteBlocked(err)) {
+        setBillingDenial({ companyId, billing: subscription.billing });
+        void subscription.refresh();
+      } else {
+        if (status === undefined || !REFUSAL_REASONS[status]) Sentry.captureException(err);
+        setError({ message, status });
+        if (status === 403) void subscription.refresh();
+      }
     } finally {
       setAsking(false);
     }
   };
 
   const handleChipClick = (prompt: string) => {
-    setQuestion(prompt);
+    rememberQuestion(prompt);
     handleSubmit(prompt, 'example');
   };
 
   const handleFollowUp = (prompt: string) => {
-    setQuestion(prompt);
+    rememberQuestion(prompt);
     handleSubmit(prompt, 'suggestion');
   };
 
@@ -626,8 +750,10 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   };
 
   const switchThread = (id: string) => {
+    if (pending || uploadStatus) return;
     setHistoryOpen(false);
     if (id === threadId) return;
+    setStagedUploads([]);
     job.reset();
     setError(null);
     setAskedQuestion('');
@@ -654,40 +780,81 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
   const placeholder = hasConversation ? 'Ask a follow-up…' : 'Type your question…';
 
   const composer = (
-    <Box sx={{ display: 'flex', gap: 1.5 }}>
-      <TextField
-        fullWidth
-        size="small"
-        multiline
-        maxRows={4}
-        placeholder={placeholder}
-        value={question}
-        onChange={(e) => setQuestion(e.target.value)}
-        onKeyDown={handleKeyDown}
-        disabled={pending}
-        slotProps={{
-          input: { sx: { minHeight: 48 } },
-          // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
-          // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
-          // the textarea itself had no accessible name at all: a screen reader
-          // announced the one control this feature exists for as unlabelled. Found
-          // by CI, where `getByLabel('Your question')` resolved to the div and
-          // Playwright refused it as "not an input element"; the same mismatch is
-          // why focusing that locator silently did nothing. `htmlInput` is the slot
-          // that reaches the real element, and is what the rest of the repo uses.
-          htmlInput: { 'aria-label': 'Your question' },
-        }}
-      />
-      <Button
-        variant="contained"
-        onClick={() => handleSubmit()}
-        disabled={!question.trim() || pending}
-        sx={{ minWidth: 48, minHeight: 48, px: 2 }}
-        aria-label="Send question"
-        aria-busy={pending}
-      >
-        {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
-      </Button>
+    <Box>
+      {subscriptionRequired && (
+        <Box id="chat-subscription-notice" role="region" aria-label="Chat subscription" tabIndex={-1} ref={subscriptionNoticeRef}>
+          <ChatSubscriptionNotice state={contextSaysBlocked ? writeBlockedState(subscription.billing) : undefined} />
+        </Box>
+      )}
+      {attachments.length > 0 && (
+        <Stack direction="row" useFlexGap flexWrap="wrap" spacing={1} sx={{ mb: 1 }} aria-label="Attached files">
+          {attachments.map(({ prepared }) => (
+            <Chip key={prepared.id} icon={<AttachFileIcon />}
+              label={`${prepared.name} · ${prepared.rows.length} ${prepared.rows.length === 1 ? 'part' : 'parts'}`}
+              onDelete={pending || uploadStatus ? undefined : () => setStagedUploads((current) => current.filter((item) => item.prepared.id !== prepared.id))}
+              sx={{ maxWidth: '100%' }} />
+          ))}
+        </Stack>
+      )}
+      <Box sx={{ display: 'flex', gap: 1.5 }}>
+        <input ref={fileInputRef} type="file" multiple accept={CHAT_FILE_ACCEPT} hidden
+          aria-label="Choose chat files"
+          onChange={(event) => {
+            const files = Array.from(event.target.files ?? []);
+            event.target.value = '';
+            void handleAttachFiles(files);
+          }} />
+        <Tooltip title="Attach files">
+          <Box component="span" sx={{ display: 'inline-flex', alignSelf: 'flex-end' }}>
+            <IconButton
+              aria-label="Attach files"
+              disabled={pending || !!uploadStatus || subscription.isLoading || attachments.length >= CHAT_MAX_UPLOADS}
+              onClick={() => { if (canUseChat()) fileInputRef.current?.click(); }}
+              sx={{ width: 48, height: 48 }}
+            >
+              <AddIcon />
+            </IconButton>
+          </Box>
+        </Tooltip>
+        <TextField
+          fullWidth
+          size="small"
+          multiline
+          maxRows={4}
+          placeholder={placeholder}
+          value={question}
+          onChange={(e) => rememberQuestion(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={pending || !!uploadStatus}
+          slotProps={{
+            input: { sx: { minHeight: 48 } },
+            // ON THE TEXTAREA, NOT THE WRAPPER. This lived under `input`, which is
+            // MUI's InputBase ROOT -- a div. The label therefore named a wrapper and
+            // the textarea itself had no accessible name at all: a screen reader
+            // announced the one control this feature exists for as unlabelled. Found
+            // by CI, where `getByLabel('Your question')` resolved to the div and
+            // Playwright refused it as "not an input element"; the same mismatch is
+            // why focusing that locator silently did nothing. `htmlInput` is the slot
+            // that reaches the real element, and is what the rest of the repo uses.
+            htmlInput: { 'aria-label': 'Your question', 'aria-describedby': subscriptionRequired ? 'chat-subscription-notice' : undefined },
+          }}
+        />
+        <Button
+          variant="contained"
+          onClick={() => handleSubmit()}
+          disabled={!question.trim() || pending || !!uploadStatus || subscription.isLoading}
+          sx={{ minWidth: 48, minHeight: 48, px: 2 }}
+          aria-label="Send question"
+          aria-busy={pending}
+        >
+          {pending ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
+        </Button>
+      </Box>
+      {uploadStatus && (
+        <Typography role="status" aria-live="polite" variant="body2" sx={{ mt: 1, color: 'warning.light' }}>
+          {uploadStatus}
+        </Typography>
+      )}
     </Box>
   );
 
@@ -706,7 +873,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
           design-system.md measures #fbbf24 at 6.28:1 on this ground against
           #f59e0b's 4.89:1, and states the split as a rule -- light for text, main
           for the mark. */}
-      {pending && (
+      {pending && !uploadStatus && (
         <Box role="status" aria-live="polite" sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <CircularProgress size={16} color="warning" />
           <Typography variant="body2" color="text.secondary">
@@ -731,7 +898,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
       {/* Failed, including the poll wall -- which renders rather than stopping
           silently. A conversation that outgrew the window gets New conversation
           instead of Try again, because asking again walks into the same wall. */}
-      {!pending && job.phase === 'failed' && (
+      {!pending && !subscriptionRequired && job.phase === 'failed' && (
         <Alert
           severity="error"
           action={
@@ -752,12 +919,12 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
 
       {/* An enqueue-time 503 is the SAME state as a mid-job outage -- insights
           are unavailable -- and gets the same quiet notice. */}
-      {error && error.status === 503 && (
+      {!subscriptionRequired && error && error.status === 503 && (
         <Alert severity="info" icon={<CloudOffIcon fontSize="inherit" />}>
           {error.message}
         </Alert>
       )}
-      {error && error.status !== 503 && <Alert severity="error">{error.message}</Alert>}
+      {!subscriptionRequired && error && error.status !== 503 && <Alert severity="error">{error.message}</Alert>}
     </>
   );
 
@@ -878,7 +1045,7 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
             variant="outlined"
             startIcon={<Icon sx={{ color: 'text.secondary' }} />}
             onClick={() => handleChipClick(prompt)}
-            disabled={pending}
+            disabled={pending || subscription.isLoading}
             sx={{
               minHeight: 48,
               justifyContent: 'flex-start',
@@ -1010,6 +1177,8 @@ export default function InsightsChat({ companyId }: InsightsChatProps) {
                     answer={turn.answer}
                     chartConfig={turn.chartConfig}
                     report={turn.report}
+                    uploads={turn.uploads}
+                    quoteDraftPath={quoteDraftPath(turn.quoteDraftUrl, companyId)}
                     onOpenReport={() => openReportTurn(turn)}
                     followUps={i === turns.length - 1 ? turn.followUps : []}
                     onFollowUp={handleFollowUp}

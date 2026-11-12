@@ -607,15 +607,17 @@ browser ──/chat──▶ FastAPI insights loop (Opus 5.5) ──tool search�
 |---|---|---|
 | The catalogue | `lib/mcp/chatCatalog.ts` — `registerJiggedTools` into a `ToolCatalog` | One list with `/mcp`. A test holds it to the server's registrations |
 | The door | `app/chat-tools/route.ts` | The person's own session token (an assistant's OAuth token is refused — its door is `/mcp`); the shared call path `runCompanyTool`; one `mcp_tool_calls` row as client `jigged-chat` / "Jigged chat" |
-| The bridge | `api/services/chat_actions.py` | The token goes only to `APP_BASE_URL`, from env — never a URL the request supplied. Tools deferred behind BM25 tool search (~30K tokens of definitions stay out of the prefix). Write tools gain a `summary_for_approval` field the model must fill; it is stripped before the call |
+| The bridge | `api/services/chat_actions.py` | The token goes only to this deployment's origin from env: `VERCEL_URL` on previews, `APP_BASE_URL` elsewhere. Protected preview calls carry the server's automation bypass header. Tools deferred behind BM25 tool search (~30K tokens of definitions stay out of the prefix). Write tools gain a `summary_for_approval` field the model must fill; it is stripped before the call |
 | The pause | `insights._paused` | A write the person has not always-allowed stops the job: `result.pending_actions` (the card) and `result.resume_state` (the conversation exactly as it stopped, thinking and tool-search blocks included — they must go back unchanged). The answer reads on its own: "This needs your approval before it runs: …" |
 | The decision | `POST /api/insights/{company_id}/chat/decide` | Only the person who asked (`ai_jobs.requested_by`), only on the newest turn of the thread (409 otherwise). The body carries the decision alone; what runs is loaded from the job. A new job in the same thread, so the transcript reads "Approved: …" then the result |
 | Always allow | `public.chat_action_grants` | Written by the backend on "Always allow"; listed and turned off by the person (column grant: `deleted_at` only) under **Allowed actions** beside Chat history. A restrictive policy refuses assistant tokens outright |
 
 **Grounding still holds.** Figures in a Jigged tool's result count as known, like a query's, and so
 do the values the person approved on the card; `tools_ok` stands beside `sql_ok` in the non-answer
-gate. **Off switch:** `CHAT_ACTIONS=off` on Vercel turns actions off without a deploy; no
-`APP_BASE_URL` (previews) has the same effect. A fresh question that cannot load the tools is
+gate. **Off switch:** `CHAT_ACTIONS=off` on Vercel turns actions off without a deploy; no valid
+deployment origin has the same effect. Previews use their immutable `VERCEL_URL`, not the shared
+`preview.jigged.app` alias, so tools cannot cross into a different PR when that alias moves.
+`VERCEL_AUTOMATION_BYPASS_SECRET` is sent as a header only to that preview's own origin. A fresh question that cannot load the tools is
 answered read-only and reported to Sentry; a decision that cannot load them is a 503 and runs
 nothing.
 
@@ -995,17 +997,52 @@ old wording attributed to it.
 `claim_ai_jobs()` and `isAiWorkerAvailable` compare it byte for byte, so `qwen3:32b` against
 `qwen3:32b-q4_K_M` reads as a box that is permanently offline. Production ran on `ollama:qwen3:32b`
 from September to 2026-11-09 and is back on a hosted model, so the chat no longer depends on a
-laptop being awake; setting the variable again is the way back. **Production only:** Preview and
-Development keep `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`, so previews stay on the worker path and read
-as offline when the box is off. `AI_READONLY_DATABASE_URL` is the backend's sandbox connection, and
-it is ONE static value per Vercel environment — but every preview runs against its own Supabase
-branch, so no single Preview value can name the right database for every PR. A hosted model on a
-preview would run its SQL against whatever that one URL points at. The worker carries its own
+laptop being awake; setting the variable again is the way back. The shared Preview and Development
+configuration uses `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`, so a preview without an override reads as
+offline when its worker is unavailable. A preview can run hosted Claude by setting **both**
+`LLM_CHAIN_INSIGHTS=anthropic:claude-opus-5-5` and `AI_READONLY_DATABASE_URL` as Vercel **Git-branch
+overrides**. The latter must connect as `jigged_ai_readonly` to that PR's own Supabase project,
+using the pooler address advertised by that project; do not reuse the parent's pooler host or a
+shared Preview database URL. Verify the role has neither superuser nor bypass-RLS privileges
+before deploying. The Anthropic key must be available to Preview. The tool bridge derives its
+origin and protection header from Vercel's system environment, as described above.
+Without a branch override, a hosted preview would query whatever the shared database URL names.
+The worker carries its own
 (`WORKER_READONLY_DATABASE_URL`, [ai-worker.md](../runbooks/ai-worker.md)) — one per database, since
 it serves production and every live Supabase preview branch from one process and each job names the
-database its SQL runs against (`JobContext.readonly_dsn`). That is why AI Insights works on a PR's
-Vercel preview with nothing run per PR. All on top of the standard
+database its SQL runs against (`JobContext.readonly_dsn`). All on top of the standard
 Supabase vars.
+
+## Drawing packages in chat
+
+The composer accepts ZIP, PDF, DXF and STEP files through **Attach files**. Selection reads the
+drawings locally, with no AI call; removable chips show the pending packages. Sending uploads the
+source files directly to the private attachments bucket, then writes a manifest under
+`{companyId}/chat/{threadId}/{uploadId}/manifest.json`. The API receives references and bounded
+extracted field summaries, never file bytes. ZIPs are capped at 25 MB compressed; a package at
+150 files, 100 MB expanded and 50 parts. Nested archives and unsupported file types are refused.
+Folder boundaries survive expansion, and the existing grouping pairs differently numbered STEP
+models with their drawing only when the shared part number is unambiguous.
+
+The original references live in `ai_jobs.payload.uploads`; later turns load the latest three
+packages independently of conversational summaries. History shows each package beside its question.
+The route checks company, thread and upload namespaces. Both `read_uploaded_drawings` and
+`setup_parts_from_upload` are ordinary company MCP tools, also available to Jigged chat; Storage,
+part creation and attachments run as the caller under the existing RLS and billing gates.
+
+**Set up these parts and draft a quote for me to review** uses the normal action approval.
+The setup tool calls the drawing import's identity resolver and writer, preserving existing customer
+references and avoiding merges of unrelated parts. Source files get independent private copies on
+their parts, and each row reports creation and attachment failures. It adds no invented routing,
+material cost or price. Its draft option returns New Quote with the resulting parts prefilled;
+the chat renders **Review quote draft** from the successful tool result, including after reload.
+This is an unsaved form: missing customer, quantities, prices and lead time still need completing.
+A saved quote uses the existing `create_quote` tool and its checks. Worker-served chats can read
+the extracted context; actions still require the hosted chat bridge.
+
+The numeric grounding guard accepts current user inputs, drawing fields and explicitly quoted
+input examples such as `like "2–3 weeks"`. A quoted shop claim without an example marker still
+requires evidence, as do shop figures recalled from older conversational turns.
 
 ## Dashboard surfaces
 
@@ -1022,6 +1059,13 @@ Supabase vars.
 one heading — *Ask about your shop* — one composer with no picker, and three starter rows: one that
 answers in prose, one that charts, one that comes back as a page. Whether an answer is prose, a chart
 or a one-page report is the model's call from the words (`compose_report`, below).
+
+**Subscription access is explained before typing.** The composer stays usable; a blocked
+attempt focuses an inline subscription notice instead of writing a thread or enqueueing AI.
+Admins get the shared billing action; other office users are directed to their shop admin.
+History remains readable, and the question survives a trip to billing. This follows the
+[billing interaction rule](../interaction-standards.md#4-unavailable-actions-keep-visible-and-explain-not-hidedisable) and uses the
+existing entitlement (including demo, past-due and grace access), not a new subscription rule.
 
 **ONE COLUMN IN EVERY STATE.** There is no longer an empty-state/conversation ternary: the order is
 heading, transcript, composer, footer, and each slot empties rather than moving, so the composer is a

@@ -294,15 +294,22 @@ class _Chain:
     def __getattr__(self, name):
         return lambda *a, **k: self
 
+    @property
+    def not_(self):
+        return self
+
     def execute(self):
         return SimpleNamespace(data=self._data)
 
 
 class _ThreadDb:
-    def __init__(self, threads, messages):
+    def __init__(self, threads, messages, uploads=None):
         self.threads, self.messages = threads, messages
+        self.uploads = uploads or []
 
     def table(self, name):
+        if name == "ai_jobs":
+            return _Chain(self.uploads)
         return _Chain(self.threads if name == "ai_chat_threads" else self.messages)
 
 
@@ -358,6 +365,15 @@ class TestTheThread:
         replay = routes._thread_replay(db, "co-1", str(THREAD))
         assert replay["summary"] is None
         assert [t["seq"] for t in replay["history"]] == [1, 2]
+
+    def test_original_uploads_survive_a_summary_and_duplicate_references_are_collapsed(self):
+        ref = {"id": "upload-1", "name": "parts.zip", "manifest_path": "private/manifest.json"}
+        db = _ThreadDb(
+            threads=[{"id": str(THREAD), "company_id": "co-1", "deleted_at": None}],
+            messages=_msgs((1, "summary", "Earlier drawings", 0)),
+            uploads=[{"uploads": [ref]}, {"uploads": [ref]}],
+        )
+        assert routes._thread_replay(db, "co-1", str(THREAD))["prior_uploads"] == [ref]
 
     @pytest.mark.parametrize("threads", [
         pytest.param([], id="unknown"),

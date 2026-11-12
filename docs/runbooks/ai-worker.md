@@ -12,8 +12,9 @@ insights handler runs inside, and
 > **Production insights no longer runs here (2026-11-09).** It moved to `claude-opus-5-5`, worked
 > inline on Vercel ([ai-insights.md](../modules/ai-insights.md#running-on-a-hosted-model)), so the
 > chat no longer depends on a laptop being awake. The worker still serves whatever names an
-> `ollama:` chain — Vercel previews, because only the worker derives each preview branch's own sandbox
-> DSN (a Vercel variable is one static URL for every PR) — and putting production
+> `ollama:` chain — the shared Vercel Preview configuration still does. A preview can instead use
+> hosted Claude with Git-branch overrides for its model and its own read-only database connection
+> ([ai-insights.md](../modules/ai-insights.md#running-on-a-hosted-model)). Putting production
 > back is one variable: `LLM_CHAIN_INSIGHTS=ollama:qwen3:32b`. Everything below is that path.
 
 ---

@@ -224,6 +224,9 @@ export async function generateVendorPoPdf(ctx: VendorPoPdfContext): Promise<jsPD
   autoTable(doc, {
     startY: cursorY,
     margin: { left: MARGIN, right: MARGIN, bottom: MARGIN + 30 },
+    // A line never splits across pages: the default carries the tail of a long Item cell onto the
+    // next page with no line number beside it, where the vendor reads it as a line of its own.
+    rowPageBreak: 'avoid',
     head: [COLUMNS.map((c) => c.header)],
     body: lines.map((line) => COLUMNS.map((c) => c.cell(line))),
     styles: { font: 'helvetica', fontSize: 9.5, cellPadding: 6, textColor: [40, 40, 40], valign: 'top' },

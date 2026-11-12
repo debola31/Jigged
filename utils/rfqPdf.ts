@@ -260,7 +260,8 @@ export async function generateRfqPdf(ctx: RfqPdfContext): Promise<jsPDF> {
   const columns: RfqColumn[] = [
     { header: '#', style: { cellWidth: 24, halign: 'right' }, cell: (l) => String(l.lineNumber) },
     { header: 'Part', style: { cellWidth: 96, fontStyle: 'bold' }, cell: (l) => l.partName ?? '—' },
-    { header: 'Your part #', style: { cellWidth: 84 }, cell: (l) => yourPartNumber(l) || '—' },
+    // 104pt holds a 16-character vendor number in capitals; at 84 "ACME-6061-RB1" broke mid-token.
+    { header: 'Your part #', style: { cellWidth: 104 }, cell: (l) => yourPartNumber(l) || '—' },
     { header: 'Description', style: { cellWidth: 'auto' }, cell: itemText },
     {
       header: 'Quantities',
@@ -273,7 +274,10 @@ export async function generateRfqPdf(ctx: RfqPdfContext): Promise<jsPDF> {
 
   autoTable(doc, {
     startY: cursorY,
-    margin: { left: MARGIN, right: MARGIN },
+    // The bottom margin keeps a long table clear of the footer drawn on every page below.
+    margin: { left: MARGIN, right: MARGIN, bottom: MARGIN + 30 },
+    // A line never splits across pages (see vendorPoPdf.ts): its tail would read as a line of its own.
+    rowPageBreak: 'avoid',
     head: [columns.map((c) => c.header)],
     body: lines.length > 0 ? lines.map((l) => columns.map((c) => c.cell(l))) : [columns.map(() => '—')],
     styles: { font: 'helvetica', fontSize: 10, cellPadding: 7, textColor: [40, 40, 40] },

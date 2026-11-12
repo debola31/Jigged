@@ -29,7 +29,11 @@ vi.mock('@/utils/operationIntervalsAccess', () => ({ getOperationActuals: vi.fn(
 vi.mock('@/components/outsideShipments', () => ({ OutsideShipmentPreviewDialog: () => null }));
 vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/utils/vendorPoAccess')>();
-  return { closeVendorPoLines: vi.fn(), isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal };
+  return {
+    closeVendorPoLines: vi.fn(),
+    isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal,
+    isAlreadyClosedRefusal: actual.isAlreadyClosedRefusal,
+  };
 });
 
 import posthog from 'posthog-js';

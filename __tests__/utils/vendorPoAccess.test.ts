@@ -33,6 +33,7 @@ import {
   getRecentNoPoReceipts,
   getVendorPo,
   getVendorPoArchiveImpact,
+  isAlreadyClosedRefusal,
   isNothingLeftToReceiveRefusal,
   listOpenOutsideOpsForVendor,
   listUnlinkedOutsideSlips,
@@ -445,6 +446,15 @@ describe('state changes', () => {
   });
 });
 
+/** What `closeVendorPoLines` throws when the line-state RPC fails with `error` — through the real plumbing. */
+async function lineCloseRefusedWith(error: { code: string; message: string }): Promise<unknown> {
+  stub.rpc.mockResolvedValueOnce({ data: null, error: { ...error, details: null, hint: null } });
+  return closeVendorPoLines('po-1', ['l2']).then(
+    () => null,
+    (err: unknown) => err,
+  );
+}
+
 describe('isNothingLeftToReceiveRefusal — a close refused because the line is received in full (O2)', () => {
   /**
    * A close after a receipt that completed the line is refused with this sentence, and that refusal
@@ -452,15 +462,7 @@ describe('isNothingLeftToReceiveRefusal — a close refused because the line is 
    * the P0001 code kept by `purchasingRpcFailure`, and the whole sentence, for that line.
    */
   it('names the "nothing left to receive" refusal, for that line only, by its P0001 sentence', async () => {
-    const refusedWith = async (error: { code: string; message: string }): Promise<unknown> => {
-      stub.rpc.mockResolvedValueOnce({ data: null, error: { ...error, details: null, hint: null } });
-      return closeVendorPoLines('po-1', ['l2']).then(
-        () => null,
-        (err: unknown) => err,
-      );
-    };
-
-    const nothingLeft = await refusedWith({ code: 'P0001', message: 'Line 2 has nothing left to receive.' });
+    const nothingLeft = await lineCloseRefusedWith({ code: 'P0001', message: 'Line 2 has nothing left to receive.' });
     expect(nothingLeft).toBeInstanceOf(Error);
     expect(isNothingLeftToReceiveRefusal(nothingLeft, 2)).toBe(true);
     // A refusal, so the person's sentence and not our failure: nothing reported.
@@ -468,13 +470,44 @@ describe('isNothingLeftToReceiveRefusal — a close refused because the line is 
     // Another line's sentence is not this line's.
     expect(isNothingLeftToReceiveRefusal(nothingLeft, 3)).toBe(false);
 
-    const otherRefusal = await refusedWith({ code: 'P0001', message: 'Line 2 is already closed.' });
+    const otherRefusal = await lineCloseRefusedWith({ code: 'P0001', message: 'Line 2 is already closed.' });
     expect(isNothingLeftToReceiveRefusal(otherRefusal, 2)).toBe(false);
     // The same words under another code are not the refusal.
-    const notARefusal = await refusedWith({ code: 'XX000', message: 'Line 2 has nothing left to receive.' });
+    const notARefusal = await lineCloseRefusedWith({ code: 'XX000', message: 'Line 2 has nothing left to receive.' });
     expect(isNothingLeftToReceiveRefusal(notARefusal, 2)).toBe(false);
     expect(isNothingLeftToReceiveRefusal(new Error('Line 2 has nothing left to receive.'), 2)).toBe(false);
     expect(isNothingLeftToReceiveRefusal(null, 2)).toBe(false);
+  });
+});
+
+describe('isAlreadyClosedRefusal — a close refused because the line was closed first (O2)', () => {
+  /**
+   * "Also close" on a slip whose PO line was closed before the receipt — on the PO page, or by
+   * another slip's "Also close" — is refused with this sentence, and that refusal means the line is
+   * DONE: nothing more is expected on it, which is what the box asked. Told apart the same way as
+   * "nothing left to receive": the P0001 code, and the whole sentence, for that line.
+   */
+  it('names the "already closed" refusal, for that line only, by its P0001 sentence', async () => {
+    const alreadyClosed = await lineCloseRefusedWith({ code: 'P0001', message: 'Line 2 is already closed.' });
+    expect(alreadyClosed).toBeInstanceOf(Error);
+    expect(isAlreadyClosedRefusal(alreadyClosed, 2)).toBe(true);
+    // A refusal, so the person's sentence and not our failure: nothing reported.
+    expect(mockCapture).not.toHaveBeenCalled();
+    // Another line's sentence is not this line's.
+    expect(isAlreadyClosedRefusal(alreadyClosed, 3)).toBe(false);
+
+    // Each "done" refusal names its own sentence.
+    expect(isNothingLeftToReceiveRefusal(alreadyClosed, 2)).toBe(false);
+    const nothingLeft = await lineCloseRefusedWith({ code: 'P0001', message: 'Line 2 has nothing left to receive.' });
+    expect(isAlreadyClosedRefusal(nothingLeft, 2)).toBe(false);
+    // The whole sentence, never a fragment: the PO's own "already closed" is not the line's.
+    const poClosed = await lineCloseRefusedWith({ code: 'P0001', message: 'PO-1042 is already closed.' });
+    expect(isAlreadyClosedRefusal(poClosed, 2)).toBe(false);
+    // The same words under another code are not the refusal.
+    const notARefusal = await lineCloseRefusedWith({ code: 'XX000', message: 'Line 2 is already closed.' });
+    expect(isAlreadyClosedRefusal(notARefusal, 2)).toBe(false);
+    expect(isAlreadyClosedRefusal(new Error('Line 2 is already closed.'), 2)).toBe(false);
+    expect(isAlreadyClosedRefusal(null, 2)).toBe(false);
   });
 });
 

@@ -43,6 +43,7 @@ import OperationCompleteDialog from './OperationCompleteDialog';
 import SendToVendorDialog, { type SendToVendorPoLine, type SendToVendorSubmit } from './SendToVendorDialog';
 import ReceiveFromVendorDialog, {
   closePoLineAfterReceipt,
+  poLineCloseSentence,
   receivePoLineFor,
   type OpenSlipOption,
   type ReceiveFromVendorSubmit,
@@ -480,12 +481,10 @@ export default function OperationsPanel({
       if (lineClose?.kind === 'failed') {
         showSnackbar(lineClose.message, 'warning');
       } else if (lineClose && v.closePoLine) {
-        // Received in full is the same "nothing more expected" the box asked for — said as what
-        // the PO page will show for the line, not as a close that never happened.
+        // Received in full, or closed before this receipt, is the same "nothing more expected" the
+        // box asked for — said as what happened to the line, not as a close that never happened.
         showSnackbar(
-          `Recorded ${v.quantityGood} back from the vendor. ${v.closePoLine.poNumber} line ${v.closePoLine.lineNumber} ${
-            lineClose.kind === 'received' ? 'is received in full' : 'is closed'
-          }.`,
+          `Recorded ${v.quantityGood} back from the vendor. ${poLineCloseSentence(v.closePoLine, lineClose)}`,
           'success',
         );
       } else {

@@ -88,7 +88,7 @@ are read off its linked slips**, and an outside receipt cannot be represented on
 | One open outside line per (operation, vendor) | Enforced by the PO writers, re-checked on reopen |
 | A slip links itself | `create_outside_shipment` links the single eligible line — draft or sent, not closed, not archived, same operation and vendor. **It takes no PO argument and no office check**: operators send, and the link happens anyway |
 | A line links its slips | Inserting an outside line links that step's existing live, unlinked slips for the vendor |
-| A person can correct it | `set_outside_shipment_vendor_purchase_order_line`, office-only relink or unlink |
+| A person can correct it | `set_outside_shipment_vendor_purchase_order_line`, office-only relink or unlink — the PO page's *Unlink* / *Link a slip…* |
 | A link goes | When the PO is archived or the line removed |
 | A wrong link is unrepresentable | A BEFORE trigger refuses a line of another company, kind, operation or vendor — 23514, the service role included |
 | **Linking changes no status** | The column is in no status trigger's `UPDATE OF` list, so it fires nothing in the cascade and cannot reach [the trap below](#the-write-surface-and-why-it-is-shaped-this-way) |

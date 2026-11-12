@@ -1096,11 +1096,27 @@ export function closeVendorPoLines(
  * the other. A sentence that drifts fails safe: the close reads as not done, as it did before.
  */
 export function isNothingLeftToReceiveRefusal(error: unknown, lineNumber: number): boolean {
-  return (
-    isPurchasingRefusal(error) &&
-    error instanceof Error &&
-    error.message === `Line ${lineNumber} has nothing left to receive.`
-  );
+  return isLineCloseRefusal(error, `Line ${lineNumber} has nothing left to receive.`);
+}
+
+/**
+ * True when `closeVendorPoLines` was refused because line `lineNumber` is already closed
+ * (`set_vendor_purchase_order_line_state`: "Line 2 is already closed.") — closed before this close
+ * was sent, on the PO page or by another slip's "Also close". For a caller closing a line AFTER a
+ * receipt, that is the line done too: nothing more is expected on it, which is what was asked.
+ *
+ * Told apart exactly as `isNothingLeftToReceiveRefusal` is: the P0001 code, and the whole sentence for
+ * this line's number — a fragment would take the PO's own "PO-1042 is already closed." for the line's.
+ * The wording is the RPC's (`RAISE EXCEPTION 'Line % is already closed.'` in 20261110043800); change
+ * one and change the other. A sentence that drifts fails safe, as a close that did not happen.
+ */
+export function isAlreadyClosedRefusal(error: unknown, lineNumber: number): boolean {
+  return isLineCloseRefusal(error, `Line ${lineNumber} is already closed.`);
+}
+
+/** A P0001 refusal from the line-state RPC whose sentence is exactly `sentence`. */
+function isLineCloseRefusal(error: unknown, sentence: string): boolean {
+  return isPurchasingRefusal(error) && error instanceof Error && error.message === sentence;
 }
 
 /** Reopen lines (a batch), or the whole PO with `'all'`. */

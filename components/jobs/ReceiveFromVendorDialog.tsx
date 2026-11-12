@@ -17,7 +17,7 @@ import {
   outsideReceiptCaption,
   outsideReceiptConsequence,
 } from '@/components/operations/operationMath';
-import { closeVendorPoLines, isNothingLeftToReceiveRefusal } from '@/utils/vendorPoAccess';
+import { closeVendorPoLines, isAlreadyClosedRefusal, isNothingLeftToReceiveRefusal } from '@/utils/vendorPoAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 import type { VendorPoJobLine } from '@/types/vendorPo';
 
@@ -100,8 +100,29 @@ export type PoLineCloseOutcome =
    * asked for ("nothing more expected"), reached by the pieces rather than by a close: done.
    */
   | { kind: 'received' }
+  /**
+   * The line was closed before this receipt — on the PO page, or by another slip's "Also close".
+   * Nothing more is expected on it, which is what the box asked: done, said as what happened.
+   */
+  | { kind: 'already_closed' }
   /** The line is still open; the sentence says so, and that the receipt stands. */
   | { kind: 'failed'; message: string };
+
+/** "PO-1042 line 2 is closed." — what became of the line, for a close that did not fail. */
+export function poLineCloseSentence(
+  target: ReceivePoLine,
+  outcome: Exclude<PoLineCloseOutcome, { kind: 'failed' }>,
+): string {
+  const line = `${target.poNumber} line ${target.lineNumber}`;
+  switch (outcome.kind) {
+    case 'closed':
+      return `${line} is closed.`;
+    case 'received':
+      return `${line} is received in full.`;
+    case 'already_closed':
+      return `${line} was already closed.`;
+  }
+}
 
 /** Float noise in a difference of two quantities must not leave "0.0000000001 still to come". */
 const QUANTITY_TOLERANCE = 1e-9;
@@ -124,6 +145,12 @@ const QUANTITY_TOLERANCE = 1e-9;
  *   2. when it could not know (the drawer), or the line had less left than the screen knew (a
  *      receipt landed elsewhere meanwhile), that one refusal — for this line — counts as done too.
  * The RPC's refusal is unchanged: closing a received line really is meaningless.
+ *
+ * A LINE CLOSED FIRST IS DONE TOO. "Also close" on a slip whose line was already closed — on the PO
+ * page, or by another slip's "Also close" — is refused ("Line 2 is already closed.") and warned the
+ * same contradiction. The operation card and the drawer offer the box without reading whether the
+ * line is still open, and any screen can be behind, so that refusal — for this line — counts as done,
+ * said as what happened ("was already closed") rather than as a close this receipt made.
  *
  * Returns `null` when no line was ticked.
  *
@@ -149,6 +176,7 @@ export async function closePoLineAfterReceipt(
     return { kind: 'closed' };
   } catch (err) {
     if (isNothingLeftToReceiveRefusal(err, target.lineNumber)) return { kind: 'received' };
+    if (isAlreadyClosedRefusal(err, target.lineNumber)) return { kind: 'already_closed' };
     const why = err instanceof Error && err.message ? err.message : 'Something went wrong.';
     return {
       kind: 'failed',

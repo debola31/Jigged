@@ -6,13 +6,18 @@ import jiggedTheme from '@/lib/theme';
 import { toFriendlyError } from '@/lib/supabaseErrors';
 
 vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
-  // The REAL refusal check, so a refusal is recognised here exactly as the app recognises it.
+  // The REAL refusal checks, so a refusal is recognised here exactly as the app recognises it.
   const actual = await importOriginal<typeof import('@/utils/vendorPoAccess')>();
-  return { closeVendorPoLines: vi.fn(), isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal };
+  return {
+    closeVendorPoLines: vi.fn(),
+    isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal,
+    isAlreadyClosedRefusal: actual.isAlreadyClosedRefusal,
+  };
 });
 
 import ReceiveFromVendorDialog, {
   closePoLineAfterReceipt,
+  poLineCloseSentence,
   receivePoLineFor,
   type OpenSlipOption,
   type ReceivePoLine,
@@ -327,13 +332,32 @@ describe('closePoLineAfterReceipt', () => {
     await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: 50 }, 48)).resolves.toEqual({ kind: 'received' });
   });
 
-  it('counts only that refusal, for this line: anything else still says the line did not close', async () => {
+  /**
+   * "Also close" on a slip whose line was closed first — on the PO page, or by another slip's
+   * "Also close" — was refused ("Line 2 is already closed.") and warned that the line "could not be
+   * closed … Close it on the PO", about a line that is closed. Nothing more is expected on it, which
+   * is what the box asked: done, and said as what happened rather than as a close.
+   */
+  it('counts the "already closed" refusal as done, and says the line was already closed', async () => {
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('Line 2 is already closed.'));
+    await expect(closePoLineAfterReceipt(PO_LINE, 48)).resolves.toEqual({ kind: 'already_closed' });
+    // The screen's own read of the line cannot know: the database decides, wherever it is asked.
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('Line 2 is already closed.'));
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: null }, 48)).resolves.toEqual({
+      kind: 'already_closed',
+    });
+
+    expect(poLineCloseSentence(PO_LINE, { kind: 'already_closed' })).toBe('PO-1042 line 2 was already closed.');
+  });
+
+  it('counts only those refusals, for this line: anything else still says the line did not close', async () => {
     const unknown = { ...PO_LINE, remainingQuantity: null };
     for (const err of [
       refusal('Line 3 has nothing left to receive.'), // another line's
-      refusal('Line 2 is already closed.'),
+      refusal('Line 3 is already closed.'), // another line's
       refusal('PO-1042 is closed. Reopen it first.'),
       new Error('Line 2 has nothing left to receive.'), // the words, without the refusal code
+      new Error('Line 2 is already closed.'),
     ]) {
       vi.mocked(closeVendorPoLines).mockRejectedValueOnce(err);
       const outcome = await closePoLineAfterReceipt(unknown, 48);

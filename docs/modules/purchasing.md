@@ -871,7 +871,13 @@ docs check.
 **Manual, by design:** the PDF render checks (a 40-line PO onto page 2, a 60-character legal vendor
 name, a vendor with no address, 1,500 characters of terms, Rev 3 + CLOSED, TBC lines, with and
 without a logo) and M-1 / M-2 above. A mocked jsPDF cannot see overflow — the lesson of
-[outside-processing.md](outside-processing.md#the-document).
+[outside-processing.md](outside-processing.md#the-document). The render checks ran on 2026-11-12
+against the real jsPDF, along with an RFQ of 30 lines and a slip carrying its PO number, and all
+pass. They found three layout faults, now fixed in the builders:
+- a long PO line split across a page break, its tail landing on the next page with no line
+  number (both tables now keep a row whole);
+- the RFQ table ran into its footer (it now reserves the PO's bottom margin);
+- the RFQ's *Your part #* column broke a 13-character vendor number mid-token.
 
 ---
 

@@ -108,10 +108,15 @@ def _load_lookups(supabase: Client, company_id: str) -> tuple[
     # returned last — routing an import step into one vendor's price when the
     # file meant the other's, with no error. A list lets the caller tell "one
     # match" from "ambiguous" and say so.
+    #
+    # A live service of an ARCHIVED vendor is skipped like an archived service,
+    # as the routing editor's picker skips it (getVendorServicesForRouting):
+    # otherwise a name it shares with a live vendor's service reads as
+    # ambiguous, naming a vendor no screen shows.
     services = fetch_all_by_company(
         supabase,
         "vendor_services",
-        "id, name, unit_price, deleted_at, vendors(name)",
+        "id, name, unit_price, deleted_at, vendors(name, deleted_at)",
         company_id,
     )
     svc_by_name: dict[str, list[dict]] = {}
@@ -121,6 +126,8 @@ def _load_lookups(supabase: Client, company_id: str) -> tuple[
             continue
         rel = svc.get("vendors")
         vendor = rel[0] if isinstance(rel, list) else rel
+        if (vendor or {}).get("deleted_at") is not None:
+            continue
         vendor_name = (vendor or {}).get("name") or ""
         svc_by_name.setdefault(svc["name"].lower(), []).append(svc)
         if vendor_name:

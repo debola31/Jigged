@@ -210,7 +210,7 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - customer_id: UUID (FK -> customers.id)
-- job_id: UUID (FK -> jobs.id, nullable)
+- job_id: UUID (FK -> jobs.id, NOT NULL)
 - packing_slip_number: TEXT
 - ship_date: DATE
 - carrier: TEXT, shipping_method: TEXT, freight_terms: TEXT

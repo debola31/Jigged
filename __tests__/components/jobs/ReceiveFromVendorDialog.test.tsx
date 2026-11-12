@@ -12,6 +12,7 @@ vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
     closeVendorPoLines: vi.fn(),
     isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal,
     isAlreadyClosedRefusal: actual.isAlreadyClosedRefusal,
+    isPoClosedRefusal: actual.isPoClosedRefusal,
   };
 });
 
@@ -350,14 +351,34 @@ describe('closePoLineAfterReceipt', () => {
     expect(poLineCloseSentence(PO_LINE, { kind: 'already_closed' })).toBe('PO-1042 line 2 was already closed.');
   });
 
-  it('counts only those refusals, for this line: anything else still says the line did not close', async () => {
+  /**
+   * "Also close" on a slip whose whole PO was closed first — on the PO page — was refused before any
+   * line was looked at ("PO-1042 is closed. Reopen it first.") and warned that the line "could not
+   * be closed", telling the person to reopen a PO only to close it again. Nothing more is expected on
+   * any of its lines, which is what the box asked: done, and said as what happened.
+   */
+  it('counts the whole PO closed first as done, and says the PO was already closed', async () => {
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('PO-1042 is closed. Reopen it first.'));
+    await expect(closePoLineAfterReceipt(PO_LINE, 48)).resolves.toEqual({ kind: 'po_already_closed' });
+    // Wherever it is asked from: the screen's own read of the PO cannot know either.
+    vi.mocked(closeVendorPoLines).mockRejectedValueOnce(refusal('PO-1042 is closed. Reopen it first.'));
+    await expect(closePoLineAfterReceipt({ ...PO_LINE, remainingQuantity: null }, 48)).resolves.toEqual({
+      kind: 'po_already_closed',
+    });
+
+    expect(poLineCloseSentence(PO_LINE, { kind: 'po_already_closed' })).toBe('PO-1042 was already closed.');
+  });
+
+  it('counts only those refusals, for this line and its PO: anything else still says the line did not close', async () => {
     const unknown = { ...PO_LINE, remainingQuantity: null };
     for (const err of [
       refusal('Line 3 has nothing left to receive.'), // another line's
       refusal('Line 3 is already closed.'), // another line's
-      refusal('PO-1042 is closed. Reopen it first.'),
+      refusal('PO-1043 is closed. Reopen it first.'), // another PO's
+      refusal('PO-1042 is archived.'), // archived is not closed
       new Error('Line 2 has nothing left to receive.'), // the words, without the refusal code
       new Error('Line 2 is already closed.'),
+      new Error('PO-1042 is closed. Reopen it first.'),
     ]) {
       vi.mocked(closeVendorPoLines).mockRejectedValueOnce(err);
       const outcome = await closePoLineAfterReceipt(unknown, 48);

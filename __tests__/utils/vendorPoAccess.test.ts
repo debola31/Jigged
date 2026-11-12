@@ -35,6 +35,7 @@ import {
   getVendorPoArchiveImpact,
   isAlreadyClosedRefusal,
   isNothingLeftToReceiveRefusal,
+  isPoClosedRefusal,
   listOpenOutsideOpsForVendor,
   listUnlinkedOutsideSlips,
   listVendorPoLinesForJob,
@@ -508,6 +509,39 @@ describe('isAlreadyClosedRefusal — a close refused because the line was closed
     expect(isAlreadyClosedRefusal(notARefusal, 2)).toBe(false);
     expect(isAlreadyClosedRefusal(new Error('Line 2 is already closed.'), 2)).toBe(false);
     expect(isAlreadyClosedRefusal(null, 2)).toBe(false);
+  });
+});
+
+describe('isPoClosedRefusal — a close refused because the whole PO was closed first (O2)', () => {
+  /**
+   * "Also close" on a slip whose whole PO was closed before the receipt — on the PO page — is refused
+   * before any line is looked at, with this sentence, and that refusal means the line is DONE too:
+   * nothing more is expected on any line of a closed PO, which is what the box asked. Told apart the
+   * same way as the line refusals: the P0001 code, and the whole sentence, for that PO's number.
+   */
+  it('names the "PO is closed" refusal, for that PO only, by its P0001 sentence', async () => {
+    const poClosed = await lineCloseRefusedWith({ code: 'P0001', message: 'PO-1042 is closed. Reopen it first.' });
+    expect(poClosed).toBeInstanceOf(Error);
+    expect(isPoClosedRefusal(poClosed, 'PO-1042')).toBe(true);
+    // A refusal, so the person's sentence and not our failure: nothing reported.
+    expect(mockCapture).not.toHaveBeenCalled();
+    // Another PO's sentence is not this PO's, nor is a number that only ends the same way.
+    expect(isPoClosedRefusal(poClosed, 'PO-1043')).toBe(false);
+    expect(isPoClosedRefusal(poClosed, '1042')).toBe(false);
+
+    // Each "done" refusal names its own sentence.
+    expect(isAlreadyClosedRefusal(poClosed, 2)).toBe(false);
+    expect(isNothingLeftToReceiveRefusal(poClosed, 2)).toBe(false);
+    const lineClosed = await lineCloseRefusedWith({ code: 'P0001', message: 'Line 2 is already closed.' });
+    expect(isPoClosedRefusal(lineClosed, 'PO-1042')).toBe(false);
+    // An archived PO is not a closed one.
+    const archived = await lineCloseRefusedWith({ code: 'P0001', message: 'PO-1042 is archived.' });
+    expect(isPoClosedRefusal(archived, 'PO-1042')).toBe(false);
+    // The same words under another code are not the refusal.
+    const notARefusal = await lineCloseRefusedWith({ code: 'XX000', message: 'PO-1042 is closed. Reopen it first.' });
+    expect(isPoClosedRefusal(notARefusal, 'PO-1042')).toBe(false);
+    expect(isPoClosedRefusal(new Error('PO-1042 is closed. Reopen it first.'), 'PO-1042')).toBe(false);
+    expect(isPoClosedRefusal(null, 'PO-1042')).toBe(false);
   });
 });
 

@@ -17,7 +17,12 @@ import {
   outsideReceiptCaption,
   outsideReceiptConsequence,
 } from '@/components/operations/operationMath';
-import { closeVendorPoLines, isAlreadyClosedRefusal, isNothingLeftToReceiveRefusal } from '@/utils/vendorPoAccess';
+import {
+  closeVendorPoLines,
+  isAlreadyClosedRefusal,
+  isNothingLeftToReceiveRefusal,
+  isPoClosedRefusal,
+} from '@/utils/vendorPoAccess';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 import type { VendorPoJobLine } from '@/types/vendorPo';
 
@@ -105,6 +110,11 @@ export type PoLineCloseOutcome =
    * Nothing more is expected on it, which is what the box asked: done, said as what happened.
    */
   | { kind: 'already_closed' }
+  /**
+   * The whole PO was closed before this receipt, on the PO page. Nothing more is expected on any of
+   * its lines, this one included: done, said as what happened to the PO.
+   */
+  | { kind: 'po_already_closed' }
   /** The line is still open; the sentence says so, and that the receipt stands. */
   | { kind: 'failed'; message: string };
 
@@ -121,6 +131,8 @@ export function poLineCloseSentence(
       return `${line} is received in full.`;
     case 'already_closed':
       return `${line} was already closed.`;
+    case 'po_already_closed':
+      return `${target.poNumber} was already closed.`;
   }
 }
 
@@ -152,6 +164,11 @@ const QUANTITY_TOLERANCE = 1e-9;
  * line is still open, and any screen can be behind, so that refusal — for this line — counts as done,
  * said as what happened ("was already closed") rather than as a close this receipt made.
  *
+ * SO DOES A PO CLOSED FIRST. A whole PO closed on its page refuses every line close before looking
+ * at any line ("PO-1042 is closed. Reopen it first."); reopening it to close one line would contradict
+ * the box, which asked for nothing more expected — already true of every line of a closed PO. That
+ * refusal — for this slip's PO — counts as done, said as "PO-1042 was already closed."
+ *
  * Returns `null` when no line was ticked.
  *
  * NOT CAPTURED as `vendor po lines closed`, deliberately: that event is the PO page's Close dialog,
@@ -177,6 +194,7 @@ export async function closePoLineAfterReceipt(
   } catch (err) {
     if (isNothingLeftToReceiveRefusal(err, target.lineNumber)) return { kind: 'received' };
     if (isAlreadyClosedRefusal(err, target.lineNumber)) return { kind: 'already_closed' };
+    if (isPoClosedRefusal(err, target.poNumber)) return { kind: 'po_already_closed' };
     const why = err instanceof Error && err.message ? err.message : 'Something went wrong.';
     return {
       kind: 'failed',

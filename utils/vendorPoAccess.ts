@@ -1114,6 +1114,22 @@ export function isAlreadyClosedRefusal(error: unknown, lineNumber: number): bool
   return isLineCloseRefusal(error, `Line ${lineNumber} is already closed.`);
 }
 
+/**
+ * True when `closeVendorPoLines` was refused because the whole PO `poNumber` is closed
+ * (`set_vendor_purchase_order_line_state`: "PO-1042 is closed. Reopen it first.") — closed on the PO
+ * page before this close was sent, and refused before any line is looked at. For a caller closing a
+ * line AFTER a receipt, that is the line done too: nothing more is expected on any line of a closed
+ * PO, so "Reopen it first" would undo the very thing that was asked.
+ *
+ * Told apart exactly as the line refusals are: the P0001 code, and the whole sentence for this PO's
+ * number. The wording is the RPC's (`RAISE EXCEPTION '% is closed. Reopen it first.'` in
+ * 20261110043800); change one and change the other. A sentence that drifts fails safe, as a close
+ * that did not happen.
+ */
+export function isPoClosedRefusal(error: unknown, poNumber: string): boolean {
+  return isLineCloseRefusal(error, `${poNumber} is closed. Reopen it first.`);
+}
+
 /** A P0001 refusal from the line-state RPC whose sentence is exactly `sentence`. */
 function isLineCloseRefusal(error: unknown, sentence: string): boolean {
   return isPurchasingRefusal(error) && error instanceof Error && error.message === sentence;

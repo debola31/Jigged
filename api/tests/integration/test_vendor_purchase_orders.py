@@ -769,6 +769,21 @@ def test_closing_a_line_already_closed_is_refused_in_the_exact_sentence(db, sent
     assert ps.line_row(db, sent.screw_line)["closed_reason"] == "Cancelled by phone"
 
 
+def test_closing_a_line_on_a_closed_po_is_refused_in_the_exact_sentence(db, sent):
+    """[P5] P0001, "PO-1042 is closed. Reopen it first." -- the whole sentence, naming the PO, before
+    any line is looked at. `isPoClosedRefusal` (utils/vendorPoAccess.ts) matches exactly that sentence
+    for the slip's PO number, so "Also close" on a slip whose whole PO was closed first reads as done
+    rather than a failure; reworded, the UI would warn about it again. The line stays as it was, and
+    the PO's own close stands."""
+    ps.set_state(sent.shop.user, sent.po.id, "close", reason="Vendor discontinued the bar")
+
+    err = _close_lines_refused(sent, [sent.screw_line], p_reason="Nothing more expected")
+    ps.assert_state_refusal(err)
+    assert ps.message(err) == f"{sent.po.number} is closed. Reopen it first."
+    assert ps.line_row(db, sent.screw_line)["closed_at"] is None, "a refused close closed the line"
+    assert ps.po_row(db, sent.po.id)["closed_reason"] == "Vendor discontinued the bar"
+
+
 def test_archive_is_never_blocked_and_lets_go_of_its_slips(db, shop):
     """[P5] Archive works on a PO with receipts and a linked slip, and unlinks the slip so a
     re-created PO can claim it."""

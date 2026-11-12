@@ -23,6 +23,7 @@ vi.mock('@/utils/vendorPoAccess', async (importOriginal) => {
     closeVendorPoLines: vi.fn(),
     isNothingLeftToReceiveRefusal: actual.isNothingLeftToReceiveRefusal,
     isAlreadyClosedRefusal: actual.isAlreadyClosedRefusal,
+    isPoClosedRefusal: actual.isPoClosedRefusal,
   };
 });
 

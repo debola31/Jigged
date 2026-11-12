@@ -11,6 +11,11 @@ import type { VendorService, VendorServiceFormData } from '@/types/vendorService
  * blocked by a routing or job reference. Every list/picker/count below filters
  * `deleted_at IS NULL`; the by-id read does not, so a document holding an
  * archived service keeps resolving.
+ *
+ * A service belongs to its vendor, so the company-wide list and the routing
+ * picker also drop a live service whose VENDOR is archived — through an
+ * `!inner` join on the vendor, filtered on its `deleted_at`. The vendor's own
+ * page does not: it is that vendor's, archived or not.
  */
 
 // ONE string literal: the typed client infers the row type from the select
@@ -18,6 +23,11 @@ import type { VendorService, VendorServiceFormData } from '@/types/vendorService
 // the read to GenericStringError.
 const VENDOR_SERVICE_COLUMNS =
   'id, company_id, vendor_id, name, description, unit_price, created_at, updated_at';
+
+// The same columns plus the vendor, joined only to filter on its archive marker.
+// Its own literal, for the reason above.
+const LIVE_VENDOR_SERVICE_COLUMNS =
+  'id, company_id, vendor_id, name, description, unit_price, created_at, updated_at, vendor:vendors!inner(deleted_at)';
 
 function numOrNull(value: string): number | null {
   const trimmed = value.trim();
@@ -48,7 +58,7 @@ export async function getVendorServicesForVendor(
 }
 
 /**
- * Every live service in the company.
+ * Every live service of a live vendor in the company.
  *
  * The Vendors list needs a Services column per row, and a shop has tens of
  * services, not thousands — so this is one small query grouped in the browser
@@ -62,9 +72,10 @@ export async function getVendorServicesForCompany(
 
   const { data, error } = await supabase
     .from('vendor_services')
-    .select(VENDOR_SERVICE_COLUMNS)
+    .select(LIVE_VENDOR_SERVICE_COLUMNS)
     .eq('company_id', companyId)
     .is('deleted_at', null)
+    .is('vendor.deleted_at', null)
     .order('name', { ascending: true });
 
   if (error) {
@@ -72,7 +83,8 @@ export async function getVendorServicesForCompany(
     throw error;
   }
 
-  return (data || []) as VendorService[];
+  // The join was for the filter; the service goes back on its own.
+  return (data ?? []).map(({ vendor: _vendor, ...service }) => service);
 }
 
 /**
@@ -82,6 +94,11 @@ export async function getVendorServicesForCompany(
  * query, and `unit_price` so the editor can pre-fill the step. The pre-fill is
  * a display convenience only: cost reads the service price live through
  * COALESCE, so a step that never overrides it follows the vendor's price.
+ *
+ * Live services of live vendors only. Until 2026-11-12 an archived vendor's
+ * services stayed on offer here — in the routing editor, the drawing station
+ * strip and the MCP routing writer. A step already on a routing keeps its
+ * service either way: those read it by reference, not through this list.
  */
 export async function getVendorServicesForRouting(
   companyId: string,
@@ -94,19 +111,12 @@ export async function getVendorServicesForRouting(
 }>> {
   const supabase = getSupabase();
 
-  type Row = {
-    id: string;
-    name: string;
-    unit_price: number | null;
-    vendor_id: string;
-    vendor: { name: string } | { name: string }[] | null;
-  };
-
   const { data, error } = await supabase
     .from('vendor_services')
-    .select('id, name, unit_price, vendor_id, vendor:vendors(name)')
+    .select('id, name, unit_price, vendor_id, vendor:vendors!inner(name, deleted_at)')
     .eq('company_id', companyId)
     .is('deleted_at', null)
+    .is('vendor.deleted_at', null)
     .order('name', { ascending: true });
 
   if (error) {
@@ -114,16 +124,13 @@ export async function getVendorServicesForRouting(
     throw error;
   }
 
-  return ((data as Row[]) || []).map((r) => {
-    const vendor = Array.isArray(r.vendor) ? r.vendor[0] : r.vendor;
-    return {
-      id: r.id,
-      name: r.name,
-      unit_price: r.unit_price !== null ? Number(r.unit_price) : null,
-      vendor_id: r.vendor_id,
-      vendor_name: vendor?.name ?? null,
-    };
-  });
+  return (data ?? []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    unit_price: r.unit_price !== null ? Number(r.unit_price) : null,
+    vendor_id: r.vendor_id,
+    vendor_name: r.vendor.name,
+  }));
 }
 
 /**

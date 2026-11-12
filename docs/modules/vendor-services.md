@@ -144,8 +144,11 @@ naturally; outside ops never get intervals.
 
 [`utils/vendorServicesAccess.ts`](../../utils/vendorServicesAccess.ts) — the greppable landmark for
 this entity. Archive is universal: `deleted_at` is stamped, never a SQL `DELETE`, never blocked by a
-routing or job reference. Every list/picker/count filters `deleted_at IS NULL`; `getVendorService`
-(by id) does not, so a routing holding an archived service keeps resolving.
+routing or job reference. Every list/picker/count filters `deleted_at IS NULL` — the company-wide
+list and the routing picker the **vendor's** too, through `vendor:vendors!inner`, since a service
+belongs to its vendor (until 2026-11-12 the picker offered an archived vendor's services). The vendor
+page is that vendor's, archived or not, and `getVendorService` (by id) filters nothing, so a routing
+holding an archived service keeps resolving.
 
 - `getVendorServicesForVendor` — the vendor detail page. Just the services; the usage and open-job
   counts that once decorated them are gone, and with them two queries per page load to describe a
@@ -170,8 +173,9 @@ everywhere else.
 `WRITE_TIERS` gives services their own tier behind vendors, because every row names a vendor that
 must already exist.
 
-**Routing steps that target a service** resolve by name, in this order: an explicit `vendor_name`
-column wins; then an in-house station of that name; then a service, *only if exactly one matches*.
+**Routing steps that target a service** resolve by name, among the live services of live vendors
+the picker offers, in this order: an explicit `vendor_name` column wins; then an in-house station
+of that name; then a service, *only if exactly one matches*.
 Several matches is an **error naming the vendors**, never a guess — the old lookup was a last-wins
 dict that silently routed a cost-bearing step into whichever vendor PostgREST returned last.
 

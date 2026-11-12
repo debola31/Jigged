@@ -481,8 +481,9 @@ export default function OperationsPanel({
       if (lineClose?.kind === 'failed') {
         showSnackbar(lineClose.message, 'warning');
       } else if (lineClose && v.closePoLine) {
-        // Received in full, or closed before this receipt, is the same "nothing more expected" the
-        // box asked for — said as what happened to the line, not as a close that never happened.
+        // Received in full, or closed before this receipt (the line, or its whole PO), is the same
+        // "nothing more expected" the box asked for — said as what happened, not as a close that
+        // never happened.
         showSnackbar(
           `Recorded ${v.quantityGood} back from the vendor. ${poLineCloseSentence(v.closePoLine, lineClose)}`,
           'success',

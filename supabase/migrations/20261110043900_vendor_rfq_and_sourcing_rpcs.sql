@@ -278,7 +278,6 @@ DECLARE
     v_lines    jsonb := COALESCE(p_lines, '[]'::jsonb);
     v_id       uuid;
     v_number   text;
-    v_terms    text;
     v_name     text;
     v_line     jsonb;
     v_vendor   uuid;
@@ -308,16 +307,14 @@ BEGIN
     END IF;
 
     v_number := public.next_purchasing_document_number(p_company_id, 'vendor_rfq');
-    SELECT s.terms_and_conditions INTO v_terms FROM public.purchasing_document_series s
-     WHERE s.company_id = p_company_id AND s.document_kind = 'vendor_rfq';
     SELECT c.name INTO v_name FROM public.companies c WHERE c.id = p_company_id;
 
     INSERT INTO public.vendor_rfqs (
         company_id, rfq_number, title, needed_by_on, respond_by_on, notes_to_vendors,
-        internal_notes, terms_and_conditions, ship_to_name, ship_to_address, created_by)
+        internal_notes, ship_to_name, ship_to_address, created_by)
     VALUES (
         p_company_id, v_number, v_title, NULLIF(v_header->>'needed_by_on', '')::date,
-        NULLIF(v_header->>'respond_by_on', '')::date, v_notes, v_internal, v_terms,
+        NULLIF(v_header->>'respond_by_on', '')::date, v_notes, v_internal,
         v_name, public.company_address_block_snapshot(p_company_id), auth.uid())
     RETURNING id INTO v_id;
 
@@ -338,7 +335,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.create_vendor_rfq(uuid, jsonb, jsonb, uuid[]) IS
-  'Creates a draft RFQ (fixed RFQ- series) with lines and invited vendors. p_header keys: title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes. p_lines: [{part_id | description, unit, quantities (1-4), job_id, cert_required, notes}]. Each invitation freezes the vendor''s sales (else primary) contact. Terms & conditions come from the RFQ series; the ship-to is our shop. Office users only. Returns (id, rfq_number).';
+  'Creates a draft RFQ, numbered RFQ-0001 on, with lines and invited vendors. p_header keys: title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes. p_lines: [{part_id | description, unit, quantities (1-4), job_id, cert_required, notes}]. Each invitation freezes the vendor''s sales (else primary) contact. The ship-to is our shop. Office users only. Returns (id, rfq_number).';
 
 REVOKE EXECUTE ON FUNCTION public.create_vendor_rfq(uuid, jsonb, jsonb, uuid[]) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.create_vendor_rfq(uuid, jsonb, jsonb, uuid[]) TO authenticated, service_role;
@@ -380,8 +377,7 @@ BEGIN
     SELECT * INTO v_rfq FROM public.vendor_rfqs WHERE id = p_id FOR UPDATE;
 
     PERFORM public.purchasing_assert_keys(v_changes,
-        ARRAY['title', 'needed_by_on', 'respond_by_on', 'notes_to_vendors', 'internal_notes',
-              'terms_and_conditions'],
+        ARRAY['title', 'needed_by_on', 'respond_by_on', 'notes_to_vendors', 'internal_notes'],
         'the RFQ changes');
     IF jsonb_typeof(v_lines) <> 'array' THEN
         RAISE EXCEPTION 'p_lines must be a JSON array' USING ERRCODE = 'XX000';
@@ -408,9 +404,8 @@ BEGIN
         RAISE EXCEPTION 'A title can be at most 200 characters.' USING ERRCODE = 'P0001';
     END IF;
     IF char_length(NULLIF(btrim(v_changes->>'notes_to_vendors'), '')) > 10000
-       OR char_length(NULLIF(btrim(v_changes->>'internal_notes'), '')) > 10000
-       OR char_length(NULLIF(btrim(v_changes->>'terms_and_conditions'), '')) > 10000 THEN
-        RAISE EXCEPTION 'Notes and terms can be at most 10,000 characters.' USING ERRCODE = 'P0001';
+       OR char_length(NULLIF(btrim(v_changes->>'internal_notes'), '')) > 10000 THEN
+        RAISE EXCEPTION 'Notes can be at most 10,000 characters.' USING ERRCODE = 'P0001';
     END IF;
 
     UPDATE public.vendor_rfqs SET
@@ -421,9 +416,6 @@ BEGIN
                                 THEN NULLIF(btrim(v_changes->>'notes_to_vendors'), '') ELSE notes_to_vendors END,
         internal_notes = CASE WHEN v_changes ? 'internal_notes'
                               THEN NULLIF(btrim(v_changes->>'internal_notes'), '') ELSE internal_notes END,
-        terms_and_conditions = CASE WHEN v_changes ? 'terms_and_conditions'
-                                    THEN NULLIF(btrim(v_changes->>'terms_and_conditions'), '')
-                                    ELSE terms_and_conditions END,
         updated_at = now()
      WHERE id = p_id;
 
@@ -471,7 +463,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.save_vendor_rfq(uuid, jsonb, jsonb, uuid[], uuid[], uuid[], text) IS
-  'Patch-saves an RFQ: p_changes (title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes, terms_and_conditions), p_lines (new without "id", existing with their "id" and changed keys), removed lines and invitations (this RFQ''s, unquoted only), and vendors to invite. A closed RFQ takes only internal notes; an archived one nothing. p_expected_updated_at is the updated_at string as read. Office users only.';
+  'Patch-saves an RFQ: p_changes (title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes), p_lines (new without "id", existing with their "id" and changed keys), removed lines and invitations (this RFQ''s, unquoted only), and vendors to invite. A closed RFQ takes only internal notes; an archived one nothing. p_expected_updated_at is the updated_at string as read. Office users only.';
 
 REVOKE EXECUTE ON FUNCTION public.save_vendor_rfq(uuid, jsonb, jsonb, uuid[], uuid[], uuid[], text) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.save_vendor_rfq(uuid, jsonb, jsonb, uuid[], uuid[], uuid[], text) TO authenticated, service_role;

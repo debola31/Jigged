@@ -285,7 +285,7 @@ export async function listVendorPosForVendor(
 // ------------------------------------------------------------------------------------------------
 
 const HEADER_COLUMNS =
-  'id, company_id, po_number, vendor_id, vendor_name, vendor_address_id, vendor_address, vendor_contact_id, vendor_contact, ship_to_kind, ship_to_vendor_id, ship_to_vendor_address_id, ship_to_customer_id, ship_to_customer_address_id, ship_to_name, ship_to_address, ordered_on, need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes, terms_and_conditions, revision, sent_revision, issued_at, last_sent_at, content_version, closed_at, closed_reason, vendor_rfq_id, created_at, updated_at, deleted_at';
+  'id, company_id, po_number, vendor_id, vendor_name, vendor_address_id, vendor_address, vendor_contact_id, vendor_contact, ship_to_kind, ship_to_vendor_id, ship_to_vendor_address_id, ship_to_customer_id, ship_to_customer_address_id, ship_to_name, ship_to_address, ordered_on, need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes, revision, sent_revision, issued_at, last_sent_at, content_version, closed_at, closed_reason, vendor_rfq_id, created_at, updated_at, deleted_at';
 
 const headerQuery = (id: string) =>
   getSupabase().from('vendor_purchase_orders').select(HEADER_COLUMNS).eq('id', id).maybeSingle();
@@ -315,7 +315,6 @@ function toHeader(row: HeaderRow): VendorPoHeader {
     shipVia: row.ship_via,
     notesToVendor: row.notes_to_vendor,
     internalNotes: row.internal_notes,
-    termsAndConditions: row.terms_and_conditions,
     revision: row.revision,
     sentRevision: row.sent_revision,
     issuedAt: row.issued_at,
@@ -947,7 +946,7 @@ const relinkResultSchema = z
 
 /**
  * A new DRAFT PO to a vendor (`create_vendor_purchase_order`). The number is minted by the RPC;
- * the vendor, contact, address, ship-to and terms & conditions are frozen there. Every non-stock
+ * the vendor, contact, address and ship-to are frozen there. Every non-stock
  * purchase unit is stored as the part's conversion first, so the RPC can freeze its factor.
  */
 export async function createVendorPo(input: CreateVendorPoInput): Promise<CreateVendorPoResult> {

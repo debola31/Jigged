@@ -79,7 +79,6 @@ function context(over: Partial<RfqPdfContext> = {}): RfqPdfContext {
         respondByOn: '2026-11-20',
         notesToVendors: 'Mill certs with every bar, please.',
         internalNotes: 'Beta was late last time — push Acme.',
-        termsAndConditions: 'Prices firm for 30 days.',
         shipToName: 'Contour Tool & Machine',
         shipToAddress: {
           address_line1: '123 Shop St',
@@ -290,7 +289,8 @@ describe('generateRfqPdf — addressed to ONE vendor (Q1)', () => {
     const all = everything();
     expect(all.some((s) => s.includes('Certs required'))).toBe(true);
     expect(all.some((s) => s.includes('Mill certs with every bar, please.'))).toBe(true);
-    expect(all.some((s) => s.includes('Prices firm for 30 days.'))).toBe(true);
+    // No standing terms: anything a vendor must know rides in the notes (founder, 2026-11-12).
+    expect(all.some((s) => s.includes('TERMS AND CONDITIONS'))).toBe(false);
     expect(all.some((s) => s.includes('push Acme'))).toBe(false);
   });
 
@@ -332,9 +332,9 @@ describe('generateRfqPdf — measuring and the footer', () => {
     expect(fontBefore).toEqual(['helvetica', 'bold']);
   });
 
-  it('sets the body font BEFORE measuring the terms', async () => {
+  it('sets the body font BEFORE measuring the notes to vendors', async () => {
     await generateRfqPdf(context());
-    const idx = doc.splitTextToSize.mock.calls.findIndex((c) => String(c[0]).includes('Prices firm for 30 days.'));
+    const idx = doc.splitTextToSize.mock.calls.findIndex((c) => String(c[0]).includes('Mill certs with every bar, please.'));
     expect(idx).toBeGreaterThanOrEqual(0);
     const order = doc.splitTextToSize.mock.invocationCallOrder[idx];
     const sizeBefore = doc.setFontSize.mock.calls

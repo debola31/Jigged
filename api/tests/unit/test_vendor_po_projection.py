@@ -38,7 +38,6 @@ def _header(**over):
         "ship_via": "UPS Ground",
         "notes_to_vendor": "Certs with the shipment, please.",
         "internal_notes": "Bryce says they are slow in December.",
-        "terms_and_conditions": "Standard terms apply.",
         "ship_to_kind": "shop",
         "ship_to_name": "L&L Machine",
         "ship_to_address": {"address_line1": "200 Shop Rd", "city": "Akron",
@@ -131,7 +130,6 @@ def test_hash_is_stable_under_key_order():
     "field, value",
     [
         ("internal_notes", "a different internal note"),
-        ("terms_and_conditions", "New terms."),
         ("vendor_name", "Acme Anodizing (renamed)"),
         ("vendor_address", {"address_line1": "2 Elsewhere"}),
         ("content_version", 99),

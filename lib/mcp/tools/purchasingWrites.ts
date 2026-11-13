@@ -123,9 +123,10 @@ import {
  * are found in this company first. Writes return the PO (or RFQ) as get_vendor_po (or
  * get_vendor_rfq) reads it, with the app's non-blocking notes in `warnings`.
  *
- * NO TOOL FOR (plan §3.12): the purchasing numbering and the QuickBooks purchasing setup (one-time
- * admin choices, named in every refusal that needs them); relinking a vendor slip (a rare
- * correction; slips link themselves); duplicate (create_vendor_po covers it).
+ * NO TOOL FOR (plan §3.12): the QuickBooks purchasing setup (a one-time admin choice, named in
+ * every refusal that needs it); relinking a vendor slip (a rare correction; slips link
+ * themselves); duplicate (create_vendor_po covers it). PO numbering has nothing to set: POs number
+ * themselves, PO-0001 on.
  */
 
 // ------------------------------------------------------------------------------------------------

@@ -1803,19 +1803,18 @@ select public.register_mcp_gateway_key(
 -- ---------------------------------------------------------------------------
 -- Every purchasing surface branches on state, so the seed has to hold each one or a branch
 -- is only reachable by hand:
---   PO-1042  draft                Atlas, aluminium blanks, priced from the estimate
---   PO-1043  sent                 FastenRight, screws bought by the HUNDRED (5 = 500 ea on order)
---   PO-1044  partly received      Atlas, steel blanks: 40 of 100 in the Yard under a NEW heat,
+--   PO-0001  draft                Atlas, aluminium blanks, priced from the estimate
+--   PO-0002  sent                 FastenRight, screws bought by the HUNDRED (5 = 500 ea on order)
+--   PO-0003  partly received      Atlas, steel blanks: 40 of 100 in the Yard under a NEW heat,
 --                                 so a lot stamped with the vendor and receipt date exists
---   PO-1045  received             Precision Bearings, bearings, all 200 on Shelf A
---   PO-1046  closed (short)       FastenRight, dowels: 800 of 1000, "that's everything"
---   PO-1047  partly received      ProFinish, the ANODIZE step of a cover job: an outside line,
+--   PO-0004  received             Precision Bearings, bearings, all 200 on Shelf A
+--   PO-0005  closed (short)       FastenRight, dowels: 800 of 1000, "that's everything"
+--   PO-0006  partly received      ProFinish, the ANODIZE step of a cover job: an outside line,
 --                                 linked to a sent vendor packing slip with 25 of 40 back
---   PO-1048  sent                 VoltEdge, motors on order, plus a CALIBRATION line on the
+--   PO-0007  sent                 VoltEdge, motors on order, plus a CALIBRATION line on the
 --                                 CNC mill (a work centre) and FREIGHT that expects no receipt
---   PO-1049  draft, archived      Atlas, so "archived never lists" has something to hide
---   PO-1050  draft                created by awarding RFQ-0002
--- Numbering continues at 1042, the way a shop moving off a QuickBooks sequence would set it.
+--   PO-0008  draft, archived      Atlas, so "archived never lists" has something to hide
+--   PO-0009  draft                created by awarding RFQ-0002
 -- RFQ-0001 is quoted by Atlas and declined by FastenRight; RFQ-0002 is awarded; RFQ-0003 is
 -- a draft nobody has been sent.
 --
@@ -1864,14 +1863,6 @@ begin
     json_build_object('sub', v_dev, 'role', 'authenticated')::text,
     true);
 
-  -- ── Numbering and printed terms ─────────────────────────────────────────────
-  perform public.save_purchasing_document_settings(v_company, 'vendor_purchase_order', jsonb_build_object(
-    'prefix', 'PO-', 'next_number', 1042,
-    'terms_and_conditions', 'Material must arrive with mill test reports where certs are required. '
-      || 'Reference our PO number on every packing slip and invoice. Partial shipments by agreement only.'));
-  perform public.save_purchasing_document_settings(v_company, 'vendor_rfq', jsonb_build_object(
-    'terms_and_conditions', 'Quote per the unit shown on each line. State lead time and how long the price holds.'));
-
   -- ── Price sheets ────────────────────────────────────────────────────────────
   -- Screws are bought by the hundred: the conversion row is what gives "hundred" one
   -- meaning on this part, the way the PO form writes a preset before it saves.
@@ -1897,20 +1888,20 @@ begin
   perform public.save_part_vendor(v_motor, v_atlas, jsonb_build_object(
       'status', 'disapproved', 'status_note', 'Shipped the wrong gear ratio twice.'));
 
-  -- ── PO-1042: draft ─────────────────────────────────────────────────────────
+  -- ── PO-0001: draft ─────────────────────────────────────────────────────────
   select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 1, current_date,
     jsonb_build_object('need_by_on', current_date + 14),
     jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_al, 'quantity', 50,
       'unit_price', 6.40, 'price_source', 'estimate', 'cert_required', true)));
 
-  -- ── PO-1043: sent, screws by the hundred ───────────────────────────────────
+  -- ── PO-0002: sent, screws by the hundred ───────────────────────────────────
   select id into v_po from public.create_vendor_purchase_order(v_fasten, current_date - 6, current_date,
     jsonb_build_object('need_by_on', current_date + 3, 'ship_via', 'UPS Ground'),
     jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_screw, 'quantity', 5,
       'unit', 'hundred', 'unit_price', 6.50, 'price_source', 'price_sheet')));
   perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
 
-  -- ── PO-1044: partly received, under a new heat ─────────────────────────────
+  -- ── PO-0003: partly received, under a new heat ─────────────────────────────
   select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 9, current_date,
     jsonb_build_object('need_by_on', current_date - 1, 'notes_to_vendor', 'Certs with the material, please.'),
     jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_steel, 'quantity', 100,
@@ -1922,7 +1913,7 @@ begin
       'heat_number', 'HT-24-9102')),
     now() - interval '2 days', 'AT-55120', null);
 
-  -- ── PO-1045: received in full ──────────────────────────────────────────────
+  -- ── PO-0004: received in full ──────────────────────────────────────────────
   select id into v_po from public.create_vendor_purchase_order(v_bearco, current_date - 20, current_date,
     jsonb_build_object('need_by_on', current_date - 8),
     jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_bearing, 'quantity', 200,
@@ -1933,7 +1924,7 @@ begin
     jsonb_build_array(jsonb_build_object('line_id', v_line, 'quantity', 200, 'location_id', v_shelf_a)),
     now() - interval '9 days', 'PBC-30021', null);
 
-  -- ── PO-1046: closed short ──────────────────────────────────────────────────
+  -- ── PO-0005: closed short ──────────────────────────────────────────────────
   select l.id into v_dowels_at
     from public.inventory_locations l
     join public.inventory_locations r on r.id = l.parent_id
@@ -1951,7 +1942,7 @@ begin
       'close_remaining', true)),
     now() - interval '15 days', 'FR-70233', 'Backordered 200; we will not wait for them.');
 
-  -- ── PO-1047: outside work on a vendor packing slip ─────────────────────────
+  -- ── PO-0006: outside work on a vendor packing slip ─────────────────────────
   -- A direct job for 40 end covers: mill and deburr done in-house, then anodize at ProFinish.
   v_job := pg_temp.direct_job('50000000-0000-0000-0000-000000000003', 'PO-MER-7815', 12, 8);
   v_jp  := pg_temp.add_job_part(v_job, v_cover, 10, 40, 38.50, null, now() - interval '8 days');
@@ -1982,7 +1973,7 @@ begin
   select company_id, id, job_operation_id, job_part_id, 25, v_dev, now() - interval '1 day'
     from public.outside_shipments where id = v_slip;
 
-  -- ── PO-1048: sent, with a calibration line on the mill and freight ─────────
+  -- ── PO-0007: sent, with a calibration line on the mill and freight ─────────
   select id into v_po from public.create_vendor_purchase_order(v_volt, current_date - 3, current_date,
     jsonb_build_object('need_by_on', current_date + 10, 'ship_via', 'FedEx Ground'),
     jsonb_build_array(
@@ -1994,7 +1985,7 @@ begin
         'quantity', 1, 'unit_price', 65.00, 'price_source', 'manual', 'expects_receipt', false)));
   perform public.set_vendor_purchase_order_state(v_po, 'mark_sent');
 
-  -- ── PO-1049: an archived draft ─────────────────────────────────────────────
+  -- ── PO-0008: an archived draft ─────────────────────────────────────────────
   select id into v_po from public.create_vendor_purchase_order(v_atlas, current_date - 12, current_date, '{}',
     jsonb_build_array(jsonb_build_object('line_kind', 'part', 'part_id', v_ss, 'quantity', 10)));
   perform public.set_vendor_purchase_order_state(v_po, 'archive');
@@ -2024,7 +2015,7 @@ begin
     'AQ-55211', current_date - 1);
   perform public.set_vendor_rfq_invitation_state(v_inv2, 'decline', 'Not a stocking item for us.');
 
-  -- ── RFQ-0002: awarded, which raises PO-1050 as a draft ─────────────────────
+  -- ── RFQ-0002: awarded, which raises PO-0009 as a draft ─────────────────────
   select id into v_rfq from public.create_vendor_rfq(v_company,
     jsonb_build_object('title', 'Bearings for the Q1 actuator run', 'needed_by_on', current_date + 30),
     jsonb_build_array(jsonb_build_object('part_id', v_bearing, 'quantities', jsonb_build_array(500))),

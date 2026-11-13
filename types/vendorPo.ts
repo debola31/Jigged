@@ -159,7 +159,6 @@ export interface VendorPoHeader {
   notesToVendor: string | null;
   /** Never printed, never pushed, never bumps the revision. */
   internalNotes: string | null;
-  termsAndConditions: string | null;
   revision: number;
   sentRevision: number | null;
   issuedAt: string | null;

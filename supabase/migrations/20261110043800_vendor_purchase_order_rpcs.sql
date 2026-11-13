@@ -1,11 +1,10 @@
 -- ============================================================================
--- PURCHASING (3 of 5): the write doors for numbering, approved vendors and POs
+-- PURCHASING (3 of 5): the write doors for approved vendors and POs
 -- ============================================================================
 -- The browser has SELECT only on every purchasing table, so these SECURITY DEFINER RPCs are
 -- the only writers. EVERY ONE follows the same preamble, in this order, written out in its
 -- own body:
---   1. derive the company from the row (or the vendor / part); only the settings save
---      takes p_company_id
+--   1. derive the company from the row (or the vendor / part)
 --   2. PERFORM assert_office_member(company): P0001 "That record is not available." for
 --      not-found and non-members alike, 42501 for an operator
 --   3. the literal company_can_write check -> 42501 (definer_writers_missing_write_gate()
@@ -21,7 +20,7 @@
 -- create_outside_shipment takes the same job lock and no PO lock, so it cannot deadlock
 -- against these, and a slip and a line insert for one job serialise. The relink RPC locks
 -- both POs (in id order) before the job lock; a receipt on a linked slip locks its PO from a
--- trigger, holding no job lock (section 6b).
+-- trigger, holding no job lock (section 5b).
 --
 -- EVERY WRITER ENDS WITH vendor_purchase_order_settle_versions, header still locked: it bumps
 -- the revision (when allowed) and the QuickBooks content_version (when the pushed projection
@@ -264,7 +263,6 @@ DECLARE
     v_vendor   record;
     v_party    jsonb;
     v_ship     jsonb;
-    v_terms    text;
     v_number   text;
     v_payment  text;
     v_ship_via text;
@@ -311,9 +309,6 @@ BEGIN
     END IF;
 
     v_number := public.next_purchasing_document_number(p_company_id, 'vendor_purchase_order');
-    SELECT s.terms_and_conditions INTO v_terms
-      FROM public.purchasing_document_series s
-     WHERE s.company_id = p_company_id AND s.document_kind = 'vendor_purchase_order';
 
     INSERT INTO public.vendor_purchase_orders (
         company_id, po_number, vendor_id, vendor_name,
@@ -321,7 +316,7 @@ BEGIN
         ship_to_kind, ship_to_vendor_id, ship_to_vendor_address_id,
         ship_to_customer_id, ship_to_customer_address_id, ship_to_name, ship_to_address,
         ordered_on, need_by_on, payment_terms, ship_via,
-        notes_to_vendor, internal_notes, terms_and_conditions,
+        notes_to_vendor, internal_notes,
         vendor_rfq_id, created_by
     ) VALUES (
         p_company_id, v_number, v_vendor.id, v_vendor.name,
@@ -331,7 +326,7 @@ BEGIN
         (v_ship->>'customer_id')::uuid, (v_ship->>'customer_address_id')::uuid,
         v_ship->>'name', NULLIF(v_ship->'address', 'null'::jsonb),
         p_ordered_on, (v_header->>'need_by_on')::date, v_payment, v_ship_via,
-        v_notes, v_internal, v_terms,
+        v_notes, v_internal,
         p_vendor_rfq_id, auth.uid()
     ) RETURNING id INTO v_id;
 
@@ -340,7 +335,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.vendor_purchase_order_insert(uuid, uuid, date, jsonb, uuid) IS
-  'Inserts a draft vendor PO header: number minted, vendor contact/address and ship-to frozen, terms & conditions copied from the series, payment terms from the vendor''s standing terms unless named. The caller has already asserted membership, role and billing. Internal.';
+  'Inserts a draft vendor PO header: number minted, vendor contact/address and ship-to frozen, payment terms from the vendor''s standing terms unless named. The caller has already asserted membership, role and billing. Internal.';
 
 REVOKE EXECUTE ON FUNCTION public.vendor_purchase_order_insert(uuid, uuid, date, jsonb, uuid) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.vendor_purchase_order_insert(uuid, uuid, date, jsonb, uuid) TO service_role;
@@ -1243,117 +1238,7 @@ GRANT  EXECUTE ON FUNCTION public.part_vendor_write(uuid, uuid, jsonb, jsonb, te
 
 
 -- ============================================================================
--- 2. save_purchasing_document_settings -- numbering and printed terms
--- ============================================================================
--- Any office user, from the Purchasing hub. RFQs use the fixed RFQ- series, so only their
--- terms and conditions change.
-CREATE OR REPLACE FUNCTION public.save_purchasing_document_settings(
-    p_company_id uuid,
-    p_kind       text,
-    p_changes    jsonb DEFAULT '{}'::jsonb)
-RETURNS jsonb
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path TO 'public', 'pg_temp'
-AS $fn$
-DECLARE
-    v_changes jsonb := COALESCE(p_changes, '{}'::jsonb);
-    v_row     public.purchasing_document_series%ROWTYPE;
-    v_prefix  text;
-    v_next    numeric;
-    v_digits  numeric;
-    v_terms   text;
-    v_preview text;
-    v_highest numeric;
-BEGIN
-    PERFORM public.assert_office_member(p_company_id);
-    IF NOT public.company_can_write(p_company_id) THEN
-        RAISE EXCEPTION 'Your subscription is not active (billing_gate_update)' USING ERRCODE = '42501';
-    END IF;
-
-    IF p_kind IS NULL OR p_kind NOT IN ('vendor_purchase_order', 'vendor_rfq') THEN
-        RAISE EXCEPTION 'Unknown purchasing document kind %', p_kind USING ERRCODE = 'XX000';
-    END IF;
-    PERFORM public.purchasing_assert_keys(v_changes,
-        ARRAY['prefix', 'next_number', 'min_digits', 'terms_and_conditions'], 'the purchasing settings');
-    IF p_kind = 'vendor_rfq'
-       AND (v_changes ? 'prefix' OR v_changes ? 'next_number' OR v_changes ? 'min_digits') THEN
-        RAISE EXCEPTION 'RFQ numbers always use the RFQ- series. Only their terms and conditions can change.'
-            USING ERRCODE = 'P0001';
-    END IF;
-
-    INSERT INTO public.purchasing_document_series (company_id, document_kind, prefix)
-    VALUES (p_company_id, p_kind, CASE p_kind WHEN 'vendor_purchase_order' THEN 'PO-' ELSE 'RFQ-' END)
-    ON CONFLICT (company_id, document_kind) DO NOTHING;
-
-    SELECT * INTO v_row FROM public.purchasing_document_series
-     WHERE company_id = p_company_id AND document_kind = p_kind
-       FOR UPDATE;
-
-    -- Not trimmed: "PO " is a prefix with a space in it, refused below, never silently fixed.
-    v_prefix := CASE WHEN v_changes ? 'prefix' THEN COALESCE(v_changes->>'prefix', '') ELSE v_row.prefix END;
-    v_next   := CASE WHEN v_changes ? 'next_number' THEN (v_changes->>'next_number')::numeric ELSE v_row.next_number END;
-    v_digits := CASE WHEN v_changes ? 'min_digits' THEN (v_changes->>'min_digits')::numeric ELSE v_row.min_digits END;
-    v_terms  := CASE WHEN v_changes ? 'terms_and_conditions' THEN NULLIF(btrim(v_changes->>'terms_and_conditions'), '')
-                     ELSE v_row.terms_and_conditions END;
-
-    IF v_prefix !~ '^[A-Za-z0-9-]{0,6}$' THEN
-        RAISE EXCEPTION 'A prefix can use letters, digits and dashes, up to 6 characters.' USING ERRCODE = 'P0001';
-    END IF;
-    IF v_next IS NULL OR v_next <> trunc(v_next) OR v_next < 1 OR v_next > 99999999999 THEN
-        RAISE EXCEPTION 'The next number must be a whole number of 1 or more.' USING ERRCODE = 'P0001';
-    END IF;
-    IF v_digits IS NULL OR v_digits <> trunc(v_digits) OR v_digits < 1 OR v_digits > 8 THEN
-        RAISE EXCEPTION 'Minimum digits must be a whole number from 1 to 8.' USING ERRCODE = 'P0001';
-    END IF;
-    IF char_length(v_terms) > 10000 THEN
-        RAISE EXCEPTION 'Terms and conditions can be at most 10,000 characters.' USING ERRCODE = 'P0001';
-    END IF;
-
-    v_preview := v_prefix || lpad(v_next::bigint::text, greatest(v_digits::integer, length(v_next::bigint::text)), '0');
-
-    IF p_kind = 'vendor_purchase_order' THEN
-        IF char_length(v_prefix) + v_digits > 11 OR char_length(v_preview) > 11 THEN
-            RAISE EXCEPTION 'PO numbers can be at most 11 characters (QuickBooks Desktop''s limit), and % would be %.',
-                v_preview, greatest(char_length(v_preview), char_length(v_prefix) + v_digits::integer)
-                USING ERRCODE = 'P0001';
-        END IF;
-        -- Never at or below a number already issued under this prefix.
-        SELECT max(substr(h.po_number, char_length(v_prefix) + 1)::numeric) INTO v_highest
-          FROM public.vendor_purchase_orders h
-         WHERE h.company_id = p_company_id
-           AND left(h.po_number, char_length(v_prefix)) = v_prefix
-           AND substr(h.po_number, char_length(v_prefix) + 1) ~ '^[0-9]+$';
-        IF v_highest IS NOT NULL AND v_next <= v_highest THEN
-            RAISE EXCEPTION 'Number % has already been issued under "%", so the next number must be at least %.',
-                v_highest, v_prefix, v_highest + 1 USING ERRCODE = 'P0001';
-        END IF;
-    END IF;
-
-    UPDATE public.purchasing_document_series
-       SET prefix = v_prefix, next_number = v_next::bigint, min_digits = v_digits::smallint,
-           terms_and_conditions = v_terms, updated_by = auth.uid()
-     WHERE company_id = p_company_id AND document_kind = p_kind;
-
-    RETURN jsonb_build_object(
-        'document_kind', p_kind,
-        'prefix', v_prefix,
-        'next_number', v_next::bigint,
-        'min_digits', v_digits::integer,
-        'terms_and_conditions', v_terms,
-        'next_number_preview', v_preview);
-END
-$fn$;
-
-COMMENT ON FUNCTION public.save_purchasing_document_settings(uuid, text, jsonb) IS
-  'Office users set the PO numbering (prefix 0-6 letters/digits/dashes, next number, minimum digits) and the printed terms & conditions for POs or RFQs. Refuses a next number at or below the highest already issued under the prefix, and a PO number longer than 11 characters. RFQs keep the fixed RFQ- series. Returns the saved values and next_number_preview.';
-
-REVOKE EXECUTE ON FUNCTION public.save_purchasing_document_settings(uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
-GRANT  EXECUTE ON FUNCTION public.save_purchasing_document_settings(uuid, text, jsonb) TO authenticated, service_role;
-
-
--- ============================================================================
--- 3. The approved vendor list
+-- 2. The approved vendor list
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.save_part_vendor(
     p_part_id        uuid,
@@ -1443,7 +1328,7 @@ GRANT  EXECUTE ON FUNCTION public.archive_part_vendor(uuid) TO authenticated, se
 
 
 -- ============================================================================
--- 4. Purchase orders: create, save, state, line state
+-- 3. Purchase orders: create, save, state, line state
 -- ============================================================================
 CREATE OR REPLACE FUNCTION public.create_vendor_purchase_order(
     p_vendor_id  uuid,
@@ -1537,9 +1422,6 @@ BEGIN
     IF p_today IS NULL THEN
         RAISE EXCEPTION 'p_today is required: pass the caller''s local date.' USING ERRCODE = 'XX000';
     END IF;
-    -- No terms_and_conditions: a PO keeps the copy it took from the series at create. It is
-    -- on the vendor's document, so a key for it would bump the revision without being on
-    -- the shared vendor-visible field list the PO form predicts "Save as Rev N+1" from.
     PERFORM public.purchasing_assert_keys(v_changes,
         ARRAY['vendor_id', 'vendor_contact_id', 'vendor_address_id', 'ship_to', 'ordered_on',
               'need_by_on', 'payment_terms', 'ship_via', 'notes_to_vendor', 'internal_notes'],
@@ -1739,7 +1621,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) IS
-  'Patch-saves a vendor PO. p_changes keys (absent = unchanged): vendor_id (drafts only, no outside lines), vendor_contact_id, vendor_address_id, ship_to, ordered_on (drafts only), need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes (terms_and_conditions stay the copy taken at create). p_lines: new lines without "id" (line_kind part|outside_service|other plus part_id, job_operation_id, job_id, job_part_id, work_center_id, description, vendor_part_number, quantity, unit, unit_price, price_source, need_by_on, promised_on, cert_required, expects_receipt) and existing lines with their "id" and only the changed keys (an existing line''s line_kind and job_operation_id are fixed: a change is refused, a repeat of the same value is not). p_removed_line_ids must be lines of this PO with no receipts. p_expected_updated_at (the updated_at string as read, passed through unchanged) is checked only when vendor-visible fields change. After a send, the first vendor-visible change bumps the revision once per send cycle; content_version moves when a QuickBooks-pushed field moves. A closed or archived PO takes only internal_notes and promised_on. Returns {id, po_number, status, revision, sent_revision, revision_bumped, content_version, content_changed, updated_at, line_ids, linked_outside_shipment_ids, unlinked_outside_shipment_ids}.';
+  'Patch-saves a vendor PO. p_changes keys (absent = unchanged): vendor_id (drafts only, no outside lines), vendor_contact_id, vendor_address_id, ship_to, ordered_on (drafts only), need_by_on, payment_terms, ship_via, notes_to_vendor, internal_notes. p_lines: new lines without "id" (line_kind part|outside_service|other plus part_id, job_operation_id, job_id, job_part_id, work_center_id, description, vendor_part_number, quantity, unit, unit_price, price_source, need_by_on, promised_on, cert_required, expects_receipt) and existing lines with their "id" and only the changed keys (an existing line''s line_kind and job_operation_id are fixed: a change is refused, a repeat of the same value is not). p_removed_line_ids must be lines of this PO with no receipts. p_expected_updated_at (the updated_at string as read, passed through unchanged) is checked only when vendor-visible fields change. After a send, the first vendor-visible change bumps the revision once per send cycle; content_version moves when a QuickBooks-pushed field moves. A closed or archived PO takes only internal_notes and promised_on. Returns {id, po_number, status, revision, sent_revision, revision_bumped, content_version, content_changed, updated_at, line_ids, linked_outside_shipment_ids, unlinked_outside_shipment_ids}.';
 
 REVOKE EXECUTE ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.save_vendor_purchase_order(uuid, jsonb, jsonb, uuid[], text, date) TO authenticated, service_role;
@@ -2009,7 +1891,7 @@ GRANT  EXECUTE ON FUNCTION public.set_vendor_purchase_order_line_state(uuid, uui
 
 
 -- ============================================================================
--- 5. Receiving, and its void
+-- 4. Receiving, and its void
 -- ============================================================================
 -- ONE DELIVERY, ONE CALL, ATOMIC. p_receipt_group_id is minted by the caller (the dialog on
 -- open; MCP from the PO, lines, quantities and UTC day); a replay returns the first result
@@ -2378,7 +2260,7 @@ GRANT  EXECUTE ON FUNCTION public.void_vendor_purchase_order_receipt(uuid, text)
 
 
 -- ============================================================================
--- 6. A slip's PO line, by hand
+-- 5. A slip's PO line, by hand
 -- ============================================================================
 -- The rare correction: relink a vendor packing slip to a line, or unlink it (NULL). Office
 -- only. Moving a slip moves what came back on it from one line's received figure to the
@@ -2493,7 +2375,7 @@ GRANT  EXECUTE ON FUNCTION public.set_outside_shipment_vendor_purchase_order_lin
 
 
 -- ============================================================================
--- 6b. A receipt on a linked vendor packing slip settles its PO
+-- 5b. A receipt on a linked vendor packing slip settles its PO
 -- ============================================================================
 -- Outside work comes back on its vendor packing slip, and recording that is the browser's
 -- plain INSERT into outside_shipment_receipts -- operators included, from the phone -- while
@@ -2588,7 +2470,7 @@ CREATE TRIGGER outside_shipment_receipts_settle_vendor_po_upd
 
 
 -- ============================================================================
--- 7. create_outside_shipment -- the send links its PO line
+-- 6. create_outside_shipment -- the send links its PO line
 -- ============================================================================
 -- Rebuilt from its newest definition (20260905183520) WORD FOR WORD, plus the lookup of the
 -- single eligible line and the column in the INSERT. The SAME 8-argument signature, so the

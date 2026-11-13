@@ -59,16 +59,17 @@ stands: **the slip stays the only record of movement** ([below](#outside-process
 
 ## Decisions
 
-### The founder's, 2026-11-09 — his answers quoted
+### The founder's, 2026-11-09 — their answers quoted
 
-| Question | Decision | His answer |
+| Question | Decision | Their answer |
 |---|---|---|
 | Scope | All of #571: POs for material, bought parts, outside services and other purchases; receiving with heat, lot and cert; purchase vs stock units (per 100, per 1000); on-order and a buy list; an approved vendor list; per-vendor price sheets; RFQs with comparison and award; an **explicit** "use as part cost"; revisions; PO and RFQ PDFs | "Everything in #571" |
 | QuickBooks | **Push the PO; bills stay in QuickBooks.** An explicit Send / Update / Close, in the UI and in MCP, to Online (Plus/Advanced) and Desktop (Conductor). Vendors matched or created the way customers are. Jigged never creates a bill or an item receipt and never sets Billable or `CustomerRef` | "Push the PO; bills stay in QB" |
-| Reading QuickBooks | **One read of the QuickBooks PO, only inside the Update/Close click** — its version token, line ids and billed flags. No read on load, preflight or create, no polling, and nothing stored but the new token. It reversed his earlier "never read or poll PO status": a bill entered against the PO very likely moves the token, and a write with the old one fails | "Allow one read inside the click" |
+| Reading QuickBooks | **One read of the QuickBooks PO, only inside the Update/Close click** — its version token, line ids and billed flags. No read on load, preflight or create, no polling, and nothing stored but the new token. It reversed their earlier "never read or poll PO status": a bill entered against the PO very likely moves the token, and a write with the old one fails | "Allow one read inside the click" |
 | QuickBooks items | **Non-inventory and service items only, no categories.** One "QuickBooks item for purchases" fills all three line kinds; a per-kind split is a secondary option. Jigged owns the stock count, so a QuickBooks inventory item would count it twice | "Non-inventory/service only" · on categories: *"Do we need to categorize items?. maybe just 1 general thing until we get a request for diversity?"* |
 | Permissions | **Admins and users; no approval step.** Operators are refused in the database functions, the MCP tools and the FastAPI routes | "Admins and users, no approval" |
 | Sending | **PDF plus mailto, like quotes.** "Mark as sent" stamps the send; there is no server email | "PDF + mailto, like quotes" |
+| Numbering and terms (2026-11-12, reversing a planner default) | **POs and RFQs number themselves, `PO-0001` and `RFQ-0001` on, like quotes and jobs; there is no settings screen and no standing terms and conditions.** Anything a vendor must know rides in the PO's "Notes to vendor". `PO-99999999` is the last number that fits QuickBooks Desktop's 11-character `refNumber`, and Jigged's `PO-` numbers cannot collide with QuickBooks' own plain-number POs | *"i don't understand why we have these purchase settings. We don't do something like this for any other module"* |
 
 **Follow-up, before L&L moves its POs to Jigged:** confirm with L&L's bookkeeper that expensing PO
 material through non-inventory items is acceptable — if QuickBooks tracks their raw material as
@@ -83,12 +84,10 @@ bookkeeper's [step 9](#what-the-bookkeeper-does-differently)).
 | A bought part on a job keeps today's production status — no "received" gate; the job shows its POs | A gate would block shipping on paperwork; it is out of scope, not forgotten |
 | No FOB field ([PR #737](https://github.com/debola31/Jigged/pull/737) found it unused), no buyer field; ship via and notes instead | Fields nobody fills are fields nobody keeps true |
 | No approvals, returns to vendor, receiving inspection, landed cost or import of open POs | [Out of scope](#out-of-scope) |
-| Per-company numbering, prefix and next number settable, **PO number ≤ 11 characters**; RFQs a fixed `RFQ-` series | 11 is QuickBooks Desktop's `refNumber`; a settable sequence lets a shop continue the one QuickBooks was numbering |
 | **A PO price is a frozen term of the document, never a cost record** | It is the price of one order — a rush premium, a minimum. Only the explicit, previewed ["Use as part cost"](#approved-vendors-price-sheets-use-as-part-cost) writes `part_pricing_tiers` |
 | A part line takes any live part, made or bought; sourcing applies to bought parts only | A subcontracted whole part is a real case |
 | **The vendor is locked once a PO is marked sent**; to change vendor, close and duplicate | The vendor holds the document |
 | Edits after a send bump **Rev N on the same number**; no void-and-reissue | The number is what the vendor files it under |
-| Numbering and terms & conditions on the Purchasing hub (any office user); QuickBooks item mapping in Settings → QuickBooks (admin) | Purchasing settings are office work; QuickBooks setup is an admin's |
 | No new toolbar menu on the job page | POs show where they bear on the job: the bought-part line, the operation card, the Materials card, one row in the details card |
 
 ---
@@ -317,7 +316,7 @@ text names the shop computer, because that is where the answer comes from. Detai
 
 | Table | Grain | Non-obvious |
 |---|---|---|
-| `purchasing_document_series` | company × kind | Prefix `^[A-Za-z0-9-]{0,6}$`, may be empty; `next_number` only moves forward; 1–8 minimum digits; for POs prefix + digits ≤ 11. No row until first use — the defaults are the contract. Terms & conditions copied onto each new document at create |
+| `purchasing_document_series` | company × kind | The counter and nothing else: `next_number` only moves forward. No row until first use. There are no numbering settings and no standing terms (founder, 2026-11-12) |
 | `vendor_purchase_orders` | one PO | `po_number` UNIQUE per company, **full** — an archived PO keeps its number. `vendor_id` RESTRICT; the vendor's name, contact, address and the ship-to (`shop` / `vendor` / `customer`) frozen at create, their ids SET NULL beside the copies. `ordered_on` is the **browser's** local date. A draft cannot be closed — archive it. "Sent" is one fact in three columns (`issued_at`, `sent_revision`, `last_sent_at`), held by CHECK |
 | `vendor_purchase_order_lines` | one line | `line_kind` `part` / `outside_service` / `other`, each shape held by CHECK. `line_number` printed and never reused. Snapshots (part, job, operation, service, work centre) freeze at insert. `stock_unit` + `stock_factor` frozen. `unit_price numeric(16,5)`, NULL = to be confirmed, and `price_source` NULL exactly then. `promised_on` internal; `expects_receipt` false only on other lines. Part, job, job part and operation RESTRICT |
 | `vendor_purchase_order_receipts` | one entry of one delivery | Append-only, corrected by void. **Part or other only — an outside receipt is unrepresentable.** `(receipt_group_id, entry_index)` UNIQUE is the replay guard. Stores the quantity and unit as typed plus the exact `stock_quantity`, and links the ledger row and its reversal. Count with `voided_at IS NULL` |
@@ -362,19 +361,26 @@ the insights AI, which may not read the links table; it returns no QuickBooks id
 
 ### Numbering
 
-`next_purchasing_document_number` mints inside the create RPC under a `FOR UPDATE` lock on the series
-row, held to commit: **a number that already exists is skipped, a number is never reissued**
-(archived POs included), and **a rolled-back create consumes nothing**. The settings save refuses a
-next number at or below the highest already issued under that prefix, and a PO number over 11
-characters. **An empty prefix plus a next number is how a shop continues its QuickBooks sequence**
-("1043").
+**POs and RFQs number themselves, `PO-0001` and `RFQ-0001` on, like quotes and jobs.** There is no
+settings screen: the founder removed it (2026-11-12), because no other module has one.
+`next_purchasing_document_number` mints inside the create RPC under a `FOR UPDATE` lock on the
+series row, held to commit:
+- **a number that already exists is skipped, and a number is never reissued** (archived POs included);
+- **a rolled-back create consumes nothing**;
+- four digits grow rather than truncate (`PO-9999`, then `PO-10000`);
+- past `PO-99999999`, the last number that fits QuickBooks Desktop's 11 characters, the create
+  refuses in a sentence.
+
+The series is not the shared `Q-`/`J-` counter: a quote and its job share a number on purpose, and a
+PO is a separate document. Jigged's `PO-` numbers cannot collide with QuickBooks' own plain-number
+POs.
 
 ### Two counters: `revision` and `content_version`
 
 | | Bumped by | Never by | Means |
 |---|---|---|---|
 | `revision` | the **first** vendor-visible change after a send — the md5 of `vendor_purchase_order_document()` no longer matches the sent revision's — **once per send cycle** | drafts; internal notes, promised dates, closing, `price_source`, `expects_receipt` (none of them are in the document) | "Rev N". `revision > sent_revision` is *Rev N not sent*, and a QuickBooks push is refused until it is sent |
-| `content_version` | every change that moves `vendor_purchase_order_pushed_projection()` — **including close and reopen**, and the receipt or void (on the PO, or on a linked vendor packing slip) that moves the PO into or out of its **derived** *closed*, the status the push closes and reopens from. Counted against `content_hash`, the md5 the current version stands for: every writer ends with `vendor_purchase_order_settle_versions`, and a trigger settles a slip receipt | an ordinary receipt, internal notes, promised dates, terms & conditions | `content_version >` the link's `pushed_content_version` is *Out of date in QuickBooks* — no QuickBooks call needed |
+| `content_version` | every change that moves `vendor_purchase_order_pushed_projection()` — **including close and reopen**, and the receipt or void (on the PO, or on a linked vendor packing slip) that moves the PO into or out of its **derived** *closed*, the status the push closes and reopens from. Counted against `content_hash`, the md5 the current version stands for: every writer ends with `vendor_purchase_order_settle_versions`, and a trigger settles a slip receipt | an ordinary receipt, internal notes, promised dates | `content_version >` the link's `pushed_content_version` is *Out of date in QuickBooks* — no QuickBooks call needed |
 
 **The vendor-visible field list is one list in three copies, pinned together:**
 [`lib/purchasing/vendorPoVisibleFields.ts`](../../lib/purchasing/vendorPoVisibleFields.ts) (the
@@ -438,7 +444,7 @@ jsonb key the RPC does not recognise; 23514 a slip linked to the wrong line.
 
 | RPC | Non-obvious |
 |---|---|
-| `create_vendor_purchase_order` | Live vendor only. Contact defaults to the sales contact, then the primary; address to the default; terms from the vendor's standing terms; T&Cs from the series; the number minted here. Returns `(id, po_number)` |
+| `create_vendor_purchase_order` | Live vendor only. Contact defaults to the sales contact, then the primary; address to the default; payment terms from the vendor's standing terms; the number minted here. Returns `(id, po_number)` |
 | `save_vendor_purchase_order` | **Patch semantics**; new lines carry no id. The staleness check (`p_expected_updated_at`, the string passed through exactly as read) runs **only when vendor-visible fields change**, so an auto-saved promise or note never collides with an edit. Refuses: quantity below received; removing a received line; changing kind, part, unit or factor after a receipt; changing an existing line's kind or routing step at all (add a new line); the vendor once sent; anything on a closed or archived PO but internal notes and promised dates |
 | `set_vendor_purchase_order_state` | `mark_sent` (needs a line; snapshots the revision) · `close` (a sent PO) · `reopen` (re-checks one open outside line per operation and vendor) · `archive` — **never blocked**, idempotent, and unlinks the slips of its outside lines |
 | `set_vendor_purchase_order_line_state` | Close short or reopen a batch of lines of one sent PO, atomically. Reopen re-checks one open outside line per (operation, vendor). Moves `content_version` (QuickBooks closes lines too), never the revision |
@@ -449,7 +455,6 @@ jsonb key the RPC does not recognise; 23514 a slip linked to the wrong line.
 | `save_part_vendor` / `archive_part_vendor` | Upsert and revive on (part, vendor). A non-null `p_price_breaks` replaces the whole sheet |
 | `preview_part_cost_from_vendor` (INVOKER) / `apply_part_cost_from_vendor` | [Above](#approved-vendors-price-sheets-use-as-part-cost) |
 | `create_vendor_rfq`, `save_vendor_rfq`, `set_vendor_rfq_state`, `set_vendor_rfq_invitation_state`, `save_vendor_rfq_responses`, `award_vendor_rfq` | [Above](#an-rfq-to-three-vendors-and-the-award) |
-| `save_purchasing_document_settings` | Any office user, not only admins |
 
 **Rebuilding a shared function is the risk this module carries most.** `CREATE OR REPLACE` does not
 validate a plpgsql body, so a stock RPC, `create_outside_shipment`, `reset_demo_company` or a guard
@@ -634,11 +639,10 @@ Written for whoever enters bills. **Jigged now writes the purchase order; QuickB
    **not** close it in QuickBooks — close it there.
 6. **Finish 1099 details on any vendor Jigged creates** — it sends the name and the vendor's address,
    nothing else.
-7. **Pick PO numbering QuickBooks will not reuse.** QuickBooks accepts a duplicate PO number
-   silently. Either keep a prefix QuickBooks never uses (the default `PO-`), or continue QuickBooks'
-   own sequence — empty prefix, next number above QuickBooks' highest — and from then on number POs
-   only in Jigged. On QuickBooks Online, turn **custom transaction numbers** on, or QuickBooks
-   renumbers every PO.
+7. **Raise POs only in Jigged from now on.** Jigged numbers them `PO-0001` on. QuickBooks numbers
+   its own POs with plain numbers, so a `PO-` number never collides with one it made, but it
+   accepts a duplicate silently, so a PO typed into QuickBooks by hand could. On QuickBooks Online,
+   turn **custom transaction numbers** on, or QuickBooks renumbers every PO.
 8. **Old QuickBooks POs stay in QuickBooks.** Nothing imports them; finish them there.
 9. **Before the first PO, check how your material is booked.** These POs post through a non-inventory
    "purchases" item to an expense or cost-of-goods account. If QuickBooks tracks your raw material as
@@ -697,7 +701,7 @@ by `tools/purchasing` › `the purchasing catalogue`:
 **`query_shop_data` reads purchasing column by column** ([ai-insights.md](ai-insights.md#adding-a-table-to-ai-scope)):
 headers through `apply_ai_read_access`, children through hand-written policies that inherit the
 parent's `deleted_at`. **Withheld:** actor columns, internal notes, contact and address snapshots,
-terms and conditions, notes and void reasons. The views and the late and amount functions are
+notes and void reasons. The views and the late and amount functions are
 readable, and `SELECT *` works on every view. **Exempt:** the revisions (a superseded price would read
 as current), the numbering series (plumbing, twin of `company_order_counters`) and the `quickbooks_*`
 purchasing tables (third-party ids, also in `SENSITIVE_TABLES`). Fixed on the way: the AI could not
@@ -732,7 +736,7 @@ header's, the feedback dialog's, each MCP `url` — come from one table,
 
 | Surface | What is non-obvious |
 |---|---|
-| Hub `/purchasing?view=orders\|receipts\|to-buy\|rfqs` | A tab switch is `router.replace` and drops the last tab's filters; an unknown `view` opens Orders. Purchasing settings ([`PurchasingSettingsDialog`](../../components/purchasing/PurchasingSettingsDialog.tsx)) open from a labelled button, for any office user: *"Next: PO-1043 · 7 of 11 characters"*, an empty prefix allowed, over 11 characters refused before any request, the RFQ terms saved on their own series |
+| Hub `/purchasing?view=orders\|receipts\|to-buy\|rfqs` | A tab switch is `router.replace` and drops the last tab's filters; an unknown `view` opens Orders. There is no settings button: POs and RFQs number themselves |
 | Orders ([`VendorPoList`](../../components/purchasing/VendorPoList.tsx)) | Default Draft + Sent + Partly received, due soonest first, the status choice remembered per company — a status in the URL wins. Every filter lives in the URL, written with `router.replace`: status, vendor, a job chip, overdue only, **QuickBooks state** (the bookkeeper's worklist), search over `search_text`. Sorted on the server by real view columns only, so every derived column is `sortable: false`; *Overdue* amber, in words; CSV export. A failed load offers Retry and never reads as "no purchase orders"; empty, no-match and capped each say their own sentence |
 | Receipts ([`VendorPoReceiptsList`](../../components/purchasing/VendorPoReceiptsList.tsx)) | For month-end: a date range read from local midnight to before the day after, vendor, PO, packing slip — all in the URL; each receipt in the unit it was typed in; a void marked in words |
 | `/purchasing/orders/new` ([`VendorPoForm`](../../components/purchasing/VendorPoForm.tsx)) | Opens bare or **prefilled by ids** ([`newVendorPoPath`](../../lib/purchasingRoutes.ts)) from the operation card's *Create PO*, the job page's *Buy it*, the vendor page and an approved-vendor row. Vendor defaults — sales contact, default address, standing terms — fill only fields not yet touched; ship-to Our shop / Another vendor / A customer; [`PaymentTermsPicker`](../../components/common/PaymentTermsPicker.tsx) in its **lazy mode** — QuickBooks terms load when it opens, never on mount; *+ Part · + Outside service · + Other*, a part line taking its unit, price and vendor P/N from the sheet and naming the source; the approved-vendor caption or block; the leak prompt; Save off while `MissingFieldsNotice` says why; `beforeunload` armed only while something is unsaved |
@@ -752,7 +756,7 @@ header's, the feedback dialog's, each MCP `url` — come from one table,
 | Copy | *Customer PO* on the jobs list (*New Job from Customer PO*), the accept modal (*Accept customer PO*) and the operator traveler (*Customer PO #*); the reorder-point help becomes *"Puts this part on To buy when stock plus orders reach it."* |
 
 Telemetry: the `vendor po …`, `vendor rfq …`, `part vendor …`, `part cost sourced`, `buy list loaded`,
-`purchasing settings saved` and `quickbooks purchase item chosen` rows of the
+and `quickbooks purchase item chosen` rows of the
 [registry](../telemetry.md#the-registry), each with its stated reason. Deliberately not counted, with
 the reasons there: RFQ edit, close, reopen, archive and decline, the preferred star, and an outside
 line's *Unlink* / *Link a slip…*.
@@ -772,10 +776,10 @@ journeys in eight specs, each walking its journey and reloading to prove it pers
 [`purchasing-buy-list`](../../e2e/purchasing-buy-list.spec.ts) (4) ·
 [`purchasing-vendors-sourcing`](../../e2e/purchasing-vendors-sourcing.spec.ts) (6) ·
 [`purchasing-rfq`](../../e2e/purchasing-rfq.spec.ts) (6) ·
-[`purchasing-settings`](../../e2e/purchasing-settings.spec.ts) (1) ·
+[`purchasing-first-po`](../../e2e/purchasing-first-po.spec.ts) (1) ·
 [`purchasing-quickbooks`](../../e2e/purchasing-quickbooks.spec.ts) (6, against `QUICKBOOKS_FAKE`); P10
-rests on them alone. The whole E2E suite, these included, passed 107/107 on a fresh database with one
-worker, as CI runs it. Two pieces are **automation-pending
+rests on them alone. They run in the whole E2E suite, on a fresh database with one worker, as CI
+runs it. Two pieces are **automation-pending
 ([#367](https://github.com/debola31/Jigged/issues/367))**, each with its reason in its row: the cert
 upload on the receive path (R6) and choosing the QuickBooks item through Settings (QB7).
 
@@ -788,20 +792,20 @@ docs check.
 | QuickBooks routes — integration, the provider boundary monkeypatched | [`test_quickbooks_vendor_po_routes`](../../api/tests/integration/test_quickbooks_vendor_po_routes.py) · [`test_quickbooks_purchasing_setup`](../../api/tests/integration/test_quickbooks_purchasing_setup.py) |
 | QuickBooks builders and services — unit | [`test_vendor_po_payload`](../../api/tests/unit/test_vendor_po_payload.py) · [`test_vendor_po_projection`](../../api/tests/unit/test_vendor_po_projection.py) · [`test_vendor_po_errors`](../../api/tests/unit/test_vendor_po_errors.py) · [`test_vendor_po_probe`](../../api/tests/unit/test_vendor_po_probe.py) · [`test_quickbooks_purchasing_service`](../../api/tests/unit/test_quickbooks_purchasing_service.py) |
 | Existing suites, extended | [`test_demo_lifecycle`](../../api/tests/integration/test_demo_lifecycle.py) · [`test_ai_read_access`](../../api/tests/integration/test_ai_read_access.py) · [`test_accounting_provider`](../../api/tests/unit/test_accounting_provider.py); unchanged, and cited because purchasing now runs through them: [`test_insights_conversation`](../../api/tests/unit/test_insights_conversation.py) · [`test_chat_actions`](../../api/tests/unit/test_chat_actions.py) |
-| Pure rules — Vitest | [`amount`](../../__tests__/lib/purchasing/amount.test.ts) · [`buyList`](../../__tests__/lib/purchasing/buyList.test.ts) · [`late`](../../__tests__/lib/purchasing/late.test.ts) · [`numbering`](../../__tests__/lib/purchasing/numbering.test.ts) · [`poReceipt`](../../__tests__/lib/purchasing/poReceipt.test.ts) · [`priceDefault`](../../__tests__/lib/purchasing/priceDefault.test.ts) · [`purchaseUnits`](../../__tests__/lib/purchasing/purchaseUnits.test.ts) · [`rfqCompare`](../../__tests__/lib/purchasing/rfqCompare.test.ts) · [`sourcing`](../../__tests__/lib/purchasing/sourcing.test.ts) · [`vendorPoStatus`](../../__tests__/lib/purchasing/vendorPoStatus.test.ts) · [`vendorPoVisibleFields`](../../__tests__/lib/purchasing/vendorPoVisibleFields.test.ts) · [`money`](../../__tests__/lib/money.test.ts) · [`purchasingRoutes`](../../__tests__/lib/purchasingRoutes.test.ts) · [`unitPresets`](../../__tests__/lib/unitPresets.test.ts); extended [`materialRequirements`](../../__tests__/lib/materialRequirements.test.ts) |
-| Access layer — Vitest | [`vendorPoAccess`](../../__tests__/utils/vendorPoAccess.test.ts) · [`partVendorsAccess`](../../__tests__/utils/partVendorsAccess.test.ts) · [`vendorRfqAccess`](../../__tests__/utils/vendorRfqAccess.test.ts) · [`buyListAccess`](../../__tests__/utils/buyListAccess.test.ts) · [`purchasingSettingsAccess`](../../__tests__/utils/purchasingSettingsAccess.test.ts) · [`purchasingShared`](../../__tests__/utils/purchasingShared.test.ts); extended [`materialCheckAccess`](../../__tests__/utils/materialCheckAccess.test.ts) · [`outsideShipmentsAccess`](../../__tests__/utils/outsideShipmentsAccess.test.ts) · [`dashboardAccess`](../../__tests__/utils/dashboardAccess.test.ts) · [`quickbooksAccess`](../../__tests__/utils/quickbooksAccess.test.ts) |
+| Pure rules — Vitest | [`amount`](../../__tests__/lib/purchasing/amount.test.ts) · [`buyList`](../../__tests__/lib/purchasing/buyList.test.ts) · [`late`](../../__tests__/lib/purchasing/late.test.ts) · [`poReceipt`](../../__tests__/lib/purchasing/poReceipt.test.ts) · [`priceDefault`](../../__tests__/lib/purchasing/priceDefault.test.ts) · [`purchaseUnits`](../../__tests__/lib/purchasing/purchaseUnits.test.ts) · [`rfqCompare`](../../__tests__/lib/purchasing/rfqCompare.test.ts) · [`sourcing`](../../__tests__/lib/purchasing/sourcing.test.ts) · [`vendorPoStatus`](../../__tests__/lib/purchasing/vendorPoStatus.test.ts) · [`vendorPoVisibleFields`](../../__tests__/lib/purchasing/vendorPoVisibleFields.test.ts) · [`money`](../../__tests__/lib/money.test.ts) · [`purchasingRoutes`](../../__tests__/lib/purchasingRoutes.test.ts) · [`unitPresets`](../../__tests__/lib/unitPresets.test.ts); extended [`materialRequirements`](../../__tests__/lib/materialRequirements.test.ts) |
+| Access layer — Vitest | [`vendorPoAccess`](../../__tests__/utils/vendorPoAccess.test.ts) · [`partVendorsAccess`](../../__tests__/utils/partVendorsAccess.test.ts) · [`vendorRfqAccess`](../../__tests__/utils/vendorRfqAccess.test.ts) · [`buyListAccess`](../../__tests__/utils/buyListAccess.test.ts) · [`purchasingShared`](../../__tests__/utils/purchasingShared.test.ts); extended [`materialCheckAccess`](../../__tests__/utils/materialCheckAccess.test.ts) · [`outsideShipmentsAccess`](../../__tests__/utils/outsideShipmentsAccess.test.ts) · [`dashboardAccess`](../../__tests__/utils/dashboardAccess.test.ts) · [`quickbooksAccess`](../../__tests__/utils/quickbooksAccess.test.ts) |
 | PDFs — Vitest, jsPDF mocked | [`vendorPoPdf`](../../__tests__/utils/vendorPoPdf.test.ts) · [`rfqPdf`](../../__tests__/utils/rfqPdf.test.ts); extended [`outsideShipmentPdf`](../../__tests__/utils/outsideShipmentPdf.test.ts) |
-| Purchasing screens — Vitest | [`PurchasingHubPage`](../../__tests__/app/dashboard/purchasing/PurchasingHubPage.test.tsx) · [`NewVendorPoPage`](../../__tests__/app/dashboard/purchasing/NewVendorPoPage.test.tsx) · [`VendorPoDetailPage`](../../__tests__/app/dashboard/purchasing/VendorPoDetailPage.test.tsx) · [`VendorPoList`](../../__tests__/components/purchasing/VendorPoList.test.tsx) · [`VendorPoForm`](../../__tests__/components/purchasing/VendorPoForm.test.tsx) · [`PurchaseUnitField`](../../__tests__/components/purchasing/PurchaseUnitField.test.tsx) · [`VendorPoPreviewDialog`](../../__tests__/components/purchasing/VendorPoPreviewDialog.test.tsx) · [`CloseVendorPoLinesDialog`](../../__tests__/components/purchasing/CloseVendorPoLinesDialog.test.tsx) · [`OutsideLineSlips`](../../__tests__/components/purchasing/OutsideLineSlips.test.tsx) · [`ReceiveVendorPoDialog`](../../__tests__/components/purchasing/ReceiveVendorPoDialog.test.tsx) · [`VendorPoReceiptsList`](../../__tests__/components/purchasing/VendorPoReceiptsList.test.tsx) · [`PurchasingSettingsDialog`](../../__tests__/components/purchasing/PurchasingSettingsDialog.test.tsx) · [`BuyList`](../../__tests__/components/purchasing/BuyList.test.tsx) · [`RfqList`](../../__tests__/components/purchasing/RfqList.test.tsx) · [`RfqForm`](../../__tests__/components/purchasing/RfqForm.test.tsx) · [`RfqDetail`](../../__tests__/components/purchasing/RfqDetail.test.tsx) · [`RfqVendorsCard`](../../__tests__/components/purchasing/RfqVendorsCard.test.tsx) · [`RfqResponseEditor`](../../__tests__/components/purchasing/RfqResponseEditor.test.tsx) · [`RfqCompareMatrix`](../../__tests__/components/purchasing/RfqCompareMatrix.test.tsx) · [`RfqPreviewDialog`](../../__tests__/components/purchasing/RfqPreviewDialog.test.tsx) · [`SendVendorPoToQuickBooksDialog`](../../__tests__/components/purchasing/SendVendorPoToQuickBooksDialog.test.tsx) |
+| Purchasing screens — Vitest | [`PurchasingHubPage`](../../__tests__/app/dashboard/purchasing/PurchasingHubPage.test.tsx) · [`NewVendorPoPage`](../../__tests__/app/dashboard/purchasing/NewVendorPoPage.test.tsx) · [`VendorPoDetailPage`](../../__tests__/app/dashboard/purchasing/VendorPoDetailPage.test.tsx) · [`VendorPoList`](../../__tests__/components/purchasing/VendorPoList.test.tsx) · [`VendorPoForm`](../../__tests__/components/purchasing/VendorPoForm.test.tsx) · [`PurchaseUnitField`](../../__tests__/components/purchasing/PurchaseUnitField.test.tsx) · [`VendorPoPreviewDialog`](../../__tests__/components/purchasing/VendorPoPreviewDialog.test.tsx) · [`CloseVendorPoLinesDialog`](../../__tests__/components/purchasing/CloseVendorPoLinesDialog.test.tsx) · [`OutsideLineSlips`](../../__tests__/components/purchasing/OutsideLineSlips.test.tsx) · [`ReceiveVendorPoDialog`](../../__tests__/components/purchasing/ReceiveVendorPoDialog.test.tsx) · [`VendorPoReceiptsList`](../../__tests__/components/purchasing/VendorPoReceiptsList.test.tsx) · [`BuyList`](../../__tests__/components/purchasing/BuyList.test.tsx) · [`RfqList`](../../__tests__/components/purchasing/RfqList.test.tsx) · [`RfqForm`](../../__tests__/components/purchasing/RfqForm.test.tsx) · [`RfqDetail`](../../__tests__/components/purchasing/RfqDetail.test.tsx) · [`RfqVendorsCard`](../../__tests__/components/purchasing/RfqVendorsCard.test.tsx) · [`RfqResponseEditor`](../../__tests__/components/purchasing/RfqResponseEditor.test.tsx) · [`RfqCompareMatrix`](../../__tests__/components/purchasing/RfqCompareMatrix.test.tsx) · [`RfqPreviewDialog`](../../__tests__/components/purchasing/RfqPreviewDialog.test.tsx) · [`SendVendorPoToQuickBooksDialog`](../../__tests__/components/purchasing/SendVendorPoToQuickBooksDialog.test.tsx) |
 | Screens elsewhere — Vitest | **Job:** [`JobDetailPage`](../../__tests__/app/dashboard/jobs/JobDetailPage.test.tsx) · [`JobPartBuyingLine`](../../__tests__/components/jobs/JobPartBuyingLine.test.tsx) · [`OperationsPanel`](../../__tests__/components/jobs/OperationsPanel.test.tsx) · [`OutsideWorkDrawer`](../../__tests__/components/jobs/OutsideWorkDrawer.test.tsx) · [`SendToVendorDialog`](../../__tests__/components/jobs/SendToVendorDialog.test.tsx); extended [`JobPartMaterialsCard`](../../__tests__/components/jobs/JobPartMaterialsCard.test.tsx) · [`OperationCard`](../../__tests__/components/jobs/OperationCard.test.tsx) · [`ReceiveFromVendorDialog`](../../__tests__/components/jobs/ReceiveFromVendorDialog.test.tsx) · [`AcceptPurchaseOrderModal`](../../__tests__/components/jobs/AcceptPurchaseOrderModal.test.tsx). **Part:** [`BuyingTab`](../../__tests__/components/parts/workspace/tabs/BuyingTab.test.tsx) · [`UseAsPartCostDialog`](../../__tests__/components/parts/UseAsPartCostDialog.test.tsx); extended [`PartWorkspaceExitGuard`](../../__tests__/components/parts/workspace/PartWorkspaceExitGuard.test.tsx) · [`PartIdentitySection`](../../__tests__/components/parts/PartIdentitySection.test.tsx). **Vendor:** [`VendorTermsCard`](../../__tests__/components/vendors/VendorTermsCard.test.tsx) · [`VendorPurchaseOrdersCard`](../../__tests__/components/vendors/VendorPurchaseOrdersCard.test.tsx) · [`VendorRfqsCard`](../../__tests__/components/vendors/VendorRfqsCard.test.tsx). **Storage:** [`CertAfterBatchPanel`](../../__tests__/components/inventory/CertAfterBatchPanel.test.tsx); extended [`PartPlacesDrawer`](../../__tests__/components/inventory/locations/place/PartPlacesDrawer.test.tsx). **Settings:** [`QuickBooksPurchasingPanel`](../../__tests__/components/settings/quickbooks/QuickBooksPurchasingPanel.test.tsx) · [`PaymentTermsPicker`](../../__tests__/components/common/PaymentTermsPicker.test.tsx) (its lazy mode); extended [`QuickBooksIntegrationCard`](../../__tests__/components/settings/QuickBooksIntegrationCard.test.tsx) · [`QuickBooksDesktopPanel`](../../__tests__/components/settings/quickbooks/QuickBooksDesktopPanel.test.tsx). **Shell:** [`ActivityPage`](../../__tests__/app/dashboard/ActivityPage.test.tsx); extended [`Sidebar`](../../__tests__/components/layout/Sidebar.test.tsx) · [`Header`](../../__tests__/components/layout/Header.test.tsx) |
 | MCP — Vitest | [`tools/purchasing`](../../__tests__/lib/mcp/tools/purchasing.test.ts) · [`tools/purchasingWrites`](../../__tests__/lib/mcp/tools/purchasingWrites.test.ts) · [`tools/purchasingQuickBooks`](../../__tests__/lib/mcp/tools/purchasingQuickBooks.test.ts) · [`tools/purchasingSourcing`](../../__tests__/lib/mcp/tools/purchasingSourcing.test.ts); extended [`catalogue`](../../__tests__/lib/mcp/catalogue.test.ts) · [`tools/archive`](../../__tests__/lib/mcp/tools/archive.test.ts) · [`tools/inventory`](../../__tests__/lib/mcp/tools/inventory.test.ts) · [`tools/jobs`](../../__tests__/lib/mcp/tools/jobs.test.ts) · [`tools/jobsWrites`](../../__tests__/lib/mcp/tools/jobsWrites.test.ts) · [`tools/parts`](../../__tests__/lib/mcp/tools/parts.test.ts) · [`tools/shipping`](../../__tests__/lib/mcp/tools/shipping.test.ts) · [`tools/shippingWrites`](../../__tests__/lib/mcp/tools/shippingWrites.test.ts) · [`tools/vendors`](../../__tests__/lib/mcp/tools/vendors.test.ts); unchanged, and cited because purchasing now runs through them: [`chatCatalog`](../../__tests__/lib/mcp/chatCatalog.test.ts) · [`company`](../../__tests__/lib/mcp/company.test.ts) |
 | Standards — Vitest | Extended [`documentPreviewActions`](../../__tests__/standards/documentPreviewActions.test.ts) · [`gridSortableColumns`](../../__tests__/standards/gridSortableColumns.test.ts) · [`interactionStandards`](../../__tests__/standards/interactionStandards.test.ts); unchanged, and run over the new code: [`analyticsEvents`](../../__tests__/standards/analyticsEvents.test.ts) · [`docLinkCheck`](../../__tests__/standards/docLinkCheck.test.ts) |
 
 | ID | Criterion | Tests |
 |---|---|---|
-| **N1** | A PO and an RFQ series per company, PO-0001 / RFQ-0001 by default | `test_purchasing_numbering` § N1 (1); `numbering` › `defaults (N1)` (2) |
-| **N2** | Prefix, next number and digits settable by any office user; character set, 6-character prefix, 11-character total and "above the highest issued" validated; live preview | `test_purchasing_numbering` § N2 (7); `numbering` › `formatPurchasingDocumentNumber (N2)`, `the prefix character set (N2)`, `previewPurchasingDocumentNumber — the live preview (N2)`, `validatePurchasingNumbering — refused before the database refuses it (N2)` (16); `purchasingSettingsAccess` (7); `PurchasingSettingsDialog` › `PurchasingSettingsDialog (N2)` (8); `PurchasingHubPage` › `Purchasing hub` (its settings button, for any office user; 1 of 5). E2E: `purchasing-settings` (1) |
+| **N1** | A PO and an RFQ series per company, `PO-0001` / `RFQ-0001` | `test_purchasing_numbering` § N1 (1); [`purchasing-first-po`](../../e2e/purchasing-first-po.spec.ts) (1) |
+| **N2** | The format is fixed, like quotes and jobs: no settings screen, no writer and nothing configurable on the series; four digits grow rather than truncate; past `PO-99999999` (QuickBooks Desktop's 11 characters) a create refuses in a sentence | `test_purchasing_numbering` § N2 (3); `PurchasingHubPage` › `has no purchasing settings to open` (1); [`purchasing-first-po`](../../e2e/purchasing-first-po.spec.ts) (1) |
 | **N3** | Concurrency-safe; never reissued, archived included; a rollback consumes nothing | `test_purchasing_numbering` § N3 (5) |
-| **P1** | Company from the vendor; archived vendor refused; parties, ship-to and T&Cs frozen | `test_vendor_purchase_orders` § P1 (8) |
+| **P1** | Company from the vendor; archived vendor refused; parties and ship-to frozen | `test_vendor_purchase_orders` § P1 (8) |
 | **P2** | Line-kind rules in the RPC and the CHECKs; Do not use refused; archived references refused | `test_vendor_purchase_orders` § P2 / L4 (6) |
 | **P3** | Revision: never on a draft; snapshot at mark-sent; once per send cycle; never for notes, promises or closing; one shared field list | `test_vendor_purchase_orders` § P3 (10); `vendorPoVisibleFields` (19); `VendorPoForm` › `VendorPoForm — editing` (its *Save as Rev 1* prediction; 1 of 7); `VendorPoDetailPage` › `VendorPoDetailPage — the internal fields save themselves, never as a revision` (2). E2E: `purchasing-po` (2 of 7) |
 | **P4** | Edit guards, the vendor lock, read-only closed/archived POs, the staleness check only on vendor-visible fields | `test_vendor_purchase_orders` § P4 (9); `vendorPoAccess` › `updateVendorPo`, `the auto-saved internal fields never take the vendor-visible path` (6); `VendorPoForm` › `VendorPoForm — editing` (7, one of them P3's). E2E: `purchasing-po` (1 of 7) |
@@ -869,7 +873,7 @@ docs check.
 | **D1–D3** | Registry rows for every capture, both directions; this doc and `docLinkCheck`; every machine standards check | `analyticsEvents` › `analyticsEventsCheck — the live tree` (2); `docLinkCheck` › `docLinkCheck — docs are clean` (3); `documentPreviewActions` › `a document preview offers the same actions wherever it is opened` (1, looped over four previews — the PO's and the RFQ's must be handed `onMarkedSent`); `gridSortableColumns` › `server-sorted grids never offer a sort that cannot reach the database` (3, `VendorPoList` now among its pages); `interactionStandards` › `silent busy buttons (§5)` (its purchasing-paths test; 1 of 6); CI: `schemaEmbedCheck` and the `gen:db-types` diff |
 
 **Manual, by design:** the PDF render checks (a 40-line PO onto page 2, a 60-character legal vendor
-name, a vendor with no address, 1,500 characters of terms, Rev 3 + CLOSED, TBC lines, with and
+name, a vendor with no address, a long note to the vendor, Rev 3 + CLOSED, TBC lines, with and
 without a logo) and M-1 / M-2 above. A mocked jsPDF cannot see overflow — the lesson of
 [outside-processing.md](outside-processing.md#the-document). The render checks ran on 2026-11-12
 against the real jsPDF, along with an RFQ of 30 lines and a slip carrying its PO number, and all

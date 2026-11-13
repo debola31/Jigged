@@ -19,6 +19,7 @@ Run (after `supabase db reset`):
 """
 from __future__ import annotations
 
+import re
 from decimal import Decimal
 
 import pytest
@@ -97,9 +98,10 @@ def test_every_seeded_po_holds_the_hash_its_content_version_counts(db, seeded):
 
 
 def test_the_seeds_po_numbers_fit_quickbooks_desktop(db, seeded):
-    """[S6, N2] Whatever series the seed sets, its numbers are ≤ 11 characters and unique."""
+    """[S6, N1] The seed's POs are numbered the one fixed way, PO-0001 on, so they are unique and
+    fit QuickBooks Desktop's 11 characters."""
     numbers = [r["po_number"] for r in ps.rows(db, "SELECT po_number FROM vendor_purchase_orders WHERE company_id = %s",
                                                  (seeded,))]
     assert numbers, "the seed has no purchase orders"
-    assert all(len(n) <= 11 for n in numbers), numbers
+    assert all(re.fullmatch(r"PO-\d{4}", n) for n in numbers), numbers
     assert len(numbers) == len(set(numbers))

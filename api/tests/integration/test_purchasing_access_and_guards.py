@@ -5,7 +5,7 @@ and nothing else — and SECURITY DEFINER bypasses RLS. So each door has to do, 
 what a policy would otherwise do for it, in this order (§3.3):
 
   1. derive the company from the record (or the vendor), never trust a `p_company_id` except
-     for RFQ create and the settings save;
+     for RFQ create;
   2. `assert_office_member`: not found or not a member is P0001 "That record is not
      available." — the same sentence, so the door cannot probe for a record — and an
      operator is 42501 "This is an office task…";
@@ -86,8 +86,6 @@ def _writer_calls(g: Guarded) -> dict[str, dict]:
         "save_part_vendor": ps.part_vendor_args(s.bar, s.v1, {"purchase_unit": "feet", "lead_time_days": 9}),
         "archive_part_vendor": dict(p_part_vendor_id=w.avl),
         "apply_part_cost_from_vendor": dict(p_part_vendor_id=w.avl, p_today=ps.TODAY, p_expected={}),
-        "save_purchasing_document_settings": dict(p_company_id=s.company, p_kind="vendor_purchase_order",
-                                                  p_changes={"next_number": 500}),
         "create_vendor_rfq": ps.rfq_create_args(s.company, [ps.rfq_adhoc_line("Anodize brackets")], [s.v1]),
         "save_vendor_rfq": dict(p_id=w.rfq, p_changes={"title": "Renamed"},
                                 p_expected_updated_at=ps.rfq_updated_at_text(g.db, w.rfq)),
@@ -111,7 +109,6 @@ ROOTS = {
     "save_part_vendor": ("p_part_id", "p_vendor_id"),
     "archive_part_vendor": ("p_part_vendor_id",),
     "apply_part_cost_from_vendor": ("p_part_vendor_id",),
-    "save_purchasing_document_settings": ("p_company_id",),
     "create_vendor_rfq": ("p_company_id",),
     "save_vendor_rfq": ("p_id",),
     "set_vendor_rfq_state": ("p_id",),
@@ -414,8 +411,6 @@ UNKNOWN_KEYS = {
                                          expected=ps.updated_at_text(g.db, g.world.po.id))),
     "receive-entry": lambda g: ("receive_vendor_purchase_order", ps.receive_args(
         g.world.po.id, [{**ps.entry(g.world.bar_line, 1, location=g.shop.shelf), "bogus_key": 1}])),
-    "settings": lambda g: ("save_purchasing_document_settings",
-                           dict(p_company_id=g.shop.company, p_kind="vendor_purchase_order", p_changes={"bogus_key": 1})),
     "part-vendor": lambda g: ("save_part_vendor",
                               ps.part_vendor_args(g.shop.bar, g.shop.v1, {"purchase_unit": "feet", "bogus_key": 1})),
     "price-break": lambda g: ("save_part_vendor", ps.part_vendor_args(
@@ -539,12 +534,12 @@ AI_WITHHELD = [
     ("vendor_purchase_orders", "created_by"), ("vendor_purchase_orders", "issued_by"),
     ("vendor_purchase_orders", "closed_by"), ("vendor_purchase_orders", "internal_notes"),
     ("vendor_purchase_orders", "vendor_contact"), ("vendor_purchase_orders", "vendor_address"),
-    ("vendor_purchase_orders", "ship_to_address"), ("vendor_purchase_orders", "terms_and_conditions"),
+    ("vendor_purchase_orders", "ship_to_address"),
     ("vendor_purchase_order_lines", "closed_by"),
     ("vendor_purchase_order_receipts", "received_by"), ("vendor_purchase_order_receipts", "voided_by"),
     ("vendor_purchase_order_receipts", "notes"), ("vendor_purchase_order_receipts", "void_reason"),
     ("part_vendors", "created_by"), ("part_vendors", "notes"),
-    ("vendor_rfqs", "created_by"), ("vendor_rfqs", "internal_notes"), ("vendor_rfqs", "terms_and_conditions"),
+    ("vendor_rfqs", "created_by"), ("vendor_rfqs", "internal_notes"),
     ("vendor_rfq_invitations", "sent_by"), ("vendor_rfq_invitations", "declined_by"),
     ("vendor_rfq_invitations", "vendor_contact"),
     ("vendor_rfq_responses", "awarded_by"), ("vendor_rfq_responses", "notes"),

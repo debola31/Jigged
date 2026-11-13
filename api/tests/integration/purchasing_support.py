@@ -102,7 +102,6 @@ WRITER_RPCS = (
     "save_part_vendor",
     "archive_part_vendor",
     "apply_part_cost_from_vendor",
-    "save_purchasing_document_settings",
     "create_vendor_rfq",
     "save_vendor_rfq",
     "set_vendor_rfq_state",
@@ -1132,13 +1131,6 @@ def save_rfq(db, user: str, rfq: str, *, changes: dict | None = None, **kw):
 
 def set_rfq_state(user: str, rfq: str, action: str):
     return call(user, "set_vendor_rfq_state", p_id=rfq, p_action=action)
-
-
-# ── Settings ────────────────────────────────────────────────────────────────────────────────────
-
-
-def save_settings(user: str, company: str, kind: str = "vendor_purchase_order", **changes):
-    return call(user, "save_purchasing_document_settings", p_company_id=company, p_kind=kind, p_changes=changes)
 
 
 # ── QuickBooks rows (only the service role writes these) ──────────────────────────────────────

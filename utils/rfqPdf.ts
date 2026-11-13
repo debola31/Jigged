@@ -18,7 +18,7 @@
  *     vendor, a last price paid — tells the vendor what to beat. There is no price column and nothing
  *     here reads a price.
  *
- * Internal notes never print. Terms and conditions and notes to vendors do.
+ * Internal notes never print. Notes to vendors do.
  *
  * WRAP HAZARD, which a mocked suite cannot see: `splitTextToSize` measures in whatever font the
  * document is CURRENTLY in, so every block sets its font before measuring (the same bug
@@ -299,7 +299,7 @@ export async function generateRfqPdf(ctx: RfqPdfContext): Promise<jsPDF> {
   cursorY = (doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY ?? cursorY;
   cursorY += 22;
 
-  // ---------- Notes to vendors, then terms and conditions ----------
+  // ---------- Notes to vendors ----------
   const footerTop = pageHeight - MARGIN - 30;
   const drawSection = (heading: string, text: string | null | undefined) => {
     const body = text?.trim();
@@ -334,7 +334,6 @@ export async function generateRfqPdf(ctx: RfqPdfContext): Promise<jsPDF> {
     cursorY += 14;
   };
   drawSection('NOTES', rfq.header.notesToVendors);
-  drawSection('TERMS AND CONDITIONS', rfq.header.termsAndConditions);
 
   // ---------- Footer (every page, AFTER the text has paginated) ----------
   const pageCount = doc.getNumberOfPages();

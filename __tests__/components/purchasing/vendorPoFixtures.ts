@@ -55,7 +55,6 @@ export function poHeader(over: Partial<VendorPoHeader> = {}): VendorPoHeader {
     shipVia: 'UPS Ground',
     notesToVendor: 'Deliver to the back dock.',
     internalNotes: 'SECRET-INTERNAL-NOTE',
-    termsAndConditions: 'All material must be certified.',
     revision: 0,
     sentRevision: 0,
     issuedAt: '2026-11-02T15:00:00Z',

@@ -29,7 +29,7 @@
 --     login never breaks a row.
 --
 -- THE AI (query_shop_data) reads the documents column by column: actor columns, internal
--- notes, contact/address snapshots, terms and conditions, notes and reasons are withheld.
+-- notes, contact/address snapshots, notes and reasons are withheld.
 -- Child tables inherit their parent's deleted_at in a hand-written ai_readonly_select
 -- policy. The revisions, the numbering series and the four QuickBooks tables are exempt.
 -- ============================================================================
@@ -102,46 +102,30 @@ COMMENT ON COLUMN public.vendors.default_payment_terms IS
 
 
 -- ============================================================================
--- 2. purchasing_document_series -- PO and RFQ numbering, plus their T&Cs
+-- 2. purchasing_document_series -- the PO and RFQ counters
 -- ============================================================================
 -- Not next_order_number: that is the shared Q-/J- counter, browser-executable and with no
--- membership check. A row per (company, kind), locked FOR UPDATE by the mint, so two
--- creates serialise and a rolled-back create consumes nothing.
+-- membership check, and a quote and its job share a number on purpose -- a PO is a separate
+-- series. A row per (company, kind), locked FOR UPDATE by the mint, so two creates serialise
+-- and a rolled-back create consumes nothing. The format is fixed, as it is for quotes, jobs
+-- and packing slips: there are no numbering settings.
 CREATE TABLE public.purchasing_document_series (
     company_id            uuid NOT NULL REFERENCES public.companies(id) ON DELETE CASCADE,
     document_kind         text NOT NULL,
-    prefix                text NOT NULL,
     next_number           bigint NOT NULL DEFAULT 1,
-    min_digits            smallint NOT NULL DEFAULT 4,
-    terms_and_conditions  text,
     created_at            timestamptz NOT NULL DEFAULT now(),
     updated_at            timestamptz NOT NULL DEFAULT now(),
-    updated_by            uuid REFERENCES auth.users(id) ON DELETE SET NULL,
 
     CONSTRAINT purchasing_document_series_pkey PRIMARY KEY (company_id, document_kind),
     CONSTRAINT purchasing_document_series_kind
         CHECK (document_kind IN ('vendor_purchase_order', 'vendor_rfq')),
-    -- '' is allowed: a shop continuing its QuickBooks sequence "1043" has no prefix.
-    CONSTRAINT purchasing_document_series_prefix_shape
-        CHECK (prefix ~ '^[A-Za-z0-9-]{0,6}$'),
-    CONSTRAINT purchasing_document_series_next_positive CHECK (next_number >= 1),
-    CONSTRAINT purchasing_document_series_digits CHECK (min_digits BETWEEN 1 AND 8),
-    CONSTRAINT purchasing_document_series_terms_length
-        CHECK (terms_and_conditions IS NULL OR char_length(terms_and_conditions) <= 10000),
-    -- QuickBooks Desktop's refNumber holds 11 characters. The mint also refuses a number
-    -- that outgrows its min_digits past 11 (PO-99999999 is the last one under 'PO-').
-    CONSTRAINT purchasing_document_series_po_fits_quickbooks
-        CHECK (document_kind <> 'vendor_purchase_order' OR char_length(prefix) + min_digits <= 11)
+    CONSTRAINT purchasing_document_series_next_positive CHECK (next_number >= 1)
 );
 
 COMMENT ON TABLE public.purchasing_document_series IS
-  'Numbering and printed terms for vendor purchase orders (default PO-0001) and vendor RFQs (fixed RFQ-0001). One row per company and kind, created on first use. next_purchasing_document_number mints under a FOR UPDATE lock, skips a number that already exists and never reissues one; a rolled-back create consumes nothing. Settings are changed only through save_purchasing_document_settings (any office user).';
-COMMENT ON COLUMN public.purchasing_document_series.prefix IS
-  'Letters, digits and dashes, 0-6 characters. Empty is allowed so a shop can continue a QuickBooks sequence such as 1043.';
+  'The counters behind vendor purchase order numbers (PO-0001) and vendor RFQ numbers (RFQ-0001). One row per company and kind, created on first use. next_purchasing_document_number mints under a FOR UPDATE lock, skips a number that already exists and never reissues one; a rolled-back create consumes nothing. The format is fixed, like Q- and J-: there are no numbering settings.';
 COMMENT ON COLUMN public.purchasing_document_series.next_number IS
-  'The number the next document gets, before zero-padding to min_digits. Only ever moves forward: the settings RPC refuses a value at or below the highest number already issued under the prefix.';
-COMMENT ON COLUMN public.purchasing_document_series.terms_and_conditions IS
-  'Printed terms copied onto each new document of this kind at create. Editing them never changes a document already raised.';
+  'The number the next document gets, before zero-padding to four digits. Only ever moves forward.';
 
 CREATE TRIGGER purchasing_document_series_updated_at
     BEFORE UPDATE ON public.purchasing_document_series
@@ -161,7 +145,6 @@ CREATE TABLE public.vendor_rfqs (
     respond_by_on         date,
     notes_to_vendors      text,
     internal_notes        text,
-    terms_and_conditions  text,
     -- Shop ship-to, frozen at create (company_address_block_snapshot).
     ship_to_name          text NOT NULL,
     ship_to_address       jsonb,
@@ -181,8 +164,7 @@ CREATE TABLE public.vendor_rfqs (
         CHECK (title IS NULL OR (title = btrim(title) AND char_length(title) BETWEEN 1 AND 200)),
     CONSTRAINT vendor_rfqs_text_lengths CHECK (
         (notes_to_vendors IS NULL OR char_length(notes_to_vendors) <= 10000)
-        AND (internal_notes IS NULL OR char_length(internal_notes) <= 10000)
-        AND (terms_and_conditions IS NULL OR char_length(terms_and_conditions) <= 10000)),
+        AND (internal_notes IS NULL OR char_length(internal_notes) <= 10000)),
     CONSTRAINT vendor_rfqs_closed_by_needs_closed_at
         CHECK (closed_by IS NULL OR closed_at IS NOT NULL)
 );
@@ -328,7 +310,6 @@ CREATE TABLE public.vendor_purchase_orders (
 
     notes_to_vendor               text,
     internal_notes                text,
-    terms_and_conditions          text,
 
     -- Send state. revision bumps at most once per send cycle (see the RPCs);
     -- sent_revision is the one the vendor last received.
@@ -395,12 +376,11 @@ CREATE TABLE public.vendor_purchase_orders (
         AND (ship_via IS NULL OR char_length(ship_via) <= 100)
         AND (notes_to_vendor IS NULL OR char_length(notes_to_vendor) <= 10000)
         AND (internal_notes IS NULL OR char_length(internal_notes) <= 10000)
-        AND (terms_and_conditions IS NULL OR char_length(terms_and_conditions) <= 10000)
         AND (closed_reason IS NULL OR char_length(closed_reason) <= 1000))
 );
 
 COMMENT ON TABLE public.vendor_purchase_orders IS
-  'A purchase order TO A VENDOR (never the customer''s PO, which is jobs.customer_po_number). Jigged-numbered from purchasing_document_series. The vendor, contact, address, ship-to and terms & conditions are frozen at create; master-record edits never change them. Status is derived (vendor_purchase_order_status view), never stored. Archived with deleted_at, never deleted; a number is never reissued. Written only through the vendor purchase order RPCs.';
+  'A purchase order TO A VENDOR (never the customer''s PO, which is jobs.customer_po_number). Jigged-numbered PO-0001 on from purchasing_document_series. The vendor, contact, address and ship-to are frozen at create; master-record edits never change them. Status is derived (vendor_purchase_order_status view), never stored. Archived with deleted_at, never deleted; a number is never reissued. Written only through the vendor purchase order RPCs.';
 COMMENT ON COLUMN public.vendor_purchase_orders.ordered_on IS
   'The order date as the BROWSER saw it (the caller''s local date, never CURRENT_DATE). Editable while a draft. QuickBooks TxnDate / transactionDate.';
 COMMENT ON COLUMN public.vendor_purchase_orders.revision IS
@@ -1221,7 +1201,7 @@ SELECT public.apply_billing_write_gate('public.quickbooks_purchase_order_line_li
 -- Headers with a direct deleted_at go through the helper, which adds the filter itself.
 -- Children scope through their parent and so inherit the parent's deleted_at in a
 -- hand-written policy (the job_parts precedent). Withheld everywhere: actor columns,
--- internal notes, contact and address snapshots, terms and conditions, notes, reasons.
+-- internal notes, contact and address snapshots, notes, reasons.
 -- The views in migration 2 read only columns granted here, so SELECT * on every one of them
 -- works for the AI role.
 SELECT public.apply_ai_read_access('public.vendor_purchase_orders', ARRAY[

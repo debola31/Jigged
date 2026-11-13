@@ -966,7 +966,6 @@ function headerRow(over: Record<string, unknown> = {}) {
     ship_via: 'UPS',
     notes_to_vendor: null,
     internal_notes: 'chase Friday',
-    terms_and_conditions: 'T&C',
     revision: 1,
     sent_revision: 0,
     issued_at: '2026-11-01T15:00:00+00:00',

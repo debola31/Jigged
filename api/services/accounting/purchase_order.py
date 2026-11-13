@@ -111,8 +111,7 @@ PO_ERROR_SENTENCES: dict[str, str] = {
     ),
     "qbd_po_number_too_long": (
         "QuickBooks Desktop takes PO numbers of up to 11 characters, and {po_number} has "
-        "{length}. Shorten the numbering on the Purchasing page for new POs; this one can't go "
-        "to QuickBooks Desktop."
+        "{length}, so this PO can't go to QuickBooks Desktop."
     ),
     "qb_setup_required": (
         "Finish the QuickBooks purchasing setup first: choose {missing} in Settings → "

@@ -127,7 +127,7 @@ describe('listVendorRfqs — one vendor’s RFQs', () => {
 describe('getVendorRfq', () => {
   function queueDetail() {
     stub.queue('vendor_rfqs', {
-      data: [{ id: 'rfq-1', company_id: 'co-1', rfq_number: 'RFQ-0003', title: null, needed_by_on: null, respond_by_on: null, notes_to_vendors: null, internal_notes: null, terms_and_conditions: null, ship_to_name: 'Our Shop', ship_to_address: null, closed_at: null, closed_reason: null, created_at: 'c', updated_at: '2026-11-09T10:00:00.123456+00:00', deleted_at: '2026-11-09T11:00:00+00:00' }],
+      data: [{ id: 'rfq-1', company_id: 'co-1', rfq_number: 'RFQ-0003', title: null, needed_by_on: null, respond_by_on: null, notes_to_vendors: null, internal_notes: null, ship_to_name: 'Our Shop', ship_to_address: null, closed_at: null, closed_reason: null, created_at: 'c', updated_at: '2026-11-09T10:00:00.123456+00:00', deleted_at: '2026-11-09T11:00:00+00:00' }],
     });
     stub.queue('vendor_rfq_status', { data: [{ status: 'quoted', line_count: 1, awarded_line_count: 0, invited_count: 2, sent_count: 2, declined_count: 1, responded_count: 2 }] });
     stub.queue('vendor_rfq_lines', { data: [{ id: 'ln-1', line_number: 1, part_id: 'part-bar', part_name: 'BAR-6061', description: 'Bar', unit: 'bar', quantities: [10, 50], job_id: null, job_number: null, cert_required: true, notes: null }] });
@@ -217,7 +217,7 @@ describe('saveVendorRfq and the state RPCs', () => {
   it('saves with patch semantics and passes the staleness token through', async () => {
     stub.rpc.mockResolvedValue({ data: { id: 'rfq-1', rfq_number: 'RFQ-0003', status: 'draft', line_ids: ['ln-1'], invitation_ids: ['inv-c'], updated_at: 'u2' }, error: null });
     const result = await saveVendorRfq('rfq-1', {
-      changes: { termsAndConditions: null },
+      changes: { notesToVendors: null },
       lines: [{ id: 'ln-1', quantities: [10, 25] }],
       addVendorIds: ['v-c'],
       removedInvitationIds: ['inv-b'],
@@ -225,7 +225,7 @@ describe('saveVendorRfq and the state RPCs', () => {
     });
     expect(stub.rpc).toHaveBeenCalledWith('save_vendor_rfq', {
       p_id: 'rfq-1',
-      p_changes: { terms_and_conditions: null },
+      p_changes: { notes_to_vendors: null },
       p_lines: [{ id: 'ln-1', quantities: [10, 25] }],
       p_removed_line_ids: [],
       p_add_vendor_ids: ['v-c'],

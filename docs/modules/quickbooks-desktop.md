@@ -237,7 +237,7 @@ providers ([purchasing.md](purchasing.md#quickbooks-push)); what differs on Desk
 | | Desktop | Why |
 |---|---|---|
 | PO number | **Jigged sends its own as `refNumber` — the opposite of invoices**, which QuickBooks numbers | The vendor holds a document with Jigged's number; the QuickBooks PO has to match it. A duplicate is still accepted silently, hence the bookkeeper's [numbering advice](purchasing.md#what-the-bookkeeper-does-differently) |
-| 11 characters | `refNumber`'s limit, so it is the PO number's CHECK and the numbering settings' cap | A longer number could never be sent. The push's `qbd_po_number_too_long` is a defensive second check; the column already holds every number to 11 |
+| 11 characters | `refNumber`'s limit, so it is the PO number's CHECK; numbers are fixed at `PO-0001` on, so `PO-99999999` is the last one minted | A longer number could never be sent. The push's `qbd_po_number_too_long` is a defensive second check; the column already holds every number to 11 |
 | Notes to vendor | `vendorMessage` — **prints**, 99 characters, cut with "…" | The PDF carries the full text |
 | `Jigged PO-1042 Rev 2 · link` | `memo` — **does not print**, 4,095 characters | The **names are the opposite of Online's**, where `Memo` prints and `PrivateNote` does not |
 | Lines | `rate`, never `amount`; quantity and rate in the purchase unit | As for invoices: Conductor ignores `rate` when `amount` is sent |

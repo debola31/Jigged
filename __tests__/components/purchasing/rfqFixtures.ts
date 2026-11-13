@@ -116,7 +116,6 @@ export function rfqDetail(over: {
       respondByOn: '2026-11-20',
       notesToVendors: 'Mill certs, please.',
       internalNotes: 'Push Acme on lead time.',
-      termsAndConditions: null,
       shipToName: 'Contour Tool & Machine',
       shipToAddress: null,
       closedAt: null,

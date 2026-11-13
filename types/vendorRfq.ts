@@ -61,7 +61,6 @@ export interface VendorRfqHeader {
   respondByOn: string | null;
   notesToVendors: string | null;
   internalNotes: string | null;
-  termsAndConditions: string | null;
   /** Our shop, frozen at create. */
   shipToName: string;
   shipToAddress: AddressSnapshot | null;
@@ -151,10 +150,8 @@ export interface VendorRfqHeaderInput {
   internalNotes?: string | null;
 }
 
-/** A save may also change the printed terms (an RFQ copies them from the series at create). */
-export interface VendorRfqChanges extends VendorRfqHeaderInput {
-  termsAndConditions?: string | null;
-}
+/** What a save may change on the header: the same fields a create takes. */
+export type VendorRfqChanges = VendorRfqHeaderInput;
 
 export interface VendorRfqLineInput {
   /** A part, or leave it out and give a `description` (an ad-hoc line, awarded as an Other line). */

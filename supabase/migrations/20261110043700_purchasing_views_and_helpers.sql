@@ -248,16 +248,18 @@ GRANT  EXECUTE ON FUNCTION public.company_address_block_snapshot(uuid) TO servic
 -- Called inside the create RPCs, in their transaction. The row lock is held to commit, so
 -- concurrent creates serialise (the second blocks, then reads the advanced counter: no
 -- 23505), and a rolled-back create consumes nothing. A number that already exists -- an
--- archived PO keeps its number -- is skipped, so a number is never reissued.
+-- archived PO keeps its number, and a row inserted directly (the seed, a fixture) never
+-- moved the counter -- is skipped, so a number is never reissued. The format is fixed:
+-- PO-0001 and RFQ-0001, growing past four digits rather than truncating. PO-99999999 is the
+-- last that fits QuickBooks Desktop's 11 characters; past it the mint refuses in a sentence.
 CREATE OR REPLACE FUNCTION public.next_purchasing_document_number(p_company_id uuid, p_document_kind text)
 RETURNS text
 LANGUAGE plpgsql
 SET search_path TO 'public', 'pg_temp'
 AS $fn$
 DECLARE
-    v_prefix  text;
+    v_prefix  text := CASE p_document_kind WHEN 'vendor_purchase_order' THEN 'PO-' ELSE 'RFQ-' END;
     v_next    bigint;
-    v_digits  integer;
     v_number  text;
     v_guard   integer := 0;
 BEGIN
@@ -265,23 +267,22 @@ BEGIN
         RAISE EXCEPTION 'Unknown purchasing document kind %', p_document_kind USING ERRCODE = 'XX000';
     END IF;
 
-    INSERT INTO public.purchasing_document_series (company_id, document_kind, prefix)
-    VALUES (p_company_id, p_document_kind,
-            CASE p_document_kind WHEN 'vendor_purchase_order' THEN 'PO-' ELSE 'RFQ-' END)
+    INSERT INTO public.purchasing_document_series (company_id, document_kind)
+    VALUES (p_company_id, p_document_kind)
     ON CONFLICT (company_id, document_kind) DO NOTHING;
 
-    SELECT s.prefix, s.next_number, s.min_digits INTO v_prefix, v_next, v_digits
+    SELECT s.next_number INTO v_next
       FROM public.purchasing_document_series s
      WHERE s.company_id = p_company_id AND s.document_kind = p_document_kind
        FOR UPDATE;
 
     LOOP
-        -- greatest(): plain lpad would TRUNCATE a number longer than min_digits.
-        v_number := v_prefix || lpad(v_next::text, greatest(v_digits, length(v_next::text)), '0');
+        -- greatest(): plain lpad would TRUNCATE a number longer than four digits.
+        v_number := v_prefix || lpad(v_next::text, greatest(4, length(v_next::text)), '0');
 
         IF p_document_kind = 'vendor_purchase_order' AND char_length(v_number) > 11 THEN
-            RAISE EXCEPTION 'The next PO number, %, would be longer than 11 characters, which QuickBooks Desktop cannot hold. Change the prefix or the next number in Purchasing settings.',
-                v_number USING ERRCODE = 'P0001';
+            RAISE EXCEPTION 'PO numbers have run past PO-99999999, the longest QuickBooks Desktop can hold.'
+                USING ERRCODE = 'P0001';
         END IF;
 
         EXIT WHEN NOT (
@@ -310,7 +311,7 @@ END
 $fn$;
 
 COMMENT ON FUNCTION public.next_purchasing_document_number(uuid, text) IS
-  'Mint the next vendor PO or RFQ number for a company: prefix || the counter zero-padded to min_digits (never truncated), under a FOR UPDATE lock on the series row held to commit. Skips a number that already exists; never reissues one; a rolled-back create consumes nothing. Refuses a PO number over 11 characters (QuickBooks Desktop). Internal: called only by the create RPCs.';
+  'Mint the next vendor PO or RFQ number for a company: PO- or RFQ- and the counter zero-padded to four digits (never truncated), under a FOR UPDATE lock on the series row held to commit. Skips a number that already exists; never reissues one; a rolled-back create consumes nothing. Refuses a PO number past PO-99999999 (QuickBooks Desktop holds 11 characters). Internal: called only by the create RPCs.';
 
 REVOKE EXECUTE ON FUNCTION public.next_purchasing_document_number(uuid, text) FROM PUBLIC, anon, authenticated;
 GRANT  EXECUTE ON FUNCTION public.next_purchasing_document_number(uuid, text) TO service_role;
@@ -327,8 +328,6 @@ GRANT  EXECUTE ON FUNCTION public.next_purchasing_document_number(uuid, text) TO
 --   header  vendor_id (-> vendor_name), vendor_address_id (-> vendor_address),
 --           vendor_contact_id (-> vendor_contact), ship_to (-> kind, name, address),
 --           ordered_on, need_by_on, payment_terms, ship_via, notes_to_vendor.
---           terms_and_conditions prints too, but it is the copy taken from the series at
---           create and no save key changes it.
 --   lines   adding or removing a line, part_id (-> part_name), description,
 --           vendor_part_number, quantity, unit, unit_price, need_by_on, cert_required,
 --           job_id and job_part_id (-> job_number: a job part carries its job),
@@ -357,7 +356,6 @@ AS $fn$
            'payment_terms',        h.payment_terms,
            'ship_via',             h.ship_via,
            'notes_to_vendor',      h.notes_to_vendor,
-           'terms_and_conditions', h.terms_and_conditions,
            'lines', COALESCE((
              SELECT jsonb_agg(jsonb_build_object(
                       'line_number',        l.line_number,

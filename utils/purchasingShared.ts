@@ -1,6 +1,6 @@
 /**
  * Plumbing shared by the purchasing access layer — `vendorPoAccess`, `partVendorsAccess`,
- * `vendorRfqAccess`, `buyListAccess` and `purchasingSettingsAccess` (plan §3.14).
+ * `vendorRfqAccess` and `buyListAccess` (plan §3.14).
  *
  * WHY RPC FAILURES ARE REPORTED BY HAND. `.rpc()` is deliberately outside the Sentry Supabase
  * integration (lib/supabase.ts), exactly as `utils/outsideShipmentsAccess.ts` explains, so every

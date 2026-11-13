@@ -15,7 +15,7 @@
  *   3. A divider, then the two party blocks — VENDOR and SHIP TO — from the PO's FROZEN copies. A PO
  *      is a document: editing the vendor's address book later must not reprint it differently.
  *   4. The lines from ONE declarative column spec, so a header can never drift from its cells.
- *   5. The total, then the notes to the vendor and the terms & conditions — the body font is set
+ *   5. The total, then the notes to the vendor — the body font is set
  *      BEFORE `splitTextToSize`, which measures against the CURRENT font (the bug quotePdf.ts and
  *      outsideShipmentPdf.ts both document, and a mocked suite cannot see).
  *   6. The footer on every page, AFTER the content has paginated.
@@ -271,7 +271,7 @@ export async function generateVendorPoPdf(ctx: VendorPoPdfContext): Promise<jsPD
   }
   cursorY += 14;
 
-  // ---------- Notes to the vendor, then the terms ----------
+  // ---------- Notes to the vendor ----------
   const drawSection = (heading: string, text: string | null) => {
     const body = text?.trim();
     if (!body) return;
@@ -305,7 +305,6 @@ export async function generateVendorPoPdf(ctx: VendorPoPdfContext): Promise<jsPD
     cursorY += 16;
   };
   drawSection('NOTES', header.notesToVendor);
-  drawSection('TERMS AND CONDITIONS', header.termsAndConditions);
 
   // ---------- Footer (every page), AFTER everything has paginated ----------
   const pageCount = doc.getNumberOfPages();

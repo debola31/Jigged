@@ -21,11 +21,6 @@ vi.mock('@/components/purchasing/BuyList', () => ({
 vi.mock('@/components/purchasing/RfqList', () => ({
   RfqList: ({ companyId }: { companyId: string }) => <div data-testid="rfqs-tab">rfqs {companyId}</div>,
 }));
-vi.mock('@/components/purchasing/PurchasingSettingsDialog', () => ({
-  default: ({ open, companyId }: { open: boolean; companyId: string }) =>
-    open ? <div role="dialog" aria-label="Purchasing settings">settings {companyId}</div> : null,
-}));
-
 import PurchasingHubPage from '@/app/dashboard/[companyId]/purchasing/page';
 
 describe('Purchasing hub', () => {
@@ -70,12 +65,9 @@ describe('Purchasing hub', () => {
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 
-  it('opens the purchasing settings from a labelled button, for any office user', async () => {
-    const user = userEvent.setup();
+  /** POs and RFQs number themselves, like quotes and jobs: the hub offers no settings. */
+  it('has no purchasing settings to open', () => {
     render(<PurchasingHubPage />);
-
-    expect(screen.queryByRole('dialog', { name: /purchasing settings/i })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: /purchasing settings/i }));
-    expect(screen.getByRole('dialog', { name: /purchasing settings/i })).toHaveTextContent('test-company-id');
+    expect(screen.queryByRole('button', { name: /settings/i })).not.toBeInTheDocument();
   });
 });

@@ -3387,34 +3387,22 @@ export type Database = {
           company_id: string
           created_at: string
           document_kind: string
-          min_digits: number
           next_number: number
-          prefix: string
-          terms_and_conditions: string | null
           updated_at: string
-          updated_by: string | null
         }
         Insert: {
           company_id: string
           created_at?: string
           document_kind: string
-          min_digits?: number
           next_number?: number
-          prefix: string
-          terms_and_conditions?: string | null
           updated_at?: string
-          updated_by?: string | null
         }
         Update: {
           company_id?: string
           created_at?: string
           document_kind?: string
-          min_digits?: number
           next_number?: number
-          prefix?: string
-          terms_and_conditions?: string | null
           updated_at?: string
-          updated_by?: string | null
         }
         Relationships: [
           {
@@ -5406,7 +5394,6 @@ export type Database = {
           ship_to_vendor_address_id: string | null
           ship_to_vendor_id: string | null
           ship_via: string | null
-          terms_and_conditions: string | null
           updated_at: string
           vendor_address: Json | null
           vendor_address_id: string | null
@@ -5447,7 +5434,6 @@ export type Database = {
           ship_to_vendor_address_id?: string | null
           ship_to_vendor_id?: string | null
           ship_via?: string | null
-          terms_and_conditions?: string | null
           updated_at?: string
           vendor_address?: Json | null
           vendor_address_id?: string | null
@@ -5488,7 +5474,6 @@ export type Database = {
           ship_to_vendor_address_id?: string | null
           ship_to_vendor_id?: string | null
           ship_via?: string | null
-          terms_and_conditions?: string | null
           updated_at?: string
           vendor_address?: Json | null
           vendor_address_id?: string | null
@@ -5884,7 +5869,6 @@ export type Database = {
           rfq_number: string
           ship_to_address: Json | null
           ship_to_name: string
-          terms_and_conditions: string | null
           title: string | null
           updated_at: string
         }
@@ -5904,7 +5888,6 @@ export type Database = {
           rfq_number: string
           ship_to_address?: Json | null
           ship_to_name: string
-          terms_and_conditions?: string | null
           title?: string | null
           updated_at?: string
         }
@@ -5924,7 +5907,6 @@ export type Database = {
           rfq_number?: string
           ship_to_address?: Json | null
           ship_to_name?: string
-          terms_and_conditions?: string | null
           title?: string | null
           updated_at?: string
         }
@@ -7273,10 +7255,6 @@ export type Database = {
           p_price_breaks?: Json
           p_vendor_id: string
         }
-        Returns: Json
-      }
-      save_purchasing_document_settings: {
-        Args: { p_changes?: Json; p_company_id: string; p_kind: string }
         Returns: Json
       }
       save_vendor_purchase_order: {

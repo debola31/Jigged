@@ -178,7 +178,7 @@ export async function getVendorRfq(rfqId: string, options: { today: string }): P
   const headerRes = await supabase
     .from('vendor_rfqs')
     .select(
-      'id, company_id, rfq_number, title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes, terms_and_conditions, ship_to_name, ship_to_address, closed_at, closed_reason, created_at, updated_at, deleted_at',
+      'id, company_id, rfq_number, title, needed_by_on, respond_by_on, notes_to_vendors, internal_notes, ship_to_name, ship_to_address, closed_at, closed_reason, created_at, updated_at, deleted_at',
     )
     .eq('id', rfqId)
     .maybeSingle();
@@ -268,7 +268,6 @@ export async function getVendorRfq(rfqId: string, options: { today: string }): P
       respondByOn: h.respond_by_on,
       notesToVendors: h.notes_to_vendors,
       internalNotes: h.internal_notes,
-      termsAndConditions: h.terms_and_conditions,
       shipToName: h.ship_to_name,
       shipToAddress: parseAddressSnapshot(h.ship_to_address, `${h.rfq_number}'s ship-to address`),
       closedAt: h.closed_at,
@@ -342,7 +341,6 @@ function changesJson(changes: VendorRfqChanges | undefined): JsonObject {
   if (changes.respondByOn !== undefined) out.respond_by_on = changes.respondByOn;
   if (changes.notesToVendors !== undefined) out.notes_to_vendors = changes.notesToVendors;
   if (changes.internalNotes !== undefined) out.internal_notes = changes.internalNotes;
-  if (changes.termsAndConditions !== undefined) out.terms_and_conditions = changes.termsAndConditions;
   return out;
 }
 

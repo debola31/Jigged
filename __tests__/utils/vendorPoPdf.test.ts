@@ -254,18 +254,18 @@ describe('generateVendorPoPdf — what never prints', () => {
   });
 });
 
-describe('generateVendorPoPdf — notes, terms and footer', () => {
-  it('prints the notes to the vendor and the terms, setting the body font BEFORE measuring them', async () => {
+describe('generateVendorPoPdf — notes and footer', () => {
+  it('prints the notes to the vendor, setting the body font BEFORE measuring them', async () => {
     await generateVendorPoPdf({ po: poDetail(), company, supabase: null });
     const t = drawn();
     expect(t).toContain('NOTES');
     expect(t).toContain('Deliver to the back dock.');
-    expect(t).toContain('TERMS AND CONDITIONS');
-    expect(t).toContain('All material must be certified.');
+    // No standing terms: anything a vendor must know rides in the notes (founder, 2026-11-12).
+    expect(t).not.toContain('TERMS AND CONDITIONS');
 
-    // The split for the terms must come after a normal 10pt font was set.
+    // The split for the notes must come after a normal 10pt font was set.
     const splitOrder = doc.splitTextToSize.mock.invocationCallOrder[
-      doc.splitTextToSize.mock.calls.findIndex((c) => c[0] === 'All material must be certified.')
+      doc.splitTextToSize.mock.calls.findIndex((c) => c[0] === 'Deliver to the back dock.')
     ];
     const fontSets = doc.setFont.mock.calls
       .map((c, i) => ({ style: c[1], order: doc.setFont.mock.invocationCallOrder[i] }))

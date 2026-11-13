@@ -131,7 +131,7 @@ AS $$
       -- row (only the settings save and RFQ create take p_company_id, and assert it), calls
       -- assert_office_member (P0001 for non-members, 42501 for operators), calls
       -- company_can_write by hand, and scopes every id it is handed to its own document.
-      'save_purchasing_document_settings', 'save_part_vendor', 'archive_part_vendor',
+      'save_part_vendor', 'archive_part_vendor',
       'create_vendor_purchase_order', 'save_vendor_purchase_order',
       'set_vendor_purchase_order_state', 'set_vendor_purchase_order_line_state',
       'receive_vendor_purchase_order', 'void_vendor_purchase_order_receipt',
@@ -316,7 +316,7 @@ BEGIN
     -- The browser's write doors: DEFINER, authenticated yes, anon no, the role check and the
     -- billing literal in their own bodies.
     FOREACH v_name IN ARRAY ARRAY[
-        'save_purchasing_document_settings', 'save_part_vendor', 'archive_part_vendor',
+        'save_part_vendor', 'archive_part_vendor',
         'create_vendor_purchase_order', 'save_vendor_purchase_order',
         'set_vendor_purchase_order_state', 'set_vendor_purchase_order_line_state',
         'receive_vendor_purchase_order', 'void_vendor_purchase_order_receipt',
@@ -416,7 +416,7 @@ BEGIN
     -- check here would abort this migration in production over drift that has nothing to do
     -- with purchasing (a hand-made backup table with a company_id column is enough).
     v_functions := ARRAY[
-        'save_purchasing_document_settings', 'save_part_vendor', 'archive_part_vendor',
+        'save_part_vendor', 'archive_part_vendor',
         'create_vendor_purchase_order', 'save_vendor_purchase_order',
         'set_vendor_purchase_order_state', 'set_vendor_purchase_order_line_state',
         'receive_vendor_purchase_order', 'void_vendor_purchase_order_receipt',

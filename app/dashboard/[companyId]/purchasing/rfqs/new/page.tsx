@@ -16,7 +16,7 @@ function ids(values: string[]): string[] {
  * A new request for quotation (plan §3.9, §3.13).
  *
  * Prefill takes IDS ONLY — `?part=` (one or more parts to put on lines), `?vendor=` (vendors to ask)
- * and `?from=to-buy` when the buy list's "Ask for prices (RFQ)" sent the person here. The form
+ * and `?from=shortages` when the Shortages list's "Ask for prices (RFQ)" sent the person here. The form
  * resolves every id itself, so a stale or tampered one fails to load rather than seeding a line from
  * URL contents (the rule at quotes/new).
  */
@@ -33,7 +33,7 @@ export default function NewRfqPage() {
         companyId={companyId}
         initialPartIds={ids(search.getAll('part'))}
         initialVendorIds={ids(search.getAll('vendor'))}
-        fromBuyList={search.get('from') === 'to-buy'}
+        fromBuyList={search.get('from') === 'shortages'}
         onSaved={(id) => router.push(vendorRfqPath(companyId, id))}
         onCancel={() => router.push(purchasingHubPath(companyId, 'rfqs'))}
       />

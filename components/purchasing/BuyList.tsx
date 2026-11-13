@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * "To buy" — the hub's buy list (plan §3.10, criterion B3). It ONLY PROPOSES: nothing writes until
+ * "Shortages" — the hub's buy list (plan §3.10, criterion B3). It ONLY PROPOSES: nothing writes until
  * a person presses a group's "Create draft PO" / "Add to draft PO-…", and that is one PO write.
  *
  * The shop-wide half of J4 and the whole of J10. A job card compares ONE job to the whole shop's
@@ -250,7 +250,7 @@ export function BuyList({ companyId }: { companyId: string }) {
   if (error && !snapshot) {
     return (
       <Box sx={{ textAlign: 'center', py: 6 }}>
-        <LoadFailedState error={error} entity="the buy list" onRetry={() => void reload()} />
+        <LoadFailedState error={error} entity="the shortages" onRetry={() => void reload()} />
       </Box>
     );
   }
@@ -309,17 +309,35 @@ export function BuyList({ companyId }: { companyId: string }) {
       )}
 
       {visibleGroups.length === 0 ? (
+        // The list fills itself, so an empty one has to say how anything gets onto it: there is
+        // nothing to add here (founder, 2026-11-12: "there's no way to add anything").
         <Card>
-          <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-            <CheckCircleOutlineIcon color="success" />
+          <CardContent sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
+            <CheckCircleOutlineIcon color="success" sx={{ mt: 0.25 }} />
             <Box>
               <Typography variant="body1" sx={{ fontWeight: 600 }}>
-                {jobFilter ? `Nothing to buy for ${jobNumber}.` : 'Nothing to buy.'}
+                {jobFilter ? `No shortages for ${jobNumber}.` : 'No shortages.'}
               </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Open jobs&apos; materials are covered by stock or orders, and nothing is at its reorder
-                point.
-              </Typography>
+              {jobFilter ? (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Its materials are covered by stock and open orders.
+                </Typography>
+              ) : (
+                <>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    This list fills itself. A part appears here when an open job needs more of it than
+                    you have in stock and on order, or when its stock and orders fall to its reorder
+                    point.
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                    Set a reorder point on the part&apos;s page in{' '}
+                    <MuiLink component={NextLink} href={`/dashboard/${companyId}/parts`}>
+                      Parts
+                    </MuiLink>
+                    .
+                  </Typography>
+                </>
+              )}
             </Box>
           </CardContent>
         </Card>

@@ -77,9 +77,33 @@ def test_the_seed_has_live_price_sheets(db, seeded):
 
 
 def test_the_seed_has_something_on_order(db, seeded):
-    """[S6] On order > 0 for at least one part, so To buy nets it and the Materials card shows it."""
+    """[S6] On order > 0 for at least one part, so Shortages nets it and the Materials card shows it."""
     most = ps.scalar(db, "SELECT max(on_order_quantity) FROM part_on_order WHERE company_id = %s", (seeded,))
     assert most is not None and Decimal(most) > 0
+
+
+def test_the_seed_puts_a_part_on_shortages_each_way(db, seeded):
+    """[S6, B2] The Shortages tab fills itself, so an empty one in the seed reads as a tab nobody can
+    use (founder, 2026-11-12). The seed holds one row of each kind: the motors under their reorder
+    point even with what is on order, and a job wanting more stainless than the shelf and the
+    orders hold."""
+    motors = ps.rows(db, """
+        SELECT p.quantity + COALESCE(o.on_order_quantity, 0) AS supply, p.reorder_point
+          FROM parts p LEFT JOIN part_on_order o ON o.part_id = p.id
+         WHERE p.company_id = %s AND p.part_name = 'BUY-MOTOR-12V'""", (seeded,))[0]
+    assert Decimal(motors["supply"]) <= Decimal(motors["reorder_point"]), motors
+
+    stainless = ps.rows(db, """
+        SELECT p.quantity + COALESCE(o.on_order_quantity, 0) AS supply,
+               (SELECT COALESCE(sum(jp.quantity * b.quantity), 0)
+                  FROM job_parts jp
+                  JOIN jobs j ON j.id = jp.job_id AND j.deleted_at IS NULL
+                  JOIN parts_bom b ON b.parent_part_id = jp.part_id AND b.child_part_id = p.id
+                 WHERE jp.company_id = p.company_id
+                   AND jp.production_status IN ('not_started', 'in_progress')) AS demand
+          FROM parts p LEFT JOIN part_on_order o ON o.part_id = p.id
+         WHERE p.company_id = %s AND p.part_name = 'RAW-SS304-BLANK'""", (seeded,))[0]
+    assert Decimal(stainless["demand"]) > Decimal(stainless["supply"]), stainless
 
 
 def test_every_seeded_po_holds_the_hash_its_content_version_counts(db, seeded):

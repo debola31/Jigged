@@ -1,5 +1,5 @@
 /**
- * The "To buy" list — the pure core (plan §3.10). It only PROPOSES: nothing here writes, and the
+ * The "Shortages" list — the pure core (plan §3.10). It only PROPOSES: nothing here writes, and the
  * access layer (`utils/buyListAccess.ts`) feeds it and turns a group into a draft PO.
  *
  * A hand port of 87df208's `rollUpShortages` (the shop-wide shortage view that was cut for having

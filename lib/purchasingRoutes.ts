@@ -22,7 +22,7 @@ export const PURCHASING_PAGE_TITLES: Record<string, string> = {
 };
 
 /** The hub's tabs (`?view=`); an unknown value falls back to `orders`. */
-export const PURCHASING_VIEWS = ['orders', 'receipts', 'to-buy', 'rfqs'] as const;
+export const PURCHASING_VIEWS = ['orders', 'receipts', 'shortages', 'rfqs'] as const;
 export type PurchasingView = (typeof PURCHASING_VIEWS)[number];
 
 const HUB_TITLE = PURCHASING_PAGE_TITLES[''];

@@ -46,7 +46,7 @@ import { getVendorPo, listVendorPos } from '@/utils/vendorPoAccess';
 import { getVendorRfq, listVendorRfqs } from '@/utils/vendorRfqAccess';
 
 /**
- * Purchasing, read side: purchase orders TO A VENDOR, the To buy list, a part's approved vendors
+ * Purchasing, read side: purchase orders TO A VENDOR, the Shortages list, a part's approved vendors
  * and price sheets, RFQs to vendors, and what "Use as part cost" or a QuickBooks push would do.
  * "PO" alone means the CUSTOMER's PO in Jigged (`customer_po_number` on a job), so every name and
  * description here says vendor (plan §3.1, §3.12).
@@ -56,7 +56,7 @@ import { getVendorRfq, listVendorRfqs } from '@/utils/vendorRfqAccess';
  *
  *   list_vendor_pos                VendorPoList (hub, Orders)     → listVendorPos
  *   get_vendor_po                  the PO page                    → getVendorPo
- *   get_buy_list                   BuyList (hub, To buy)          → getBuyList
+ *   get_buy_list                   BuyList (hub, Shortages)       → getBuyList
  *   get_part_vendors               BuyingTab (part page)          → listPartVendors
  *   list_vendor_rfqs               the hub's RFQs tab             → listVendorRfqs
  *   get_vendor_rfq                 the RFQ page and its compare   → getVendorRfq
@@ -92,7 +92,7 @@ export const vendorPoUrl = (env: CompanyToolEnv, poId: string): string | null =>
   env.link(vendorPoPath(env.company.id, poId));
 export const vendorRfqUrl = (env: CompanyToolEnv, rfqId: string): string | null =>
   env.link(vendorRfqPath(env.company.id, rfqId));
-export const toBuyUrl = (env: CompanyToolEnv): string | null => env.link(purchasingHubPath(env.company.id, 'to-buy'));
+export const toBuyUrl = (env: CompanyToolEnv): string | null => env.link(purchasingHubPath(env.company.id, 'shortages'));
 export const partUrl = (env: CompanyToolEnv, partId: string): string | null => companyLink(env, `/parts/${partId}`);
 export const vendorUrl = (env: CompanyToolEnv, vendorId: string): string | null => companyLink(env, `/vendors/${vendorId}`);
 export const jobUrl = (env: CompanyToolEnv, jobId: string): string | null => companyLink(env, `/jobs/${jobId}`);
@@ -805,7 +805,7 @@ const buyRowOutput = z.object({
       }),
     )
     .describe("The part's usable approved vendors, each priced for this need."),
-  url: urlOutput.describe('The To buy list in Jigged.'),
+  url: urlOutput.describe('The Shortages list in Jigged.'),
 });
 
 function buyRowRecord(row: BuyListPricedRow, group: BuyListPricedGroup, env: CompanyToolEnv): z.infer<typeof buyRowOutput> {
@@ -849,9 +849,9 @@ function buyRowRecord(row: BuyListPricedRow, group: BuyListPricedGroup, env: Com
 
 export const getBuyListTool = defineCompanyTool({
   name: 'get_buy_list',
-  title: 'Get the To buy list',
+  title: 'Get the shortages list',
   description:
-    "Returns what the shop should buy, the Purchasing page's To buy list: each bought part that open " +
+    "Returns what the shop should buy, the Purchasing page's Shortages list: each bought part that open " +
     'jobs need more of than is on hand and on order, or that sits at or below its reorder point, in ' +
     'its stock unit, with the jobs behind it, the vendor it would be bought from, a suggested quantity ' +
     'in whole purchase units and the price a PO line would default to, and any draft PO to that ' +

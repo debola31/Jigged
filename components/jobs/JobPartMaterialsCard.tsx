@@ -72,7 +72,7 @@ const NUM_SX = { fontVariantNumeric: 'tabular-nums' as const };
  * missing from the shelf right now — and steel on a purchase order is not on the shelf. The column
  * shows the SENT POs with their numbers and due dates, and drafts muted and apart ("+144 on
  * draft"): the vendor has not seen a draft, so it is not on order. The buy list is where orders are
- * netted against need, and "See To buy" opens it on this job.
+ * netted against need, and "See shortages" opens the Purchasing page's Shortages on this job.
  *
  * **A failed load is an error with Retry**, never "No materials on this part's BOM" — the empty
  * state is the one thing a failure must not say.
@@ -131,10 +131,10 @@ export default function JobPartMaterialsCard({
           {shortCount > 0 && (
             <MuiLink
               component={NextLink}
-              href={`${purchasingHubPath(companyId, 'to-buy')}&job=${encodeURIComponent(jobId)}`}
+              href={`${purchasingHubPath(companyId, 'shortages')}&job=${encodeURIComponent(jobId)}`}
               variant="body2"
             >
-              See To buy
+              See shortages
             </MuiLink>
           )}
           {oddCount > 0 && (

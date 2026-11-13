@@ -1,5 +1,5 @@
 /**
- * "To buy" — the access layer that feeds `lib/purchasing/buyList.ts` (plan §3.10, criterion B3).
+ * "Shortages" — the access layer that feeds `lib/purchasing/buyList.ts` (plan §3.10, criterion B3).
  *
  * IT ONLY PROPOSES. Nothing here writes: a person reads the list and creates a draft PO through
  * `createVendorPo` (or starts an RFQ for the "No vendor chosen" group).
@@ -402,7 +402,7 @@ export function buildBuyListFromSnapshot(
 }
 
 /**
- * The shop's "To buy" list (the hub's To buy tab, and MCP `get_buy_list`). Reads only.
+ * The shop's "Shortages" list (the hub's Shortages tab, and MCP `get_buy_list`). Reads only.
  * `today` is the caller's local date; `chosenVendors` carries the page's "Buy from" picks.
  */
 export async function getBuyList(

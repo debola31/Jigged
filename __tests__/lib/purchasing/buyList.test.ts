@@ -1,5 +1,5 @@
 /**
- * The "To buy" list (plan §3.10, criteria B2 and B3) — a hand port of 87df208's
+ * The "Shortages" list (plan §3.10, criteria B2 and B3) — a hand port of 87df208's
  * `rollUpShortages`, with the dropped `is_hot` / `is_stocked` columns gone and on order, drafts,
  * bought job parts and reorder points added.
  *

@@ -233,20 +233,20 @@ describe('JobPartMaterialsCard — on order (plan §3.10, criterion B4)', () => 
     expect(within(tr).getByText('20 each')).toBeInTheDocument();
   });
 
-  it('links to To buy for this job when something is short', async () => {
+  it('links to the Shortages for this job when something is short', async () => {
     asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel', shortBy: 5, status: 'short' })]);
     renderCard();
-    expect(await screen.findByRole('link', { name: /see to buy/i })).toHaveAttribute(
+    expect(await screen.findByRole('link', { name: /see shortages/i })).toHaveAttribute(
       'href',
-      '/dashboard/co1/purchasing?view=to-buy&job=job1',
+      '/dashboard/co1/purchasing?view=shortages&job=job1',
     );
   });
 
-  it('offers no To buy link when nothing is short', async () => {
+  it('offers no Shortages link when nothing is short', async () => {
     asMock(getJobPartMaterialCheck).mockResolvedValue([row({ partId: 'steel' })]);
     renderCard();
     await rowFor('STEEL');
-    expect(screen.queryByRole('link', { name: /see to buy/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /see shortages/i })).not.toBeInTheDocument();
   });
 
   /** A failed read must never say "No materials on this part's BOM" — the one thing it must not. */

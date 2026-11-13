@@ -216,12 +216,12 @@ describe('VendorPoList — four states, four sentences', () => {
     expect(await screen.findByText('PO-1042')).toBeInTheDocument();
   });
 
-  it('an empty default view says there are no open POs and offers to make one or see what to buy', async () => {
+  it('an empty default view says there are no open POs and offers to make one or see the shortages', async () => {
     listVendorPos.mockResolvedValue(result([]));
     render(<VendorPoList companyId="test-company-id" />);
     expect(await screen.findByText('No open purchase orders')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /new purchase order/i }).length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /see what to buy/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /see shortages/i })).toBeInTheDocument();
   });
 
   it('a filter with no matches says so, and offers to clear the filters', async () => {

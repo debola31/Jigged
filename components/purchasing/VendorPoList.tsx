@@ -650,8 +650,8 @@ export default function VendorPoList({ companyId }: VendorPoListProps) {
                   <Button variant="contained" startIcon={<AddIcon />} onClick={newPo}>
                     New purchase order
                   </Button>
-                  <Button variant="outlined" onClick={() => router.push(purchasingHubPath(companyId, 'to-buy'))}>
-                    See what to buy
+                  <Button variant="outlined" onClick={() => router.push(purchasingHubPath(companyId, 'shortages'))}>
+                    See shortages
                   </Button>
                 </Box>
               </>

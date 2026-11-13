@@ -389,7 +389,7 @@ describe('get_vendor_po', () => {
 });
 
 describe('get_buy_list', () => {
-  it("reads the To buy list the hub builds, flattened by vendor, with each row's price and the draft it can join", async () => {
+  it("reads the Shortages list the hub builds, flattened by vendor, with each row's price and the draft it can join", async () => {
     kit.fn('getBuyList').mockResolvedValue(buyList());
     const res = await getBuyListTool.run({}, env);
     if (!res.ok) throw new Error(res.message);
@@ -429,7 +429,7 @@ describe('get_buy_list', () => {
             amount: 425,
           },
         ],
-        url: `${ORIGIN}/dashboard/${CO}/purchasing?view=to-buy`,
+        url: `${ORIGIN}/dashboard/${CO}/purchasing?view=shortages`,
       },
     ]);
     expect(res.data).toMatchObject({
@@ -439,7 +439,7 @@ describe('get_buy_list', () => {
       reorder_row_count: 0,
       no_vendor_row_count: 0,
       truncated: false,
-      url: `${ORIGIN}/dashboard/${CO}/purchasing?view=to-buy`,
+      url: `${ORIGIN}/dashboard/${CO}/purchasing?view=shortages`,
     });
     expect(res.data.incomparable).toEqual([
       { part: { part_id: expect.any(String), part_name: 'SHIM-2', url: expect.stringContaining('/parts/') }, stock_unit: 'each', job_numbers: ['J-1042'] },

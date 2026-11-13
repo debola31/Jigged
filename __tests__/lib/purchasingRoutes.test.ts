@@ -87,7 +87,7 @@ describe('purchasingPageTitle (P8)', () => {
 describe('purchasing paths (P8, M1)', () => {
   it('builds the hub, PO and RFQ links every surface and MCP record points at', () => {
     expect(purchasingHubPath('c1')).toBe('/dashboard/c1/purchasing');
-    expect(purchasingHubPath('c1', 'to-buy')).toBe('/dashboard/c1/purchasing?view=to-buy');
+    expect(purchasingHubPath('c1', 'shortages')).toBe('/dashboard/c1/purchasing?view=shortages');
     expect(vendorPoPath('c1', 'po-1')).toBe('/dashboard/c1/purchasing/orders/po-1');
     expect(vendorPoPath('c1', 'new')).toBe('/dashboard/c1/purchasing/orders/new');
     expect(vendorRfqPath('c1', 'rfq-1')).toBe('/dashboard/c1/purchasing/rfqs/rfq-1');

@@ -57,7 +57,7 @@ const menuItems: MenuItem[] = [
   // split above still holds — Parts is the catalogue, Storage is where things live — and the tab
   // names a view within the places area rather than a second list of items.
   { name: 'Storage', path: '/inventory/locations', icon: WarehouseIcon },
-  // ONE row for buying: the purchase orders, the receipts, To buy and the RFQs are tabs of one
+  // ONE row for buying: the purchase orders, the receipts, Shortages and the RFQs are tabs of one
   // hub (`?view=`), not four rows on a sidebar that already has twelve. Not adminOnly — admins and
   // users both buy (plan §2); operators never reach /dashboard. After Storage because buying is
   // how stock gets in.

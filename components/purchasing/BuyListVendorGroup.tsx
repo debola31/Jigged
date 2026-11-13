@@ -255,7 +255,7 @@ function RowLine({
 }
 
 /**
- * One vendor's card on the To buy list (plan §3.10): the parts to buy from them, each with its
+ * One vendor's card on the Shortages list (plan §3.10): the parts to buy from them, each with its
  * suggested quantity (editable, kept through refreshes by the list), its default price and caption,
  * and "Buy from" — and ONE action for the group.
  *
@@ -286,10 +286,10 @@ export default function BuyListVendorGroup({
   ];
   const total = sumDecimal(ticked.map((v) => v.amount).filter((a): a is number => a !== null));
   const anyUnpriced = ticked.some((v) => v.amount === null);
-  // The RFQ form reads `part` (repeated) and `from=to-buy`, which marks the RFQ as started here.
+  // The RFQ form reads `part` (repeated) and `from=shortages`, which marks the RFQ as started here.
   const rfqHref = `${vendorRfqPath(companyId, 'new')}?${[
     ...ticked.map((v) => `part=${encodeURIComponent(v.row.partId)}`),
-    'from=to-buy',
+    'from=shortages',
   ].join('&')}`;
 
   let action: ReactNode;

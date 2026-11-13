@@ -97,7 +97,7 @@ states the requirement and links there rather than restating it.
 | ID | Title | Requirement | Priority | Status |
 |---|---|---|---|---|
 | FR-1 | Flexible Inventory Units | Multiple units of measure per part; depleting in any supported unit converts and decrements correctly (a steel bar in lbs, depleted 6 inches). See [inventory.md](modules/inventory.md) | Must | **Built** |
-| FR-2 | Reorder Threshold Alerts | Visual alert when an item falls below its reorder threshold, **and** email to designated users | Must | **Partial** — **To buy** lists every part at or under its reorder point, net of what is on order and on draft, and on order shows on the job's Materials card ([purchasing.md](modules/purchasing.md#the-buy-list), inventory Phase 3, 2026-11); **there is no email.** ⚠ *This cell credited a low-stock badge and the parts-page shortage lens. The badge went 2026-08-02 and the lens with `is_stocked` on 2026-08-18, so between then and To buy FR-2 had no surface at all* |
+| FR-2 | Reorder Threshold Alerts | Visual alert when an item falls below its reorder threshold, **and** email to designated users | Must | **Partial** — **Shortages** lists every part at or under its reorder point, net of what is on order and on draft, and on order shows on the job's Materials card ([purchasing.md](modules/purchasing.md#the-buy-list), inventory Phase 3, 2026-11); **there is no email.** ⚠ *This cell credited a low-stock badge and the parts-page shortage lens. The badge went 2026-08-02 and the lens with `is_stocked` on 2026-08-18, so between then and Shortages FR-2 had no surface at all* |
 | FR-3 | Job Creation from Quote | Quote → job with no approval ceremony. Conversion captures a **required customer PO** — the authorization — and is blocked without it. An optional PO PDF attaches to the job. See [quotes.md](modules/quotes.md) | Must | **Built** |
 | FR-3a | Quote PDF Export | A branded, customer-facing PDF: shop FROM block, Customer · Ship-to (only when it differs) · contact, line items, validity, lead time, payment terms, and an acceptance block telling the customer to **reply with a purchase order** — no signature line. Internal cost, markup and routing are excluded. See [quotes.md](modules/quotes.md#printing) | Must | **Built.** *The emailing half of this row was **descoped** — there is no Email action and no server send; users send the downloaded PDF themselves* |
 | FR-3b | Direct Job Creation from PO | When a customer sends a PO with no prior quote: pick the customer, enter the PO #, add existing parts with quantity and agreed price, optionally attach the PDF. `quote_id` null; the job number comes from the same per-company counter quotes use | Must | **Built** (v1: existing parts that already have a routing) |
@@ -136,7 +136,7 @@ of FR-19's intent; its fate is tied to the operator-side scrap/defect discovery 
 or drop, but decide there.
 
 **Flow 3: Inventory Reorder.** Operator depletes stock on a job → the item reaches its threshold →
-it appears on **To buy** → an office user creates a draft PO from it, and it leaves To buy (drafts
+it appears on **Shortages** → an office user creates a draft PO from it, and it leaves Shortages (drafts
 count) → the PDF goes by mailto and, optionally, the PO to QuickBooks → material arrives and is
 received against the PO, with heat and cert, moving from on order to on hand. **Built 2026-11** ([purchasing.md](modules/purchasing.md)),
 all but FR-2's email. **There is no "owner approves a reorder" step, by decision**: admins and users
@@ -319,7 +319,7 @@ this is only the index.
 |---|---|---|
 | **1 — close the loop** ✅ **2026-07-28** | J1 opening balances · J9 count sheet · J4 material check · J7 issue-to-job | Numbers get in, get used on a job, stay true. **Zero new tables, zero migrations** |
 | **2 — locations reshaped** | J2 | Incremental places, a permanent visual board and fill state; retires the structure-first wizard |
-| **3 — purchasing** ✅ **2026-11** | J5 POs · J6 receiving · J10 buy list + on-order · J4's shop-wide shortage view (as To buy) | Completes **Flow 3** — with no approval step — and **FR-2** but its email. Issue #571; [purchasing.md](modules/purchasing.md) |
+| **3 — purchasing** ✅ **2026-11** | J5 POs · J6 receiving · J10 buy list + on-order · J4's shop-wide shortage view (as Shortages) | Completes **Flow 3** — with no approval step — and **FR-2** but its email. Issue #571; [purchasing.md](modules/purchasing.md) |
 | **4 — debt paydown** | J8 remnants | Remnants, reconciliation, one-stock-engine collapse, `job_materials` drop |
 
 **Already built:** J3 (material cost on a quote, FR-11), J11 (QR scan → bin view), and all of

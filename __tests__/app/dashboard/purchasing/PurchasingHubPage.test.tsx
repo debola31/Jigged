@@ -16,7 +16,7 @@ vi.mock('@/components/purchasing/VendorPoReceiptsList', () => ({
   default: ({ companyId }: { companyId: string }) => <div data-testid="receipts-tab">receipts {companyId}</div>,
 }));
 vi.mock('@/components/purchasing/BuyList', () => ({
-  BuyList: ({ companyId }: { companyId: string }) => <div data-testid="to-buy-tab">to buy {companyId}</div>,
+  BuyList: ({ companyId }: { companyId: string }) => <div data-testid="shortages-tab">shortages {companyId}</div>,
 }));
 vi.mock('@/components/purchasing/RfqList', () => ({
   RfqList: ({ companyId }: { companyId: string }) => <div data-testid="rfqs-tab">rfqs {companyId}</div>,
@@ -37,7 +37,7 @@ describe('Purchasing hub', () => {
 
   it.each([
     ['receipts', /receipts/i, 'receipts-tab'],
-    ['to-buy', /to buy/i, 'to-buy-tab'],
+    ['shortages', /shortages/i, 'shortages-tab'],
     ['rfqs', /rfqs/i, 'rfqs-tab'],
   ])('?view=%s selects its tab and renders it for this company', (view, tabName, testId) => {
     setSearchParams({ view });
@@ -48,7 +48,8 @@ describe('Purchasing hub', () => {
   });
 
   it('falls back to Orders for a view it does not know', () => {
-    setSearchParams({ view: 'shortages' });
+    // The Shortages tab's old name: a link made before the rename lands on Orders, not a blank page.
+    setSearchParams({ view: 'to-buy' });
     render(<PurchasingHubPage />);
     expect(screen.getByRole('tab', { name: /orders/i })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByTestId('orders-tab')).toBeInTheDocument();
@@ -59,9 +60,9 @@ describe('Purchasing hub', () => {
     const user = userEvent.setup();
     render(<PurchasingHubPage />);
 
-    await user.click(screen.getByRole('tab', { name: /to buy/i }));
+    await user.click(screen.getByRole('tab', { name: /shortages/i }));
 
-    expect(routerMocks.replace).toHaveBeenCalledWith('?view=to-buy', { scroll: false });
+    expect(routerMocks.replace).toHaveBeenCalledWith('?view=shortages', { scroll: false });
     expect(routerMocks.push).not.toHaveBeenCalled();
   });
 

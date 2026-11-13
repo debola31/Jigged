@@ -58,14 +58,14 @@ export default function PurchasingHubPage() {
         >
           <Tab label="Orders" value="orders" icon={<DescriptionOutlinedIcon />} iconPosition="start" />
           <Tab label="Receipts" value="receipts" icon={<MoveToInboxOutlinedIcon />} iconPosition="start" />
-          <Tab label="To buy" value="to-buy" icon={<ShoppingCartOutlinedIcon />} iconPosition="start" />
+          <Tab label="Shortages" value="shortages" icon={<ShoppingCartOutlinedIcon />} iconPosition="start" />
           <Tab label="RFQs" value="rfqs" icon={<RequestQuoteOutlinedIcon />} iconPosition="start" />
         </Tabs>
       </Box>
 
       {view === 'orders' && <VendorPoList companyId={companyId} />}
       {view === 'receipts' && <VendorPoReceiptsList companyId={companyId} />}
-      {view === 'to-buy' && <BuyList companyId={companyId} />}
+      {view === 'shortages' && <BuyList companyId={companyId} />}
       {view === 'rfqs' && <RfqList companyId={companyId} />}
     </Box>
   );

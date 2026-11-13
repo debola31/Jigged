@@ -37,7 +37,7 @@ import { getVendor } from '@/utils/vendorsAccess';
  *
  * get_part also says what is coming for the part on purchase orders TO A VENDOR — on order (sent,
  * open lines) and on draft, apart, in its stock unit, from `part_on_order` through
- * getOnOrderForParts (the figures the job page's Materials card and the To buy list use) — and the
+ * getOnOrderForParts (the figures the job page's Materials card and the Shortages list use) — and the
  * Last PO price from each vendor, read from `part_vendor_last_purchase`, which IS that definition.
  */
 

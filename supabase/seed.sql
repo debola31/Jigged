@@ -1811,12 +1811,14 @@ select public.register_mcp_gateway_key(
 --   PO-0005  closed (short)       FastenRight, dowels: 800 of 1000, "that's everything"
 --   PO-0006  partly received      ProFinish, the ANODIZE step of a cover job: an outside line,
 --                                 linked to a sent vendor packing slip with 25 of 40 back
---   PO-0007  sent                 VoltEdge, motors on order, plus a CALIBRATION line on the
+--   PO-0007  sent                 VoltEdge, 10 motors on order, plus a CALIBRATION line on the
 --                                 CNC mill (a work centre) and FREIGHT that expects no receipt
 --   PO-0008  draft, archived      Atlas, so "archived never lists" has something to hide
 --   PO-0009  draft                created by awarding RFQ-0002
 -- RFQ-0001 is quoted by Atlas and declined by FastenRight; RFQ-0002 is awarded; RFQ-0003 is
 -- a draft nobody has been sent.
+-- Shortages lists a part each of its two ways: the motors sit under their reorder point (75)
+-- even with PO-0007's 10 counted, and a job for 150 drive shafts is 30 stainless blanks short.
 --
 -- Everything goes through the RPCs the app calls, as dev@jigged.test (the same impersonation
 -- the stock placement above uses), so the seed exercises the real write path and its
@@ -1840,6 +1842,7 @@ declare
   v_dowel   constant uuid := '60000000-0000-0000-0000-000000000007';
   v_motor   constant uuid := '60000000-0000-0000-0000-000000000008';
   v_cover   constant uuid := '60000000-0000-0000-0000-000000000011';
+  v_shaft   constant uuid := '60000000-0000-0000-0000-000000000010';
   v_mill    constant uuid := '40000000-0000-0000-0000-000000000002';
   v_shelf_a constant uuid := '71000000-0000-0000-0000-000000000002';
   v_yard    constant uuid := '71000000-0000-0000-0000-000000000004';
@@ -1977,7 +1980,9 @@ begin
   select id into v_po from public.create_vendor_purchase_order(v_volt, current_date - 3, current_date,
     jsonb_build_object('need_by_on', current_date + 10, 'ship_via', 'FedEx Ground'),
     jsonb_build_array(
-      jsonb_build_object('line_kind', 'part', 'part_id', v_motor, 'quantity', 30,
+      -- 10, not more: 60 on hand plus these 10, less the 3 J-0026 needs, leaves the motors under
+      -- their reorder point of 75, so Purchasing → Shortages lists them (one of its two ways in).
+      jsonb_build_object('line_kind', 'part', 'part_id', v_motor, 'quantity', 10,
         'unit_price', 14.20, 'price_source', 'last_po'),
       jsonb_build_object('line_kind', 'other', 'description', 'Spindle encoder recalibration, on site',
         'work_center_id', v_mill, 'quantity', 1, 'unit_price', 380.00, 'price_source', 'manual'),
@@ -2035,6 +2040,14 @@ begin
     jsonb_build_object('title', 'O-rings, next quarter'),
     jsonb_build_array(jsonb_build_object('part_id', v_oring, 'quantities', jsonb_build_array(1000, 5000))),
     array[v_fasten]);
+
+  -- ── A job short of material ───────────────────────────────────────────────
+  -- 150 drive shafts for Summit, one stainless blank each, against 120 on the shelf and none on
+  -- order: Purchasing → Shortages lists the stainless "Short 30" for this job, under Atlas, whose
+  -- draft PO-0001 it can join (RFQ-0001 is already asking Atlas for stainless prices). Last in
+  -- the block, so every job above keeps its number.
+  v_job := pg_temp.direct_job('50000000-0000-0000-0000-000000000008', 'PO-SUM-5521', 21, 2);
+  perform pg_temp.add_job_part(v_job, v_shaft, 10, 150, 22.00, null, now() - interval '2 days');
 
   -- Sends happened on the order date, not at seed time.
   update public.vendor_purchase_orders

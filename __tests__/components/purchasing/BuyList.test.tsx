@@ -1,5 +1,5 @@
 /**
- * "To buy" (plan §3.10, criterion B3) — the buy list a person reads and orders from.
+ * "Shortages" (plan §3.10, criterion B3) — the buy list a person reads and orders from.
  *
  * Ported from 87df208's shop-wide shortages page (`InventoryShortagesPage.test.tsx`, 8 tests). The
  * reason that page existed survives: two jobs each needing 10 against 15 on hand both read "not
@@ -244,12 +244,13 @@ describe('BuyList — ported from the 87df208 shortages page', () => {
     expect(loadBuyListSnapshot).toHaveBeenCalledTimes(1);
   });
 
-  it('says plainly when there is nothing to buy', async () => {
+  /** The list fills itself, so an empty one says how a part gets onto it (founder, 2026-11-12). */
+  it('says plainly when there are no shortages, and how a part would get here', async () => {
     renderList();
-    expect(await screen.findByText(/nothing to buy/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/covered by stock or orders, and nothing is at its reorder point/i),
-    ).toBeInTheDocument();
+    expect(await screen.findByText('No shortages.')).toBeInTheDocument();
+    expect(screen.getByText(/this list fills itself/i)).toBeInTheDocument();
+    expect(screen.getByText(/needs more of it than you have in stock and on order/i)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Parts' })).toHaveAttribute('href', '/dashboard/co1/parts');
   });
 
   /**
@@ -265,7 +266,7 @@ describe('BuyList — ported from the 87df208 shortages page', () => {
     );
     renderList();
 
-    expect(await screen.findByText(/nothing to buy/i)).toBeInTheDocument();
+    expect(await screen.findByText(/no shortages/i)).toBeInTheDocument();
     const section = screen.getByRole('region', { name: /can't compare units \(1\)/i });
     expect(within(section).getByText('BAR')).toBeInTheDocument();
     expect(within(section).getByText(/3 jobs affected/)).toBeInTheDocument();
@@ -299,9 +300,9 @@ describe('BuyList — ported from the 87df208 shortages page', () => {
   it('surfaces a failed load rather than rendering an empty all-clear', async () => {
     asMock(loadBuyListSnapshot).mockRejectedValue(new Error('boom'));
     renderList();
-    expect(await screen.findByText(/couldn't load the buy list/i)).toBeInTheDocument();
+    expect(await screen.findByText(/couldn't load the shortages/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
-    expect(screen.queryByText(/nothing to buy/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/no shortages/i)).not.toBeInTheDocument();
   });
 });
 
@@ -519,7 +520,7 @@ describe('BuyList — ordering from a group', () => {
     expect(url.pathname).toBe('/dashboard/co1/purchasing/rfqs/new');
     expect(url.searchParams.getAll('part').sort()).toEqual(['nut', 'washer']);
     // What tells the RFQ form — and its `vendor rfq created` event — that the buy list started it.
-    expect(url.searchParams.get('from')).toBe('to-buy');
+    expect(url.searchParams.get('from')).toBe('shortages');
   });
 
   it('moves a row to a vendor that is not on the part’s list through "Another vendor…"', async () => {
@@ -576,7 +577,7 @@ describe('BuyList — what it says about itself', () => {
 
   it('narrows to one job from ?job=, with a chip that clears it', async () => {
     const user = userEvent.setup();
-    setSearchParams('view=to-buy&job=j2');
+    setSearchParams('view=shortages&job=j2');
     asMock(loadBuyListSnapshot).mockResolvedValue(twoVendorSnapshot());
     renderList();
 
@@ -586,7 +587,7 @@ describe('BuyList — what it says about itself', () => {
 
     const chip = screen.getByRole('button', { name: /for J2/i });
     await user.click(within(chip).getByTestId('CancelIcon'));
-    expect(routerMocks.replace).toHaveBeenCalledWith('/dashboard/test-company-id?view=to-buy');
+    expect(routerMocks.replace).toHaveBeenCalledWith('/dashboard/test-company-id?view=shortages');
   });
 
   it('never writes on its own', async () => {

@@ -99,8 +99,8 @@ export function RfqList({ companyId }: { companyId: string }) {
             Ask vendors for prices before you order — on a part, or on anything else you buy. Each vendor gets its own
             copy, and their quotes line up side by side.
           </Typography>
-          <Button variant="outlined" component={NextLink} href={purchasingHubPath(companyId, 'to-buy')}>
-            See what to buy
+          <Button variant="outlined" component={NextLink} href={purchasingHubPath(companyId, 'shortages')}>
+            See shortages
           </Button>
         </CardContent>
       </Card>

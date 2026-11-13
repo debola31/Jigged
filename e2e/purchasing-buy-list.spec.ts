@@ -14,7 +14,7 @@ import {
 } from './helpers/purchasing';
 
 /**
- * E2E: the buy list ("To buy") and on-order (plan §5.5, B1–B4).
+ * E2E: the buy list (the "Shortages" tab) and on-order (plan §5.5, B1–B4).
  *
  * One job short of two things — a material its assembly's BOM needs (5 a piece, 4 pieces, none in
  * stock) and a bought part it ships as is — plus a part sitting under its reorder point. All three
@@ -48,7 +48,7 @@ let poId = '';
 
 const group = (page: Page) => page.getByRole('region', { name: vendor.name });
 const listRow = (page: Page, part: string) => group(page).getByRole('row').filter({ hasText: part });
-const toBuy = () => `/dashboard/${companyId}/purchasing?view=to-buy`;
+const toBuy = () => `/dashboard/${companyId}/purchasing?view=shortages`;
 
 test.beforeAll(async () => {
   const a = admin();
@@ -101,9 +101,9 @@ test("the job's Materials card points at the buy list, which shows the job's nee
   await expect(page.getByText('Not on a purchase order')).toBeVisible();
   await expect(page.getByRole('link', { name: 'Buy it' })).toBeVisible();
   await expect(page.getByText('1 short')).toBeVisible();
-  await page.getByRole('link', { name: 'See To buy' }).click();
+  await page.getByRole('link', { name: 'See shortages' }).click();
 
-  await expect(page).toHaveURL(new RegExp(`view=to-buy.*job=${jobId}`));
+  await expect(page).toHaveURL(new RegExp(`view=shortages.*job=${jobId}`));
   await expect(page.getByRole('button', { name: `For ${JOB}` })).toBeVisible();
   await expect(listRow(page, MATERIAL)).toContainText('Short 20 each');
   await expect(listRow(page, MATERIAL)).toContainText('20 needed · 0 on hand');

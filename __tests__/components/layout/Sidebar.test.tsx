@@ -95,7 +95,7 @@ describe('Sidebar', () => {
   // MenuItem no longer carries a `featureFlag` field at all.
   // One row for buying, for admins AND users: purchasing is office work for both roles (plan §2),
   // so it must not be filtered with Team and Settings. Placed after Storage — buying is how stock
-  // gets in — and pointing at the hub, whose tabs hold the orders, receipts, To buy and RFQs.
+  // gets in — and pointing at the hub, whose tabs hold the orders, receipts, Shortages and RFQs.
   it.each([
     ['admin', true],
     ['user', false],

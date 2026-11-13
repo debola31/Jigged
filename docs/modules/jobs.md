@@ -239,7 +239,7 @@ produces one, since each part becomes its own job.
 part ([purchasing.md](purchasing.md)) and the job shows it — *"Bought · PO-1042 (Acme) · 40 of 100
 received"* on the part's line, a *Vendor POs* row in the details card — but a receipt leaves the
 part's production status alone, so it is still shippable immediately. Bought parts still to ship
-count as demand on the To buy list, because they read `completed` from creation. ⚠ *This line
+count as demand on the Shortages list, because they read `completed` from creation. ⚠ *This line
 called the missing step a gap "a purchasing module would add"; the purchasing module decided
 against it — a gate would block shipping on paperwork.*
 

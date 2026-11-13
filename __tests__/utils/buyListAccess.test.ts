@@ -1,5 +1,5 @@
 /**
- * "To buy" — access layer (criterion B3, plan §3.10).
+ * "Shortages" — access layer (criterion B3, plan §3.10).
  *
  * The tests that earn their keep:
  *   - A FIXED number of reads: six, whatever the shop's size. Counted against a 20-job fixture,

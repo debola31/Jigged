@@ -7,12 +7,38 @@ import type { QuickBooksStatus } from '@/utils/quickbooksAccess';
 
 const mockGetStatus = vi.fn();
 const mockStartConnect = vi.hoisted(() => vi.fn());
+// The Purchasing panel's mount read: Jigged's own table, never QuickBooks (plan §3.13).
+const mockGetPurchasingSetup = vi.hoisted(() => vi.fn());
+const mockListPurchaseItems = vi.hoisted(() => vi.fn());
 
-vi.mock('@/utils/quickbooksAccess', () => ({
+// Partial: the classifiers and error class the Purchasing panel imports stay real.
+vi.mock('@/utils/quickbooksAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/quickbooksAccess')>()),
   getQuickBooksStatus: (...args: unknown[]) => mockGetStatus(...args),
   startQuickBooksConnect: (...args: unknown[]) => mockStartConnect(...args),
   disconnectQuickBooks: vi.fn(),
+  getQuickBooksPurchasingSetup: (...args: unknown[]) => mockGetPurchasingSetup(...args),
+  listQuickBooksPurchaseItems: (...args: unknown[]) => mockListPurchaseItems(...args),
 }));
+
+// The Purchasing panel hides its write actions from non-admins; Settings is admin-only.
+vi.mock('@/hooks/useUserRole', () => ({
+  useUserRole: () => ({ role: 'admin', isAdmin: true, loading: false }),
+}));
+
+const PURCHASING_NOT_SET_UP = {
+  connected: true,
+  provider: 'qbo',
+  items: [],
+  one_item_for_all: false,
+  ap_account: null,
+  preferences: null,
+  missing: ['item:part', 'item:outside_service', 'item:other', 'ap_account'],
+};
+
+beforeEach(() => {
+  mockGetPurchasingSetup.mockResolvedValue(PURCHASING_NOT_SET_UP);
+});
 
 // No useCompanyFeatures mock: the card stopped reading feature flags when `quickbooks_desktop`
 // was retired (Aug 2026). Leaving an inert one here would keep "working" against a component that
@@ -72,6 +98,49 @@ describe('QuickBooksIntegrationCard — status', () => {
     expect(
       screen.getByRole('button', { name: /Connect QuickBooks Desktop/i }),
     ).toBeInTheDocument();
+  });
+
+  it('shows the Purchasing panel once QuickBooks Online is connected, reading only Jigged’s setup', async () => {
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    expect(await screen.findByRole('heading', { name: 'Purchasing' })).toBeInTheDocument();
+    expect(await screen.findByText('QuickBooks item for purchases')).toBeInTheDocument();
+    expect(mockGetPurchasingSetup).toHaveBeenCalledWith('c1');
+    // Nothing that reaches QuickBooks runs on the way in.
+    expect(mockListPurchaseItems).not.toHaveBeenCalled();
+  });
+
+  it('has no Purchasing panel until something is connected', async () => {
+    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    await screen.findByRole('button', { name: /Connect QuickBooks Online/i });
+    expect(screen.queryByRole('heading', { name: 'Purchasing' })).not.toBeInTheDocument();
+    expect(mockGetPurchasingSetup).not.toHaveBeenCalled();
+  });
+
+  it('QuickBooks Desktop: says "Purchasing setup needed" beside its own setup, with the panel inside', async () => {
+    mockGetStatus.mockResolvedValue({ connected: false } as QuickBooksStatus);
+    mockGetDesktopStatus.mockResolvedValue({
+      connected: true,
+      linked: true,
+      qb_company_name: 'Rock Castle Construction',
+      last_successful_request_at: null,
+      needs_income_account: false,
+    });
+    mockGetPurchasingSetup.mockResolvedValue({
+      ...PURCHASING_NOT_SET_UP,
+      provider: 'qbd',
+      missing: ['item:part', 'item:outside_service', 'item:other'],
+    });
+    render(<QuickBooksIntegrationCard companyId="c1" />);
+
+    expect(await screen.findByText('Purchasing setup needed')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Purchasing' })).toBeInTheDocument();
+    // The panel sits above Disconnect, not after it.
+    const disconnect = screen.getByRole('button', { name: /disconnect quickbooks desktop/i });
+    const chooseItem = screen.getByRole('button', { name: 'Choose item' });
+    expect(chooseItem.compareDocumentPosition(disconnect) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('does not offer to connect when the status check itself failed', async () => {

@@ -20,9 +20,12 @@ const tableData: Record<string, unknown[]> = {};
 /** Every filter applied, per table — lets a test assert what was actually asked for. */
 let filters: Array<{ table: string; method: string; args: unknown[] }> = [];
 
+/** A table that answers with an error instead of rows. */
+const tableErrors: Record<string, unknown> = {};
+
 function makeBuilder(table: string) {
   const rows = tableData[table] ?? [];
-  const result = { data: rows, error: null };
+  const result = tableErrors[table] ? { data: null, error: tableErrors[table] } : { data: rows, error: null };
   const builder: Record<string, unknown> = {
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve),
   };
@@ -61,6 +64,9 @@ beforeEach(() => {
   ];
   tableData.parts_unit_conversions = [];
   tableData.inventory_transactions = [];
+  tableData.part_on_order = [];
+  tableData.vendor_purchase_order_line_status = [];
+  for (const k of Object.keys(tableErrors)) delete tableErrors[k];
 });
 
 describe('getJobPartMaterialCheck — request budget', () => {
@@ -76,6 +82,10 @@ describe('getJobPartMaterialCheck — request budget', () => {
       'parts_bom',
       'parts',
       'inventory_transactions',
+      // What is on order for the materials: the view's totals, and the PO lines behind them —
+      // one read each for the whole BOM, never one per material.
+      'part_on_order',
+      'vendor_purchase_order_line_status',
       // parts_unit_conversions is skipped — every BOM unit matches its stock unit.
     ]);
   });
@@ -147,6 +157,51 @@ describe('getJobPartMaterialCheck', () => {
     });
     expect(rows).toEqual([]);
   });
+
+  // On order rides beside the shortage (criterion B4): sent apart from drafts, with the POs.
+  it('carries what is on order per material, from part_on_order, without changing short-by', async () => {
+    tableData.part_on_order = [
+      { part_id: 'steel', stock_unit: 'each', on_order_quantity: 12, on_draft_quantity: 5, next_expected_on: '2026-11-12', open_line_count: 2, draft_line_count: 1, unit_mismatch_line_count: 0 },
+    ];
+    tableData.vendor_purchase_order_line_status = [
+      { id: 'l1', vendor_purchase_order_id: 'po-1', po_number: 'PO-0042', vendor_id: 'v1', line_number: 1, part_id: 'steel', status: 'open', quantity: 8, stock_unit: 'each', stock_factor: 1, open_stock_quantity: 8, expected_on: '2026-11-14' },
+      { id: 'l2', vendor_purchase_order_id: 'po-1', po_number: 'PO-0042', vendor_id: 'v1', line_number: 2, part_id: 'steel', status: 'partially_received', quantity: 6, stock_unit: 'each', stock_factor: 1, open_stock_quantity: 4, expected_on: '2026-11-12' },
+      { id: 'l3', vendor_purchase_order_id: 'po-2', po_number: 'PO-0043', vendor_id: 'v1', line_number: 1, part_id: 'steel', status: 'draft', quantity: 5, stock_unit: 'each', stock_factor: 1, open_stock_quantity: 0, expected_on: null },
+    ];
+    tableData.parts = [
+      { id: 'steel', part_name: 'Steel', primary_unit: 'each', quantity: 0, deleted_at: null },
+      { id: 'oring', part_name: 'O-ring', primary_unit: 'each', quantity: 9000, deleted_at: null },
+      { id: 'bolt', part_name: 'Bolt', primary_unit: 'each', quantity: 9000, deleted_at: null },
+    ];
+    const rows = await getJobPartMaterialCheck({
+      companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
+    });
+    const steel = rows[0];
+    expect(steel).toMatchObject({ onOrder: 12, onDraft: 5, shortBy: 6 });
+    // One entry per PO (two lines on PO-0042 merge), sent first, drafts after.
+    expect(steel.onOrderRefs).toEqual([
+      { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-0042', stockQuantity: 12, expectedOn: '2026-11-12', isDraft: false },
+      { vendorPurchaseOrderId: 'po-2', poNumber: 'PO-0043', stockQuantity: 5, expectedOn: null, isDraft: true },
+    ]);
+    // Loaded, and nothing coming: a true 0, never null.
+    expect(rows[1]).toMatchObject({ onOrder: 0, onDraft: 0, onOrderRefs: [] });
+    // Archived POs never count.
+    expect(filterFor('vendor_purchase_order_line_status', 'eq')).toContainEqual(['is_archived', false]);
+    expect(filterFor('part_on_order', 'eq')).toContainEqual(['company_id', 'co1']);
+  });
+
+  // "No materials on this part's BOM" is the one thing a failed load must never render.
+  it.each(['parts_bom', 'parts', 'inventory_transactions', 'part_on_order'])(
+    'THROWS a real Error when the %s read fails — never an empty list',
+    async (table) => {
+      tableErrors[table] = { code: '08006', message: 'connection failure' };
+      const run = getJobPartMaterialCheck({
+        companyId: 'co1', jobId: 'job0', jobPartId: 'jp0', madePartId: 'made1', orderQuantity: 2,
+      });
+      await expect(run).rejects.toBeInstanceOf(Error);
+      await expect(run).rejects.toThrow(/^Failed to load/);
+    },
+  );
 
   // A child row that can't be read is dropped rather than rendered with invented facts.
   it('skips a BOM line whose child part cannot be resolved', async () => {

@@ -4,7 +4,8 @@ import userEvent from '@testing-library/user-event';
 import { ThemeProvider } from '@mui/material/styles';
 import jiggedTheme from '@/lib/theme';
 
-import OperationCard from '@/components/jobs/OperationCard';
+import OperationCard, { outsidePoLineForOperation, type OperationPoLink } from '@/components/jobs/OperationCard';
+import type { VendorPoJobLine } from '@/types/vendorPo';
 import type { JobOperation } from '@/types/job';
 import type { OutsideOperationSummary } from '@/types/outsideShipment';
 import type { OperationCompletionSummary } from '@/types/operationCompletion';
@@ -275,5 +276,157 @@ describe('OperationCard — external (outside-vendor) operations', () => {
     // Only 'pending' is suppressed; real states (Completed / In Progress / At
     // Vendor) still render their chip.
     expect(screen.getByText(/^Completed$/i)).toBeInTheDocument();
+  });
+});
+
+describe('OperationCard — the vendor PO an outside step ships against', () => {
+  const outsideOp = (over: Partial<JobOperation> = {}): JobOperation =>
+    op({
+      work_center: null,
+      vendor_service_id: 'vs-1',
+      vendor_service: { id: 'vs-1', name: 'Anodize', unit_price: null, vendor: { id: 'v1', name: 'AcmeCoat' } },
+      status: 'sent',
+      ...over,
+    } as Partial<JobOperation>);
+
+  const outside: OutsideOperationSummary = {
+    job_operation_id: 'op-1',
+    qty_ordered: 100,
+    qty_sent: 50,
+    qty_good: 0,
+    qty_at_vendor: 50,
+    qty_to_send: 50,
+    oldest_open_shipped_at: '2026-03-01T00:00:00Z',
+    earliest_due_back_on: null,
+    open_slip_count: 1,
+  };
+
+  const poLink: OperationPoLink = {
+    poNumber: 'PO-1042',
+    lineNumber: 2,
+    href: '/dashboard/co1/purchasing/orders/po-1042',
+    expectedOn: '2026-03-09',
+    isLate: false,
+  };
+
+  const drawCard = (operation: JobOperation, extra: Partial<Parameters<typeof OperationCard>[0]> = {}) =>
+    render(
+      <ThemeProvider theme={jiggedTheme}>
+        <OperationCard
+          operation={operation}
+          {...baseProps}
+          outside={outside}
+          onSend={vi.fn()}
+          onReceive={vi.fn()}
+          {...extra}
+        />
+      </ThemeProvider>,
+    );
+
+  it('links the PO this step ships against — and still offers both Send and Receive', () => {
+    drawCard(outsideOp(), { purchaseOrder: poLink, createPoHref: '/new' });
+    expect(screen.getByRole('link', { name: 'PO-1042' })).toHaveAttribute('href', poLink.href);
+    expect(screen.getByText(/due 3\/9\/26/)).toBeInTheDocument();
+    // No third button: the PO is a caption, the two movements stay the controls.
+    expect(screen.getByRole('button', { name: /Send to AcmeCoat/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Receive 50/i })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /create po/i })).not.toBeInTheDocument();
+  });
+
+  it('marks a late line Overdue, in words', () => {
+    drawCard(outsideOp(), { purchaseOrder: { ...poLink, isLate: true } });
+    expect(screen.getByText(/overdue/i)).toBeInTheDocument();
+  });
+
+  /**
+   * A slip's due-back is a date column. Formatted as an instant it was read as UTC midnight: west of
+   * Greenwich that printed the day before at 4:00 PM, contradicting the PO caption under it; in UTC
+   * it still printed a time no one set.
+   */
+  it('prints the due-back as the date on the slip, with no time', () => {
+    drawCard(outsideOp(), { outside: { ...outside, earliest_due_back_on: '2026-03-09' }, purchaseOrder: poLink });
+    const caption = screen.getByText(/at AcmeCoat since/);
+    expect(caption.textContent).toContain(`due back ${new Date(2026, 2, 9).toLocaleDateString()}`);
+    expect(caption.textContent).not.toMatch(/due back [^·]*\d{1,2}:\d{2}/);
+  });
+
+  it('offers "Create PO" when the step is on no PO, with Send and Receive still there', () => {
+    drawCard(outsideOp(), { purchaseOrder: null, createPoHref: '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1' });
+    expect(screen.getByRole('link', { name: /create po/i })).toHaveAttribute(
+      'href',
+      '/dashboard/co1/purchasing/orders/new?vendor=v1&jobOperation=op-1',
+    );
+    expect(screen.getByRole('button', { name: /Send to AcmeCoat/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Receive 50/i })).toBeInTheDocument();
+  });
+
+  it('offers no "Create PO" on a finished step', () => {
+    drawCard(outsideOp({ status: 'completed' }), {
+      outside: { ...outside, qty_good: 100, qty_at_vendor: 0, qty_to_send: 0, open_slip_count: 0 },
+      purchaseOrder: null,
+      createPoHref: '/new',
+    });
+    expect(screen.queryByRole('link', { name: /create po/i })).not.toBeInTheDocument();
+  });
+
+  /** Unknown is not "none": a failed read that offered Create PO would invite a second PO. */
+  it('shows neither while the PO lines are unknown', () => {
+    drawCard(outsideOp(), { purchaseOrder: undefined, createPoHref: '/new' });
+    expect(screen.queryByRole('link', { name: /PO-/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /create po/i })).not.toBeInTheDocument();
+  });
+
+  it('puts no PO caption on an in-house step', () => {
+    drawCard(op({ status: 'pending' }), { purchaseOrder: poLink, createPoHref: '/new' });
+    expect(screen.queryByRole('link', { name: 'PO-1042' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /create po/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('outsidePoLineForOperation — the one line a slip would link to', () => {
+  const line = (over: Partial<VendorPoJobLine> = {}): VendorPoJobLine => ({
+    lineId: 'line-2',
+    vendorPurchaseOrderId: 'po-1042',
+    poNumber: 'PO-1042',
+    poStatus: 'sent',
+    vendorId: 'v1',
+    vendorName: 'AcmeCoat',
+    lineNumber: 2,
+    lineKind: 'outside_service',
+    partId: null,
+    partName: null,
+    description: 'Anodize — BRACKET-A — Job J-1042, Op 30',
+    jobPartId: 'jp-1',
+    jobOperationId: 'op-1',
+    operationLabel: 'Op 30 Anodize',
+    quantity: 100,
+    unit: 'each',
+    receivedQuantity: 0,
+    openQuantity: 100,
+    status: 'open',
+    needByOn: '2026-03-09',
+    expectedOn: '2026-03-09',
+    isLate: false,
+    ...over,
+  });
+
+  it('finds the open outside line for the step and its vendor', () => {
+    expect(outsidePoLineForOperation([line()], 'op-1', 'v1')?.lineId).toBe('line-2');
+  });
+
+  it('counts a draft line, as the database does when it links a slip', () => {
+    expect(outsidePoLineForOperation([line({ status: 'draft', poStatus: 'draft' })], 'op-1', 'v1')).not.toBeNull();
+  });
+
+  it('ignores closed lines, closed POs, other steps, other vendors and part lines', () => {
+    expect(outsidePoLineForOperation([line({ status: 'closed' })], 'op-1', 'v1')).toBeNull();
+    expect(outsidePoLineForOperation([line({ poStatus: 'closed' })], 'op-1', 'v1')).toBeNull();
+    expect(outsidePoLineForOperation([line({ jobOperationId: 'op-2' })], 'op-1', 'v1')).toBeNull();
+    expect(outsidePoLineForOperation([line({ vendorId: 'v2' })], 'op-1', 'v1')).toBeNull();
+    expect(outsidePoLineForOperation([line({ lineKind: 'part' })], 'op-1', 'v1')).toBeNull();
+  });
+
+  it('names none when two lines qualify — the database links a slip to neither', () => {
+    expect(outsidePoLineForOperation([line(), line({ lineId: 'line-9', lineNumber: 9 })], 'op-1', 'v1')).toBeNull();
   });
 });

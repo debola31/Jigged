@@ -56,9 +56,25 @@ function mountsOf(component: string): { rel: string; jsx: string }[] {
  * handler — "no void here" should be a thing someone wrote, not a thing someone
  * forgot.
  */
+/**
+ * Each preview, and the action prop every one of its mounts must pass.
+ *
+ * The slip previews gate Void on `onVoided` (above). The purchase order and RFQ previews gate their
+ * send on `onMarkedSent` the same way: "Mark as sent & download" stamps the send, and a mount that
+ * forgot the handler would render the document with its main action quietly gone — or worse, stamp
+ * the send and leave the page behind it showing "Draft". A closed or archived copy says
+ * `readOnly` explicitly; it never drops the handler.
+ */
+const REQUIRED_ACTION_PROP: Record<string, string> = {
+  PackingSlipPreviewDialog: 'onVoided',
+  OutsideShipmentPreviewDialog: 'onVoided',
+  VendorPoPreviewDialog: 'onMarkedSent',
+  RfqPreviewDialog: 'onMarkedSent',
+};
+
 describe('a document preview offers the same actions wherever it is opened', () => {
-  for (const component of ['PackingSlipPreviewDialog', 'OutsideShipmentPreviewDialog']) {
-    it(`every <${component}> passes onVoided`, () => {
+  for (const [component, prop] of Object.entries(REQUIRED_ACTION_PROP)) {
+    it(`every <${component}> passes ${prop}`, () => {
       const mounts = mountsOf(component);
 
       // Guards the guard: a renamed component would make the loop above vacuous
@@ -66,7 +82,7 @@ describe('a document preview offers the same actions wherever it is opened', () 
       expect(mounts.length).toBeGreaterThan(0);
 
       const missing = mounts
-        .filter(({ jsx }) => !/\bonVoided=/.test(jsx))
+        .filter(({ jsx }) => !new RegExp(`\\b${prop}=`).test(jsx))
         .map(({ rel }) => rel);
 
       expect(missing).toEqual([]);

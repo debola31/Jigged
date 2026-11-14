@@ -27,12 +27,17 @@ import {
 import { ON_HAND_ROW_CEILING, getStorageOnHand, type OnHandRow } from '@/utils/inventoryOnHandAccess';
 import { occupancyFor, rollUpOccupancy } from '@/utils/locationOccupancy';
 import { getPartTransactions } from '@/utils/partsAccess';
+import { getOnOrderForParts } from '@/utils/vendorPoAccess';
 
 /**
  * Storage, read-only: what the shop holds, where, and how it moved.
  *
  * MONEY: inventory cost and value go to admins only, mirroring the Storage page, which renders
  * them only when `isAdmin` (docs/modules/inventory.md §5.15). Non-admins get null in those fields.
+ *
+ * ON ORDER (search_inventory): what is coming on purchase orders to vendors, from `part_on_order`
+ * through getOnOrderForParts — the places drawer's "Also on order" line. Quantities, not money, so
+ * every office user gets them.
  *
  * PEOPLE: nothing here says who moved, counted, issued or received stock. The ledger rows carry
  * `operator_id` / `created_by` and `getPartTransactions` resolves names from them; every one of
@@ -260,6 +265,9 @@ const stockPartOutput = z.object({
       'Why the part has no cost on file: `no_cost_tier` (no purchase cost recorded) or `made` ' +
         '(a made part, costed from its routing instead). Null when it has one.',
     ),
+  on_order: z.number().describe('On sent purchase orders to vendors and still to arrive, in `unit`.'),
+  on_draft: z.number().describe('On draft purchase orders not sent yet, in `unit`: not on order.'),
+  next_expected_on: z.string().nullable().describe('When the next of what is on order is expected.'),
   url: urlOutput,
 });
 
@@ -269,9 +277,9 @@ export const searchInventory = defineCompanyTool({
   description:
     'Lists the stock a Jigged company holds, one entry per part: the total on hand and its unit, ' +
     'each storage location holding it with the quantity there, and the lots (heat numbers) of ' +
-    'lot-tracked material. Search matches part number, description, heat or lot number, or the ' +
-    'name of a location holding it. Admins also get the cost per unit and the value of the stock. ' +
-    'Sorted by part number.',
+    'lot-tracked material, and what is on order for it on purchase orders to vendors. Search ' +
+    'matches part number, description, heat or lot number, or the name of a location holding it. ' +
+    'Admins also get the cost per unit and the value of the stock. Sorted by part number.',
   access: 'read',
   input: {
     search: z.string().optional().describe('Part number, description, heat or lot number, or a location name.'),
@@ -306,11 +314,16 @@ export const searchInventory = defineCompanyTool({
     if (!page) return { ok: false, message: BAD_CURSOR_MESSAGE };
 
     const admin = isAdmin(env);
+    const coming = await getOnOrderForParts(
+      env.company.id,
+      page.items.map((part) => part.partId),
+    );
     return {
       ok: true,
       data: {
         parts: page.items.map((part) => {
           const detail = details.get(part.partId);
+          const onOrder = coming.get(part.partId);
           return {
             part_id: part.partId,
             part_name: part.partName,
@@ -323,6 +336,10 @@ export const searchInventory = defineCompanyTool({
             cost_per_unit: admin ? part.costPerUnit : null,
             inventory_value: admin ? part.onHandCost : null,
             cost_gap: part.gap,
+            // Loaded, so a part with nothing coming is a true 0, never unknown.
+            on_order: onOrder?.onOrder ?? 0,
+            on_draft: onOrder?.onDraft ?? 0,
+            next_expected_on: onOrder?.nextExpectedOn ?? null,
             url: companyLink(env, `/parts/${part.partId}`),
           };
         }),

@@ -36,8 +36,8 @@ CANONICAL_UNITS: set[str] = {
     "inches", "feet", "millimeters", "centimeters", "meters",
     # volume
     "gallons", "liters", "quarts", "milliliters", "fluid ounces",
-    # count
-    "pieces", "each", "dozen",
+    # count ("hundred" / "thousand" are purchase units: fasteners priced per 100 or per 1000)
+    "pieces", "each", "dozen", "hundred", "thousand",
     # area
     "square inches", "square feet", "square centimeters", "square meters",
 }

@@ -85,9 +85,8 @@ export const CAPABILITY_STRIP = {
 // back, twice.
 //
 // EVERY CHIP WAS CHECKED AGAINST THE CODE. Deliberately absent because they do not exist:
-// supplier purchase orders and receiving (no schema), carrier label generation (no carrier
-// API), an invoice aging report — and anything resembling an operator scoreboard, which is
-// forbidden rather than merely unbuilt.
+// carrier label generation (no carrier API), an invoice aging report — and anything resembling
+// an operator scoreboard, which is forbidden rather than merely unbuilt.
 export type Step = {
   key: string;
   eyebrow: string;

@@ -226,19 +226,30 @@ def _teardown_seeded_user(supabase_admin: Client, seeded: dict) -> None:
     """
     Reverse what _create_seeded_user did, in dependency order.
 
-    A subset of FKs into `companies` lack ON DELETE CASCADE in the current
-    schema (e.g. shipments.company_id, jobs.company_id). Same drift that
-    test_shipment_void_permutations.py is xfailed against. Delete the
-    known blockers explicitly before the company; the rest cascades.
+    Every tenant FK into `companies` is ON DELETE CASCADE except
+    shipments.company_id (NO ACTION) -- the same drift
+    test_shipment_void_permutations.py is xfailed against. jobs.company_id
+    DOES cascade. Delete the shipments explicitly before the company; the
+    rest cascades, the purchasing graph included.
     """
     company_id = seeded["company_id"]
 
-    # Tables with FKs to companies(id) that are NOT ON DELETE CASCADE.
-    # Order matters: shipment_line_items → shipments → (job_parts via
-    # job_part_id) is independent of the company cascade, but PostgreSQL
-    # evaluates the references at the parent-row delete, so wiping
-    # shipments first is sufficient.
-    for table in ("shipment_line_items", "shipments", "job_parts", "jobs"):
+    # Order matters:
+    #   * shipments.company_id is NO ACTION, and shipment_line_items.job_part_id
+    #     is NO ACTION too, so the slips go first (their lines cascade with them).
+    #   * vendor_purchase_order_lines RESTRICT job_parts, jobs and job_operations,
+    #     and vendor_purchase_order_receipts RESTRICT their lines, so receipts and
+    #     then lines go before job_parts. jobs and job_parts would cascade from the
+    #     company anyway; deleting them here first keeps a failure pointing at the
+    #     table that caused it.
+    for table in (
+        "shipment_line_items",
+        "shipments",
+        "vendor_purchase_order_receipts",
+        "vendor_purchase_order_lines",
+        "job_parts",
+        "jobs",
+    ):
         try:
             (
                 supabase_admin.table(table)

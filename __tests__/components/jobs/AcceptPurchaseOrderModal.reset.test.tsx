@@ -28,7 +28,8 @@ const wrap = (ui: React.ReactElement) => (
 );
 
 const props = { companyId: 'co1', onClose: vi.fn(), onCreated: vi.fn() };
-const poField = () => screen.getByLabelText(/customer po/i) as HTMLInputElement;
+// The field, not the dialog: the dialog is titled "Accept customer PO" too, so match the "#".
+const poField = () => screen.getByLabelText(/customer po #/i) as HTMLInputElement;
 
 beforeEach(() => {
   vi.clearAllMocks();

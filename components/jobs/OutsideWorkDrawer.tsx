@@ -17,10 +17,11 @@ import { formatDateOnly, isDateOnlyPast } from '@/lib/localDate';
 import posthog from 'posthog-js';
 import {
   listOutsideShipmentsForCompany,
+  outsideShipmentPoNumber,
   outstandingOn,
   receiveOutsideShipment,
 } from '@/utils/outsideShipmentsAccess';
-import ReceiveFromVendorDialog from './ReceiveFromVendorDialog';
+import ReceiveFromVendorDialog, { closePoLineAfterReceipt, receivePoLineFor } from './ReceiveFromVendorDialog';
 import { daysAtVendorBucket } from './outsideWorkMetrics';
 import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
 
@@ -56,6 +57,10 @@ function daysSince(iso: string): number {
  * open" the same moment and lets the fetch go through `useLoad` rather than an
  * effect that sets state.
  *
+ * Each row names the vendor PO the slip ships against ("PO-1042"), as TEXT: it is
+ * what the plater quotes back on the phone, and a second link would break the
+ * one-target row below.
+ *
  * Each row is ONE link -- the job number -- deep-linking to `?op=` on the job,
  * which OperationsPanel scroll-highlights. Landing at the top of a job with
  * fourteen operations and being told to find the anodize step is how a read-only
@@ -70,6 +75,8 @@ export default function OutsideWorkDrawer({
   const router = useRouter();
   const [receiving, setReceiving] = useState<OutsideShipmentWithRelations | null>(null);
   const [busy, setBusy] = useState(false);
+  /** What the last receive could not finish (a refused receipt, or a PO line left open). */
+  const [notice, setNotice] = useState<{ severity: 'error' | 'warning'; text: string } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const { data, loading, error } = useLoad(
     () => listOutsideShipmentsForCompany(companyId, { openOnly: true }),
@@ -124,6 +131,12 @@ export default function OutsideWorkDrawer({
           </Alert>
         ) : null}
 
+        {notice && (
+          <Alert severity={notice.severity} sx={{ mb: 2 }} onClose={() => setNotice(null)}>
+            {notice.text}
+          </Alert>
+        )}
+
         {loading && !error && (
           <Box sx={{ display: 'flex', justifyContent: 'center', py: 6 }}>
             <CircularProgress size={26} />
@@ -153,6 +166,8 @@ export default function OutsideWorkDrawer({
 
             {group.slips.map((s) => {
               const out = outstandingOn(s);
+              const poNumber = outsideShipmentPoNumber(s);
+              const what = poNumber ? `${s.service_name} · ${poNumber}` : s.service_name;
               const days = daysSince(s.shipped_at);
               const overdue = isDateOnlyPast(s.due_back_on);
               return (
@@ -161,7 +176,12 @@ export default function OutsideWorkDrawer({
                   sx={{
                     display: 'flex',
                     alignItems: 'baseline',
-                    gap: 1,
+                    columnGap: 1,
+                    rowGap: 0.5,
+                    // A last resort, not the layout: the "service · PO" text gives way first. Only
+                    // when the job number, count, age and button alone are wider than the drawer
+                    // does the age-and-Receive pair drop to its own line — never off the edge.
+                    flexWrap: 'wrap',
                     py: 1,
                     borderTop: '1px solid',
                     borderColor: 'divider',
@@ -186,31 +206,45 @@ export default function OutsideWorkDrawer({
                   >
                     {s.job?.job_number ?? 'Open job'}
                   </Link>
-                  <Typography variant="body2" sx={{ color: 'warning.light' }}>
+                  <Typography variant="body2" sx={{ color: 'warning.light', flexShrink: 0 }}>
                     {out}
                   </Typography>
-                  <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
-                    {s.service_name}
-                  </Typography>
-                  <Box sx={{ flex: 1 }} />
+                  {/* THE ONE COLUMN THAT GIVES WAY. A zero basis and min-width 0 let it shrink
+                      to whatever the row leaves, on one line with an ellipsis; the title keeps
+                      the whole "service · PO" reachable when the ellipsis cuts it. Without
+                      `minWidth: 0` a flex item cannot shrink below its content, and with it but
+                      no ellipsis the text collapsed to nothing beside long names. */}
                   <Typography
-                    variant="caption"
-                    // Red only for a MISSED PROMISE, never for age alone: a
-                    // 30-day plating run that is on schedule is not a problem,
-                    // and colouring it like one teaches people to ignore the red.
-                    sx={{ color: overdue ? 'error.light' : 'text.secondary', whiteSpace: 'nowrap' }}
+                    variant="body2"
+                    color="text.secondary"
+                    noWrap
+                    title={what}
+                    sx={{ flex: '1 1 0', minWidth: 0 }}
                   >
-                    {days === 0 ? 'today' : `${days}d`}
-                    {s.due_back_on ? ` · due ${formatDateOnly(s.due_back_on)}` : ''}
+                    {what}
                   </Typography>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    onClick={() => setReceiving(s)}
-                    sx={{ flexShrink: 0, ml: 0.5 }}
+                  <Box
+                    sx={{ display: 'flex', alignItems: 'baseline', columnGap: 1, flexShrink: 0, ml: 'auto' }}
                   >
-                    Receive
-                  </Button>
+                    <Typography
+                      variant="caption"
+                      // Red only for a MISSED PROMISE, never for age alone: a
+                      // 30-day plating run that is on schedule is not a problem,
+                      // and colouring it like one teaches people to ignore the red.
+                      sx={{ color: overdue ? 'error.light' : 'text.secondary', whiteSpace: 'nowrap' }}
+                    >
+                      {days === 0 ? 'today' : `${days}d`}
+                      {s.due_back_on ? ` · due ${formatDateOnly(s.due_back_on)}` : ''}
+                    </Typography>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      onClick={() => setReceiving(s)}
+                      sx={{ flexShrink: 0 }}
+                    >
+                      Receive
+                    </Button>
+                  </Box>
                 </Box>
               );
             })}
@@ -230,12 +264,14 @@ export default function OutsideWorkDrawer({
               slip_number: receiving.slip_number,
               shipped_at: receiving.shipped_at,
               outstanding: outstandingOn(receiving),
+              poLine: receivePoLineFor(receiving),
             },
           ]}
           busy={busy}
           onClose={() => setReceiving(null)}
           onSubmit={async (v) => {
             setBusy(true);
+            setNotice(null);
             try {
               // The SAME function the operation card calls. Two surfaces, one
               // write path -- which is what stops them drifting.
@@ -250,9 +286,22 @@ export default function OutsideWorkDrawer({
                 was_backfilled: false,
                 days_at_vendor_bucket: daysAtVendorBucket(receiving.shipped_at),
               });
+              // The same after-the-receipt step as the operation card: the receipt stands either way.
+              // This drawer reads slips only, so it cannot tell a receipt that completes the line;
+              // the step itself counts the database's "nothing left to receive" as done.
+              const lineClose = await closePoLineAfterReceipt(v.closePoLine, v.quantityGood);
+              if (lineClose?.kind === 'failed') setNotice({ severity: 'warning', text: lineClose.message });
               setReceiving(null);
               setReloadKey((n) => n + 1);
               onReceived?.();
+            } catch (err) {
+              // A refused receipt closes the dialog and says why here: the dialog has no error
+              // slot of its own, and a failure nobody sees reads as a click that did nothing.
+              setReceiving(null);
+              setNotice({
+                severity: 'error',
+                text: err instanceof Error && err.message ? err.message : 'Failed to record the receipt.',
+              });
             } finally {
               setBusy(false);
             }

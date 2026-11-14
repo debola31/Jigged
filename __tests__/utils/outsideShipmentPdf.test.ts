@@ -42,6 +42,12 @@ vi.mock('jspdf-autotable', () => ({ default: autoTableFn }));
 // packingSlipPdf reaches lib/supabase at module load, which builds a real
 // browser client. supabase: null below means the logo path never calls it.
 vi.mock('@/lib/supabase', () => ({ getSupabase: () => ({}), createClient: () => ({}) }));
+// Where a test needs a logo it sets logo.url; the fetch itself is packingSlipPdf's business.
+const logo = vi.hoisted(() => ({ url: null as string | null }));
+vi.mock('@/utils/packingSlipPdf', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/packingSlipPdf')>()),
+  loadLogoAsDataUrl: vi.fn(async () => logo.url),
+}));
 
 import {
   generateOutsideShipmentPdf,
@@ -103,6 +109,7 @@ const drawn = () => doc.text.mock.calls.map((c) => String(c[0]));
 
 beforeEach(() => {
   vi.clearAllMocks();
+  logo.url = null;
   // Pass-through by default, which is what the real splitTextToSize does for a
   // string that fits. Returning a placeholder instead would make every
   // assertion about drawn address text read 'wrapped'.
@@ -160,6 +167,20 @@ describe('generateOutsideShipmentPdf — what the vendor reads', () => {
       shipment: slip({ due_back_on: null }), company, sentBefore: 0, supabase: null,
     });
     expect(drawn().some((s) => s.startsWith('Due Back:'))).toBe(false);
+  });
+
+  it('prints the logo at a real size on a slip with no due-back date and no PO', async () => {
+    // Slip #, Ship Date and Job: three meta lines left a three-line letterhead a 4pt logo.
+    logo.url = 'data:image/png;base64,AAAA';
+    await generateOutsideShipmentPdf({
+      shipment: slip({ due_back_on: null }),
+      company: { ...company, logo_url: 'logo.png' },
+      sentBefore: 0,
+      supabase: null,
+    });
+    const firstImage = doc.addImage.mock.calls[0];
+    expect(firstImage).toBeDefined();
+    expect(Number(firstImage[5])).toBeGreaterThanOrEqual(40);
   });
 
   it('banners a voided slip as PARTS NOT SENT, before the table is drawn', async () => {
@@ -317,5 +338,41 @@ describe('generateOutsideShipmentPdf — the address blocks wrap', () => {
       .filter((_, i) => doc.setFont.mock.invocationCallOrder[i] < order)
       .pop();
     expect(fontBefore).toEqual(['helvetica', 'bold']);
+  });
+});
+
+describe('generateOutsideShipmentPdf — the vendor PO it ships against (plan §3.6, criterion O4)', () => {
+  const linked: Partial<OutsideShipmentWithRelations> = {
+    vendor_purchase_order_line_id: 'line-2',
+    vendor_purchase_order_line: {
+      id: 'line-2',
+      line_number: 2,
+      vendor_purchase_order_id: 'po-1042',
+      vendor_purchase_order: { id: 'po-1042', po_number: 'PO-1042' },
+    },
+  };
+
+  it('prints "PO: PO-1042" when the slip ships against a vendor PO', async () => {
+    await generateOutsideShipmentPdf({ shipment: slip(linked), company, sentBefore: 0, supabase: null });
+    expect(drawn()).toContain('PO: PO-1042');
+  });
+
+  it('prints no PO line on a slip that is on none', async () => {
+    await generateOutsideShipmentPdf({
+      shipment: slip({ vendor_purchase_order_line_id: null, vendor_purchase_order_line: null }),
+      company, sentBefore: 0, supabase: null,
+    });
+    expect(drawn().some((s) => s.startsWith('PO:'))).toBe(false);
+  });
+
+  /** The meta column is measured before the logo, so a fifth line must be in that measurement. */
+  it('sits in the meta column after the job, right-aligned like its neighbours', async () => {
+    await generateOutsideShipmentPdf({ shipment: slip(linked), company, sentBefore: 0, supabase: null });
+    const calls = doc.text.mock.calls.map((c) => ({ text: String(c[0]), x: c[1], y: c[2], opts: c[3] }));
+    const job = calls.find((c) => c.text === 'Job: J-0141')!;
+    const po = calls.find((c) => c.text === 'PO: PO-1042')!;
+    expect(po.x).toBe(job.x);
+    expect(po.y).toBe(job.y + 14);
+    expect(po.opts).toEqual({ align: 'right' });
   });
 });

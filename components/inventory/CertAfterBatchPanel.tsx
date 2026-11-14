@@ -26,6 +26,12 @@ interface CertAfterBatchPanelProps {
   companyId: string;
   /** Every lot the batch landed on, in the order the lines were written. */
   lots: LandedLot[];
+  /**
+   * Where the batch landed, for the lot-certificate events (docs/telemetry.md). `office_batch` is
+   * the Storage bin form; a purchase order's receive dialog passes `office_po_receipt`, so a cert
+   * retried here after a PO receipt is still counted as one taken at the receiving bench.
+   */
+  surface?: string;
   onDone: () => void;
 }
 
@@ -45,7 +51,12 @@ interface CertAfterBatchPanelProps {
  * with its own disarm-what-succeeded protocol, and stacking a second post-write state on top of
  * that one would give two things claiming to describe what just happened.
  */
-export default function CertAfterBatchPanel({ companyId, lots, onDone }: CertAfterBatchPanelProps) {
+export default function CertAfterBatchPanel({
+  companyId,
+  lots,
+  surface = 'office_batch',
+  onDone,
+}: CertAfterBatchPanelProps) {
   const [error, setError] = useState<string | null>(null);
 
   const lotIds = lots.map((l) => l.lotId);
@@ -87,7 +98,7 @@ export default function CertAfterBatchPanel({ companyId, lots, onDone }: CertAft
               lotId={lot.lotId}
               heatLabel={lot.heatLabel}
               certificates={certsByLot.get(lot.lotId) ?? []}
-              surface="office_batch"
+              surface={surface}
               atReceipt
               onChanged={reload}
               onError={setError}

@@ -15,6 +15,7 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogContentText from '@mui/material/DialogContentText';
 import DialogActions from '@mui/material/DialogActions';
 import Card from '@mui/material/Card';
+import Divider from '@mui/material/Divider';
 import Stack from '@mui/material/Stack';
 import {
   getQuickBooksStatus,
@@ -25,6 +26,7 @@ import {
 import SettingsSection from '@/components/settings/SettingsSection';
 import DesktopAuthHandoff from '@/components/settings/quickbooks/DesktopAuthHandoff';
 import QuickBooksDesktopPanel from '@/components/settings/quickbooks/QuickBooksDesktopPanel';
+import QuickBooksPurchasingPanel from '@/components/settings/quickbooks/QuickBooksPurchasingPanel';
 import BusyButton from '@/components/common/BusyButton';
 import LoadFailedState from '@/components/common/LoadFailedState';
 import posthog from 'posthog-js';
@@ -85,6 +87,9 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
    *  greys both cards out, which reads as a dead button rather than work in
    *  progress -- the same complaint raised about the panel's buttons. */
   const [pending, setPending] = useState<null | 'qbo' | 'qbd'>(null);
+  /** Whether vendor POs still need their purchases item, as the Purchasing panel last read it
+   *  from Jigged's own table. Undefined until that read lands; drives the Desktop panel's hint. */
+  const [purchasingNeedsSetup, setPurchasingNeedsSetup] = useState<boolean | undefined>(undefined);
 
   const loadStatus = useCallback(async () => {
     try {
@@ -243,7 +248,7 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         connected ? 'QuickBooks Online' : desktopConnected ? 'QuickBooks Desktop' : 'QuickBooks'
       }
       statusChip={statusChip}
-      description="Send invoices to QuickBooks and see what’s still owed. Jigged never changes or deletes anything already in QuickBooks."
+      description="Send invoices and vendor POs to QuickBooks and see what’s still owed. Jigged never deletes anything in QuickBooks, and changes only the POs it sent there."
     >
         {error && (
           <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError(null)}>
@@ -289,9 +294,14 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
               companyId={companyId}
               onDisconnected={() => {
                 setPendingLink(null);
+                // Disconnecting deletes the purchasing setup, so the last answer is no longer true.
+                setPurchasingNeedsSetup(undefined);
                 void loadStatus();
               }}
-            />
+              purchasingSetupNeeded={purchasingNeedsSetup}
+            >
+              <QuickBooksPurchasingPanel companyId={companyId} onSetupChange={setPurchasingNeedsSetup} />
+            </QuickBooksDesktopPanel>
           ) : (
             <DesktopAuthHandoff
               authFlowUrl={pendingLink?.auth_flow_url ?? ''}
@@ -390,6 +400,16 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
             {/* No "Customer PO number" section any more (removed 2026-11-09). The
                 PO still prints on every invoice line and in the customer note
                 without setup; see docs/modules/customers.md#quickbooks. */}
+
+            {/* Vendor POs (purchasing). A reconnect has to come first: until then the
+                backend treats the company as not connected, and so would the panel. */}
+            {!status?.reconnect_required && (
+              <Box sx={{ mb: 3 }}>
+                <Divider sx={{ mb: 3 }} />
+                <QuickBooksPurchasingPanel companyId={companyId} />
+              </Box>
+            )}
+
             <Button variant="outlined" color="error" onClick={() => setDisconnectOpen(true)} disabled={busy}>
               Disconnect
             </Button>
@@ -400,8 +420,9 @@ export default function QuickBooksIntegrationCard({ companyId }: QuickBooksInteg
         <DialogTitle>Disconnect QuickBooks?</DialogTitle>
         <DialogContent>
           <DialogContentText>
-            Jigged will stop pushing invoices to QuickBooks until you reconnect. Invoices
-            already created in QuickBooks are not affected.
+            Jigged will stop sending invoices and vendor POs to QuickBooks until you reconnect,
+            and the purchasing setup is cleared. Invoices and POs already in QuickBooks are not
+            affected.
           </DialogContentText>
         </DialogContent>
         <DialogActions>

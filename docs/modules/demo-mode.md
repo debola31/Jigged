@@ -212,7 +212,18 @@ existing triggers compute the rest. Likewise it writes `part_location_stock` and
 `recompute_part_quantity_from_locations` set `parts.quantity`. That is deliberate: a template
 cannot then express a state the app itself cannot produce, and it cannot double-count stock.
 Job operations and `job_materials` are still **generated from the routing**
-(`create_job_part_operations_from_routing`), not listed in the template.
+(`create_job_part_operations_from_routing`), not listed in the template. A template outside step
+marked `sent` goes out on a real `VPS-` slip, and one marked `completed` also gets a receipt for
+the whole slip, so its status derives from those rows like an app-sent step's
+([outside-processing.md](outside-processing.md#status-derivation)).
+
+**Withdrawn:** *the seeder writes a template outside step's status, `sent_at` and `completed_at`
+straight onto `job_operations`* — wrong because nothing backed it: no slip to open, and the first
+part-quantity edit re-derived the step to `pending`. `20260903203741` had already replaced it with
+slips; `20260906005845` rebuilt the seeder from production's older body and reverted that unseen,
+and [`20261112194119`](../../supabase/migrations/20261112194119_demo_seed_sends_outside_work_on_slips.sql)
+restores it. **Rebuild a function from its newest migration, or from a live body only where that
+body is the newest migration's.**
 
 Two actor columns are easy to confuse, and the seeder handles both:
 `notes.author_id` / `note_reactions.reactor_id` reference **`user_company_access.id`** (the
@@ -371,6 +382,9 @@ had **no** coverage at all before 2026-08-05, which is why both failures above s
 | First entry creates the hidden company and populates every seeded table | `test_create_demo_company_seeds_the_graph` |
 | `parts.quantity` equals `SUM(part_location_stock)` — the seeder must not write both | `test_seeded_part_quantities_are_derived_not_asserted` |
 | Job statuses are trigger-derived and agree with the rows underneath | `test_seeded_job_statuses_come_from_the_triggers` |
+| Every outside step at a vendor has a live slip with pieces out; every one that came back has receipts covering the part | `test_seeded_outside_steps_are_backed_by_slips` |
+| A part-quantity edit leaves a seeded send at the vendor | `test_a_part_quantity_edit_leaves_a_seeded_send_at_the_vendor` |
+| Reset, twice, re-sends the outside steps on fresh slips with no number reused | `test_reset_twice_sends_the_outside_steps_on_fresh_slips` |
 | Reset survives a demo holding shipments and stock — **#675** | `test_reset_is_repeatable` |
 | Reset clears the tables that used to be out of scope | `test_reset_clears_the_tables_that_were_out_of_scope` |
 | Reset keeps membership and never reaches the real company | `test_reset_preserves_membership_and_leaves_the_real_company_alone` |

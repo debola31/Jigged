@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
 import { BAD_CURSOR_MESSAGE, companyLink, pageInput, pageOutput, paginate, urlOutput } from '@/lib/mcp/tools/shared';
+import { VENDOR_PO_LINE_STATUSES } from '@/lib/purchasing/vendorPoStatus';
+import { vendorPoPath } from '@/lib/purchasingRoutes';
 import { getSupabase } from '@/lib/supabase';
 import {
   getJobLifecycleStage,
@@ -25,12 +27,18 @@ import {
 import { calculateRoutingCost, type LaborItem, type RoutingCostBreakdown } from '@/utils/routingCostCalculation';
 import { getRoutingForPart } from '@/utils/routingsAccess';
 import { escapeIlikePattern } from '@/utils/searchFilter';
+import { getOnOrderForParts } from '@/utils/vendorPoAccess';
 import { getVendor } from '@/utils/vendorsAccess';
 
 /**
  * The part tools: the item master (made and bought parts), one part in full, and what a part
  * costs. Part cost and prices are shown to every office user in the app, so none of this is
  * admin-only. Inventory (on hand, stock value) belongs to the inventory tools, not here.
+ *
+ * get_part also says what is coming for the part on purchase orders TO A VENDOR — on order (sent,
+ * open lines) and on draft, apart, in its stock unit, from `part_on_order` through
+ * getOnOrderForParts (the figures the job page's Materials card and the Shortages list use) — and the
+ * Last PO price from each vendor, read from `part_vendor_last_purchase`, which IS that definition.
  */
 
 export const SOURCES = ['made', 'bought'] as const satisfies readonly Part['source'][];
@@ -57,6 +65,8 @@ const kindOf = (outside: boolean): (typeof STEP_KINDS)[number] => (outside ? 'ou
 /** How many jobs, quotes and notes `get_part` carries; the totals say how many there are. */
 const RECENT = 10;
 const NOTES_SHOWN = 20;
+/** How many lines of purchase orders to vendors `get_part` lists. */
+const OPEN_PO_LINES_SHOWN = 10;
 
 const round2 = (n: number): number => Math.round(n * 100) / 100;
 const round4 = (n: number): number => Math.round(n * 10000) / 10000;
@@ -282,6 +292,118 @@ const noteOutput = z.object({
 type JobUse = z.infer<typeof jobUseOutput>;
 type QuoteUse = z.infer<typeof quoteUseOutput>;
 
+const onOrderOutput = z
+  .object({
+    quantity: z.number().describe("On sent purchase orders to vendors and still to arrive, in the part's unit."),
+    on_draft_quantity: z.number().describe('On draft POs not sent yet: not on order.'),
+    next_expected_on: z.string().nullable(),
+    open_line_count: z.number(),
+    draft_line_count: z.number(),
+    unit_mismatch_line_count: z
+      .number()
+      .describe("Lines ordered in a unit the part no longer counts in, so they are in neither figure."),
+  })
+  .describe('What is coming from vendors. Only purchase orders in Jigged count.');
+
+const openPoLineOutput = z.object({
+  vendor_po_id: z.string(),
+  po_number: z.string().describe('A purchase order to a vendor, not a customer PO.'),
+  line_number: z.number(),
+  quantity: z.number().describe("Still to arrive, in the part's unit; for a draft, the whole line."),
+  expected_on: z.string().nullable(),
+  draft: z.boolean(),
+  status: z.enum(VENDOR_PO_LINE_STATUSES),
+  url: urlOutput,
+});
+
+const lastPoPriceOutput = z.object({
+  vendor: z.object({ vendor_id: z.string(), name: z.string(), url: urlOutput }),
+  vendor_po_id: z.string(),
+  po_number: z.string(),
+  ordered_on: z.string().nullable(),
+  quantity: z.number(),
+  unit: z.string(),
+  unit_price: z.number().describe('Per `unit`.'),
+  unit_price_per_stock_unit: z.number().nullable(),
+  url: urlOutput,
+});
+
+type OpenPoLine = z.infer<typeof openPoLineOutput>;
+type LastPoPrice = z.infer<typeof lastPoPriceOutput>;
+
+const poLink = (env: CompanyToolEnv, poId: string): string | null => env.link(vendorPoPath(env.company.id, poId));
+
+/** What is coming for one part on purchase orders to vendors: the totals and the lines behind them. */
+async function onOrderFor(
+  partId: string,
+  env: CompanyToolEnv,
+): Promise<{ onOrder: z.infer<typeof onOrderOutput>; lines: OpenPoLine[] }> {
+  const entry = (await getOnOrderForParts(env.company.id, [partId])).get(partId);
+  const lines = (entry?.refs ?? [])
+    .slice()
+    .sort((a, b) => {
+      if (a.isDraft !== b.isDraft) return a.isDraft ? 1 : -1;
+      return (a.expectedOn ?? '9999-12-31').localeCompare(b.expectedOn ?? '9999-12-31');
+    })
+    .slice(0, OPEN_PO_LINES_SHOWN)
+    .map((ref) => ({
+      vendor_po_id: ref.vendorPurchaseOrderId,
+      po_number: ref.poNumber,
+      line_number: ref.lineNumber,
+      quantity: ref.stockQuantity,
+      expected_on: ref.expectedOn,
+      draft: ref.isDraft,
+      status: ref.status,
+      url: poLink(env, ref.vendorPurchaseOrderId),
+    }));
+  return {
+    onOrder: {
+      // Loaded, so a part with nothing coming is a true 0, never unknown.
+      quantity: entry?.onOrder ?? 0,
+      on_draft_quantity: entry?.onDraft ?? 0,
+      next_expected_on: entry?.nextExpectedOn ?? null,
+      open_line_count: entry?.openLineCount ?? 0,
+      draft_line_count: entry?.draftLineCount ?? 0,
+      unit_mismatch_line_count: entry?.unitMismatchLineCount ?? 0,
+    },
+    lines,
+  };
+}
+
+/**
+ * "Last PO price" from each vendor: the newest priced line for this part on a sent, unarchived
+ * purchase order to that vendor (`part_vendor_last_purchase`). Newest first.
+ */
+async function lastPoPrices(partId: string, env: CompanyToolEnv): Promise<LastPoPrice[]> {
+  const { data, error } = await getSupabase()
+    .from('part_vendor_last_purchase')
+    .select('vendor_id, vendor_purchase_order_id, po_number, ordered_on, quantity, unit, unit_price, unit_price_per_stock_unit')
+    .eq('company_id', env.company.id)
+    .eq('part_id', partId)
+    .order('ordered_on', { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []).flatMap((r) =>
+    r.vendor_id && r.vendor_purchase_order_id && r.po_number && r.unit && r.unit_price !== null && r.quantity !== null
+      ? [{ ...r, vendor_id: r.vendor_id, vendor_purchase_order_id: r.vendor_purchase_order_id, po_number: r.po_number, unit: r.unit, unit_price: Number(r.unit_price), quantity: Number(r.quantity) }]
+      : [],
+  );
+  if (rows.length === 0) return [];
+  const names = await namesById('vendors', rows.map((r) => r.vendor_id));
+  return rows
+    .sort((a, b) => (b.ordered_on ?? '').localeCompare(a.ordered_on ?? ''))
+    .map((r) => ({
+      vendor: { vendor_id: r.vendor_id, name: names.get(r.vendor_id) ?? 'Unknown vendor', url: companyLink(env, `/vendors/${r.vendor_id}`) },
+      vendor_po_id: r.vendor_purchase_order_id,
+      po_number: r.po_number,
+      ordered_on: r.ordered_on,
+      quantity: r.quantity,
+      unit: r.unit,
+      unit_price: r.unit_price,
+      unit_price_per_stock_unit: r.unit_price_per_stock_unit === null ? null : Number(r.unit_price_per_stock_unit),
+      url: poLink(env, r.vendor_purchase_order_id),
+    }));
+}
+
 /**
  * The newest live jobs this part is on, and how many there are. Queried here rather than through
  * `getJobsForPart`, which returns archived jobs too; this is a list, so they stay out.
@@ -365,7 +487,9 @@ export const getPart = defineCompanyTool({
     'tiers (quantity breaks with unit price and markup), bill of materials, routing steps (work ' +
     'center or outside service, setup and run estimates, instructions), the part numbers ' +
     'customers use for it, the 10 newest jobs and quotes it is on with their totals, and its ' +
-    'notes. Find a part by id or by exact part name (part number).',
+    'notes. Also what is coming for it on purchase orders to vendors (on order, and on draft apart, ' +
+    'in its own unit, with the open lines) and the Last PO price from each vendor. Find a part by ' +
+    'id or by exact part name (part number).',
   access: 'read',
   input: partRef,
   output: {
@@ -386,13 +510,20 @@ export const getPart = defineCompanyTool({
     recent_quotes: z.array(quoteUseOutput).describe(`The ${RECENT} newest of them.`),
     notes_total: z.number(),
     notes: z.array(noteOutput).describe(`The ${NOTES_SHOWN} newest notes, newest first.`),
+    on_order: onOrderOutput,
+    open_vendor_po_lines: z
+      .array(openPoLineOutput)
+      .describe(`Up to ${OPEN_PO_LINES_SHOWN} lines for this part on purchase orders to vendors still to arrive: sent ones first by expected date, then drafts.`),
+    last_po_prices: z
+      .array(lastPoPriceOutput)
+      .describe('Last PO price from each vendor: the newest priced line on a sent purchase order to that vendor. Newest first.'),
     url: urlOutput,
   },
   run: async (args, env) => {
     const found = await findPart(args, env);
     if ('message' in found) return { ok: false, message: found.message };
     const { part, archived } = found;
-    const [tiers, bom, routing, references, jobs, quotes, notes, vendor] = await Promise.all([
+    const [tiers, bom, routing, references, jobs, quotes, notes, vendor, coming, lastPrices] = await Promise.all([
       getTiersWithComputedPrices(part.id),
       getBomForPart(part.id),
       getRoutingForPart(part.id),
@@ -401,6 +532,8 @@ export const getPart = defineCompanyTool({
       recentQuotes(part.id, env),
       getPartNotes(part.id, env.company.id),
       part.preferred_vendor_id ? getVendor(part.preferred_vendor_id) : Promise.resolve(null),
+      onOrderFor(part.id, env),
+      lastPoPrices(part.id, env),
     ]);
     const customers = await namesById('customers', references.map((r) => r.customer_id));
     return {
@@ -463,6 +596,9 @@ export const getPart = defineCompanyTool({
           created_at: n.created_at,
           edited_at: n.edited_at,
         })),
+        on_order: coming.onOrder,
+        open_vendor_po_lines: coming.lines,
+        last_po_prices: lastPrices,
         url: partLink(env, part.id),
       },
     };

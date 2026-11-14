@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 
 import type { CompanyToolEnv } from '@/lib/mcp/defineTool';
 import { getPart, getPartCost, listParts } from '@/lib/mcp/tools/parts';
@@ -49,6 +50,12 @@ vi.mock('@/utils/vendorsAccess', () => ({ getVendor: (...a: unknown[]) => mockVe
 const mockBreakdown = vi.fn();
 vi.mock('@/utils/routingCostCalculation', () => ({
   calculateRoutingCost: (...a: unknown[]) => mockBreakdown(...a),
+}));
+
+const mockOnOrder = vi.fn();
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/vendorPoAccess')>()),
+  getOnOrderForParts: (...a: unknown[]) => mockOnOrder(...a),
 }));
 
 /** Every query-builder call, by table, so a test can see which filters a query carried. */
@@ -173,6 +180,7 @@ const note = (overrides: Partial<PartNote>): PartNote => ({
 });
 
 function stubPartDetail(): void {
+  mockOnOrder.mockResolvedValue(new Map());
   mockGetPart.mockResolvedValue(part({ preferred_vendor_id: 'v-1' }));
   mockVendor.mockResolvedValue({ id: 'v-1', company_id: 'co-1', name: 'Anodize Co', created_at: '', updated_at: '' });
   mockPricedTiers.mockResolvedValue([
@@ -346,6 +354,105 @@ describe('get_part', () => {
     expect(res.ok).toBe(true);
     expect(mockGetPart).toHaveBeenCalledWith('live');
     expect(callsOn('parts', 'ilike')).toEqual([{ table: 'parts', method: 'ilike', args: ['part_name', 'BRKT-100'] }]);
+  });
+
+  it('carries what is on order to vendors, the open PO lines and the Last PO price from each vendor, to a user too', async () => {
+    singles.parts = { id: 'part-1', deleted_at: null };
+    stubPartDetail();
+    mockOnOrder.mockResolvedValue(
+      new Map([
+        [
+          'part-1',
+          {
+            partId: 'part-1',
+            stockUnit: 'ea',
+            onOrder: 40,
+            onDraft: 10,
+            nextExpectedOn: '2026-11-20',
+            openLineCount: 1,
+            draftLineCount: 1,
+            unitMismatchLineCount: 0,
+            refs: [
+              { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', vendorId: 'v-1', lineId: 'l-1', lineNumber: 1, stockQuantity: 40, expectedOn: '2026-11-20', isDraft: false, status: 'open' },
+              { vendorPurchaseOrderId: 'po-2', poNumber: 'PO-1043', vendorId: 'v-1', lineId: 'l-2', lineNumber: 3, stockQuantity: 10, expectedOn: null, isDraft: true, status: 'draft' },
+            ],
+          },
+        ],
+      ]),
+    );
+    lists.part_vendor_last_purchase = {
+      data: [
+        { vendor_id: 'v-2', vendor_purchase_order_id: 'po-0', po_number: 'PO-1001', ordered_on: '2026-09-01', quantity: 100, unit: 'ea', unit_price: 2.75, unit_price_per_stock_unit: 2.75 },
+        { vendor_id: 'v-1', vendor_purchase_order_id: 'po-1', po_number: 'PO-1042', ordered_on: '2026-11-02', quantity: 50, unit: 'ea', unit_price: 2.5, unit_price_per_stock_unit: 2.5 },
+      ],
+      error: null,
+    };
+    lists.vendors = { data: [{ id: 'v-1', name: 'Anodize Co' }, { id: 'v-2', name: 'Bay Steel' }], error: null };
+
+    const res = await getPart.run({ part_id: '7c1e7c7e-0000-4000-8000-000000000001' }, env);
+    if (!res.ok) throw new Error('expected the part');
+    expect(mockOnOrder).toHaveBeenCalledWith('co-1', ['part-1']);
+    expect(res.data.on_order).toEqual({
+      quantity: 40,
+      on_draft_quantity: 10,
+      next_expected_on: '2026-11-20',
+      open_line_count: 1,
+      draft_line_count: 1,
+      unit_mismatch_line_count: 0,
+    });
+    expect(res.data.open_vendor_po_lines).toEqual([
+      { vendor_po_id: 'po-1', po_number: 'PO-1042', line_number: 1, quantity: 40, expected_on: '2026-11-20', draft: false, status: 'open', url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1' },
+      { vendor_po_id: 'po-2', po_number: 'PO-1043', line_number: 3, quantity: 10, expected_on: null, draft: true, status: 'draft', url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-2' },
+    ]);
+    // Newest first, one per vendor: the view's own definition of "Last PO price".
+    expect(res.data.last_po_prices).toEqual([
+      {
+        vendor: { vendor_id: 'v-1', name: 'Anodize Co', url: 'https://jigged.app/dashboard/co-1/vendors/v-1' },
+        vendor_po_id: 'po-1',
+        po_number: 'PO-1042',
+        ordered_on: '2026-11-02',
+        quantity: 50,
+        unit: 'ea',
+        unit_price: 2.5,
+        unit_price_per_stock_unit: 2.5,
+        url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-1',
+      },
+      {
+        vendor: { vendor_id: 'v-2', name: 'Bay Steel', url: 'https://jigged.app/dashboard/co-1/vendors/v-2' },
+        vendor_po_id: 'po-0',
+        po_number: 'PO-1001',
+        ordered_on: '2026-09-01',
+        quantity: 100,
+        unit: 'ea',
+        unit_price: 2.75,
+        unit_price_per_stock_unit: 2.75,
+        url: 'https://jigged.app/dashboard/co-1/purchasing/orders/po-0',
+      },
+    ]);
+    expect(callsOn('part_vendor_last_purchase', 'eq')).toEqual(
+      expect.arrayContaining([
+        { table: 'part_vendor_last_purchase', method: 'eq', args: ['company_id', 'co-1'] },
+        { table: 'part_vendor_last_purchase', method: 'eq', args: ['part_id', 'part-1'] },
+      ]),
+    );
+    expect(() => z.object(getPart.output).parse(res.data)).not.toThrow();
+  });
+
+  it('reads nothing on order as zero, never as unknown', async () => {
+    singles.parts = { id: 'part-1', deleted_at: null };
+    stubPartDetail();
+    const res = await getPart.run({ part_id: '7c1e7c7e-0000-4000-8000-000000000001' }, env);
+    if (!res.ok) throw new Error('expected the part');
+    expect(res.data.on_order).toEqual({
+      quantity: 0,
+      on_draft_quantity: 0,
+      next_expected_on: null,
+      open_line_count: 0,
+      draft_line_count: 0,
+      unit_mismatch_line_count: 0,
+    });
+    expect(res.data.open_vendor_po_lines).toEqual([]);
+    expect(res.data.last_po_prices).toEqual([]);
   });
 
   it('opens an archived part by id and says it is archived', async () => {

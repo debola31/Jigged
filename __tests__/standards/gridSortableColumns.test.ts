@@ -80,7 +80,7 @@ describe('server-sorted grids never offer a sort that cannot reach the database'
   /**
    * The check is only as good as its file selection. If a grid page stops
    * matching `onSortChanged` the scan silently skips it, so the five pages known
-   * to sort server-side are asserted to still be in scope. A page that moves off
+   * to sort server-side are asserted to still be in scope (pages and grid components alike). A page that moves off
    * server-side sorting should be removed from this list in the same change.
    */
   it('still covers every page known to sort server-side', () => {
@@ -90,6 +90,9 @@ describe('server-sorted grids never offer a sort that cannot reach the database'
       'app/dashboard/[companyId]/parts/page.tsx',
       'app/dashboard/[companyId]/quotes/page.tsx',
       'app/dashboard/[companyId]/vendors/page.tsx',
+      // The Purchasing hub's Orders tab: a component, not a page, and sorted on the server through
+      // a colId → view-column map (only real columns of vendor_purchase_order_status reach .order()).
+      'components/purchasing/VendorPoList.tsx',
     ];
 
     const outOfScope = pages.filter((rel) => {

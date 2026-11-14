@@ -31,6 +31,9 @@ Requires a local Supabase with all migrations applied. Skipped without it.
 """
 from __future__ import annotations
 
+import uuid
+from datetime import date, datetime, timezone
+
 import pytest
 
 pytestmark = pytest.mark.integration
@@ -84,10 +87,28 @@ def _wipe_company(supabase_admin, company_id: str) -> None:
     def wipe_company(table: str) -> None:
         supabase_admin.table(table).delete().eq("company_id", company_id).execute()
 
+    # Purchasing first, leaves first, as reset_demo_company does: PO lines RESTRICT parts, jobs,
+    # job parts and operations; receipts RESTRICT their lines; RFQ lines RESTRICT parts and
+    # jobs; invitations RESTRICT vendors. The preference is cleared before the list rows go,
+    # so no "a preferred vendor is always listed" rule can stand in the way of the delete.
+    supabase_admin.table("parts").update({"preferred_vendor_id": None}).eq("company_id", company_id).execute()
+    for t in ("quickbooks_purchase_order_line_links", "quickbooks_purchase_order_links",
+              "quickbooks_vendor_map", "quickbooks_purchasing_setup",
+              "vendor_rfq_responses", "vendor_rfq_invitations", "vendor_rfq_lines",
+              "part_vendor_price_breaks", "part_vendors",
+              "vendor_purchase_order_receipts", "vendor_purchase_order_revisions",
+              "outside_shipment_receipts", "outside_shipments",
+              "vendor_purchase_order_lines", "vendor_purchase_orders", "vendor_rfqs",
+              "purchasing_document_series"):
+        wipe_company(t)
+
     wipe("shipment_line_items", "shipment_id", shipment_ids)
     for t in ("shipments", "note_reactions", "note_views", "note_media", "notes",
               "job_fulfillment_audit", "job_operation_completions", "inventory_transactions",
               "part_location_stock"):
+        wipe_company(t)
+    # Lots after the ledger and the balances, before parts: material_lots.part_id RESTRICTs.
+    for t in ("lot_certificates", "material_lots"):
         wipe_company(t)
     wipe("job_materials", "job_id", job_ids)
     wipe("job_operations", "job_id", job_ids)
@@ -305,6 +326,118 @@ def test_seeded_job_statuses_come_from_the_triggers(supabase_admin, demo):
             assert all(s == "not_started" for s in parts), (
                 f"{j['job_number']} is not_started but its parts are {parts}"
             )
+
+
+# Outside steps travel on vendor packing slips (20261112194119). The template marks some outside
+# steps `sent` and some `completed`; until that migration the seeder wrote those statuses straight
+# onto job_operations with no slip behind them -- a fix 20260903203741 had made and a later rebuild
+# silently reverted. compute_job_operation_status reads only slips and receipts, so each such step
+# disagreed with its own derivation and the first part-quantity edit dropped it to `pending`.
+def _outside_steps(supabase_admin, company_id: str) -> tuple[list[dict], dict, dict]:
+    """-> (the demo's outside operations, their live slips by operation with each slip's live
+    good quantity, ordered quantity by job_part id)."""
+    job_ids = _ids(supabase_admin, "jobs", company_id)
+    ops = (
+        supabase_admin.table("job_operations")
+        .select("id, job_part_id, status, sent_at")
+        .in_("job_id", job_ids).not_.is_("vendor_service_id", "null").execute()
+    ).data
+    slips = (
+        supabase_admin.table("outside_shipments")
+        .select("id, job_operation_id, slip_number, quantity, shipped_at, due_back_on, "
+                "vendor_name, service_name, closed_at, voided_at")
+        .eq("company_id", company_id).execute()
+    ).data
+    good: dict[str, float] = {}
+    for r in (
+        supabase_admin.table("outside_shipment_receipts")
+        .select("outside_shipment_id, quantity_good, voided_at")
+        .eq("company_id", company_id).execute()
+    ).data:
+        if r["voided_at"] is None:
+            good[r["outside_shipment_id"]] = good.get(r["outside_shipment_id"], 0.0) + float(r["quantity_good"])
+    by_op: dict[str, list[dict]] = {}
+    for s in slips:
+        if s["voided_at"] is None:
+            by_op.setdefault(s["job_operation_id"], []).append({**s, "good": good.get(s["id"], 0.0)})
+    ordered = {
+        jp["id"]: float(jp["quantity"]) for jp in (
+            supabase_admin.table("job_parts").select("id, quantity").eq("company_id", company_id).execute()
+        ).data
+    }
+    return ops, by_op, ordered
+
+
+def _assert_outside_steps_agree_with_their_slips(supabase_admin, company_id: str) -> None:
+    ops, by_op, ordered = _outside_steps(supabase_admin, company_id)
+    sent = [o for o in ops if o["status"] == "sent"]
+    back = [o for o in ops if o["status"] == "completed"]
+    assert sent, "the demo shows no outside step at a vendor, so this proves nothing"
+    assert back, "the demo shows no outside step that came back, so this proves nothing"
+
+    for op in sent:
+        open_slips = [s for s in by_op.get(op["id"], []) if s["closed_at"] is None]
+        at_vendor = sum(float(s["quantity"]) - s["good"] for s in open_slips)
+        assert open_slips and at_vendor > 0, (
+            f"operation {op['id']} reads sent with no live slip holding pieces at the vendor")
+        for s in open_slips:
+            assert s["slip_number"].startswith("VPS-"), s["slip_number"]
+            assert s["vendor_name"] and s["service_name"], "the slip froze no vendor or service name"
+            assert s["due_back_on"] >= s["shipped_at"][:10], "due back before it left"
+        first_out = min(s["shipped_at"] for s in by_op[op["id"]])
+        assert datetime.fromisoformat(op["sent_at"]) == datetime.fromisoformat(first_out), (
+            "sent_at must mirror the first live slip")
+
+    for op in back:
+        returned = sum(s["good"] for s in by_op.get(op["id"], []))
+        assert returned >= ordered[op["job_part_id"]], (
+            f"operation {op['id']} reads completed with {returned} of "
+            f"{ordered[op['job_part_id']]} back on its slips")
+
+
+def test_seeded_outside_steps_are_backed_by_slips(supabase_admin, demo):
+    """Every demo step at a vendor has a live VPS- slip with pieces outstanding, and every one that
+    came back has receipts covering the part -- the rows the status is derived from."""
+    _assert_outside_steps_agree_with_their_slips(supabase_admin, demo["demo_id"])
+
+
+def test_a_part_quantity_edit_leaves_a_seeded_send_at_the_vendor(supabase_admin, demo):
+    """The symptom that was reported. recompute_job_ops_status_from_part_qty() re-derives every
+    operation on the part; with no slip behind it a seeded `sent` step came back `pending`."""
+    demo_id = demo["demo_id"]
+    ops, _, ordered = _outside_steps(supabase_admin, demo_id)
+    op = next(o for o in ops if o["status"] == "sent")
+
+    supabase_admin.table("job_parts").update(
+        {"quantity": ordered[op["job_part_id"]] + 1}
+    ).eq("id", op["job_part_id"]).execute()
+
+    after = (
+        supabase_admin.table("job_operations").select("status, sent_at").eq("id", op["id"])
+        .single().execute()
+    ).data
+    assert after["status"] == "sent", f"a quantity edit moved a step at the vendor to {after['status']}"
+    assert after["sent_at"] == op["sent_at"], "a quantity edit rewrote the send stamp"
+
+
+def test_reset_twice_sends_the_outside_steps_on_fresh_slips(supabase_admin, demo):
+    """Reset deletes receipts, then slips, before the operations they belong to -- and the
+    re-seeded jobs reuse their numbers, so a slip left behind would collide on VPS-{job}-1. Twice,
+    for #675's reason: only the second reset runs against slips the seeder itself wrote."""
+    demo_id, client, user = demo["demo_id"], demo["client"], demo["user"]
+    args = {"p_source_company_id": demo["source_id"], "p_user_id": user["user_id"]}
+
+    client.rpc("reset_demo_company", args).execute()
+    client.rpc("reset_demo_company", args).execute()
+
+    _assert_outside_steps_agree_with_their_slips(supabase_admin, demo_id)
+    numbers = [
+        s["slip_number"] for s in (
+            supabase_admin.table("outside_shipments").select("slip_number")
+            .eq("company_id", demo_id).execute()
+        ).data
+    ]
+    assert len(numbers) == len(set(numbers)), f"a reset stacked slips: {sorted(numbers)}"
 
 
 def test_reset_is_repeatable(supabase_admin, demo):
@@ -703,3 +836,177 @@ def test_operator_events_are_still_recorded_for_the_real_company(supabase_admin,
     ).execute()
 
     assert _operator_event_count(supabase_admin, source_id) == before + 1
+
+
+# ===========================================================================
+# Purchasing in the demo (plan §2 "Demo data", §5.1; V1, S6)
+#
+# There is no purchasing template: the demo starts with no purchase orders. But a demo user can
+# make every kind of purchasing row, and each one is a RESTRICT parent somewhere — PO lines of
+# parts, jobs and operations; receipts of their lines; RFQ lines of parts and jobs; invitations
+# of vendors; and the heat a receipt records is a material_lots row, which RESTRICTs its part
+# and which reset_demo_company never deleted before this. Reset is one transaction, so a single
+# missed table rolls the whole reset back and the demo can never be reset again (#675's shape).
+# ===========================================================================
+
+PURCHASING_ROWS = (
+    "vendor_purchase_orders", "vendor_purchase_order_lines", "vendor_purchase_order_receipts",
+    "vendor_purchase_order_revisions", "vendor_rfqs", "vendor_rfq_lines", "vendor_rfq_invitations",
+    "vendor_rfq_responses", "part_vendor_price_breaks", "purchasing_document_series",
+    "material_lots", "lot_certificates",
+)
+
+
+def _count_rows(supabase_admin, table: str, company_id: str) -> int:
+    # By company_id rather than id: purchasing_document_series is keyed (company, kind).
+    res = (
+        supabase_admin.table(table)
+        .select("company_id", count="exact")
+        .eq("company_id", company_id)
+        .execute()
+    )
+    return res.count or 0
+
+
+def _first(rows):
+    return rows[0] if isinstance(rows, list) else rows
+
+
+def _stage_purchasing(supabase_admin, client, demo_id: str) -> dict:
+    """Every kind of purchasing row a demo user can make, through the real RPCs as the real
+    user: a sent PO with a part line, an outside line linked to a slip and an "other" line on a
+    machine; a receipt that records a heat (so a lot) with a certificate on it; and an RFQ with
+    an invitation."""
+    admin = supabase_admin
+    today = date.today().isoformat()
+
+    job_ids = [
+        j["id"] for j in admin.table("jobs").select("id").eq("company_id", demo_id)
+        .is_("deleted_at", "null").execute().data
+    ]
+    outside_ops = (
+        admin.table("job_operations")
+        .select("id, job_part_id, vendor_service_id, status")
+        .in_("job_id", job_ids).not_.is_("vendor_service_id", "null").execute().data
+    )
+    op = next(o for o in outside_ops if o["status"] != "completed")
+    vendor = (
+        admin.table("vendor_services").select("vendor_id").eq("id", op["vendor_service_id"])
+        .single().execute().data["vendor_id"]
+    )
+    piece_part = (
+        admin.table("job_parts").select("part_id").eq("id", op["job_part_id"]).single().execute().data["part_id"]
+    )
+    piece_unit = (
+        admin.table("parts").select("primary_unit").eq("id", piece_part).single().execute().data["primary_unit"]
+    )
+    material = next(
+        p for p in admin.table("parts").select("id, primary_unit").eq("company_id", demo_id)
+        .eq("source", "bought").is_("deleted_at", "null").execute().data
+        if p["primary_unit"]
+    )
+    machine = (
+        admin.table("work_centers").select("id").eq("company_id", demo_id).is_("deleted_at", "null")
+        .limit(1).execute().data[0]["id"]
+    )
+    places = admin.table("inventory_locations").select("id, parent_id").eq("company_id", demo_id).execute().data
+    parents = {p["parent_id"] for p in places if p["parent_id"]}
+    leaf = next(p["id"] for p in places if p["id"] not in parents)
+
+    po_id = _first(client.rpc("create_vendor_purchase_order", {
+        "p_vendor_id": vendor, "p_ordered_on": today, "p_today": today, "p_header": {},
+        "p_lines": [
+            {"line_kind": "part", "part_id": material["id"], "quantity": 5, "unit": material["primary_unit"],
+             "unit_price": 2.5, "price_source": "manual", "description": "Demo material"},
+            {"line_kind": "outside_service", "job_operation_id": op["id"], "quantity": 1, "unit": piece_unit,
+             "unit_price": 3.5, "price_source": "vendor_service", "description": "Demo outside step"},
+            {"line_kind": "other", "work_center_id": machine, "quantity": 1, "unit": "each",
+             "unit_price": 450, "price_source": "manual", "description": "Calibration"},
+        ],
+    }).execute().data)["id"]
+    client.rpc("set_vendor_purchase_order_state",
+               {"p_id": po_id, "p_action": "mark_sent", "p_today": today}).execute()
+    lines = {
+        line["line_kind"]: line["id"] for line in admin.table("vendor_purchase_order_lines")
+        .select("id, line_kind").eq("vendor_purchase_order_id", po_id).execute().data
+    }
+
+    slip = _first(client.rpc("create_outside_shipment",
+                             {"p_job_operation_id": op["id"], "p_quantity": 1}).execute().data)["shipment_id"]
+    linked = (
+        admin.table("outside_shipments").select("vendor_purchase_order_line_id").eq("id", slip)
+        .single().execute().data["vendor_purchase_order_line_id"]
+    )
+    assert linked == lines["outside_service"], "the demo slip did not link to its PO line"
+
+    client.rpc("receive_vendor_purchase_order", {
+        "p_id": po_id, "p_receipt_group_id": str(uuid.uuid4()),
+        "p_receipts": [{"line_id": lines["part"], "quantity": 5, "quantity_unit": "purchase",
+                        "location_id": leaf, "heat_number": "DEMO-HEAT-1"}],
+        "p_received_at": datetime.now(timezone.utc).isoformat(),
+    }).execute()
+    lot = (
+        admin.table("vendor_purchase_order_receipts").select("lot_id").eq("vendor_purchase_order_id", po_id)
+        .execute().data[0]["lot_id"]
+    )
+    admin.table("lot_certificates").insert({
+        "company_id": demo_id, "lot_id": lot, "file_name": "mill-cert.pdf",
+        "file_path": f"{demo_id}/lots/{lot}/mill-cert.pdf",
+    }).execute()
+
+    client.rpc("create_vendor_rfq", {
+        "p_company_id": demo_id, "p_vendor_ids": [vendor], "p_header": {"title": "Demo request"},
+        "p_lines": [{"part_id": material["id"], "description": "Demo material",
+                     "unit": material["primary_unit"], "quantities": [10]}],
+    }).execute()
+    return {"vendor": vendor, "po_id": po_id}
+
+
+def test_seeded_preferred_vendors_are_on_their_vendors_lists(supabase_admin, demo):
+    """[V1] The template writes `preferred_vendor_id` directly; the trigger on `parts` puts each
+    of those vendors on its part's approved list, so the demo's Buying tab is never empty for a
+    part that has a preferred vendor."""
+    demo_id = demo["demo_id"]
+    preferred = (
+        supabase_admin.table("parts").select("id, part_name, preferred_vendor_id")
+        .eq("company_id", demo_id).not_.is_("preferred_vendor_id", "null").execute().data
+    )
+    assert preferred, "the template sets no preferred vendor, so this proves nothing"
+    listed = {
+        (r["part_id"], r["vendor_id"]) for r in supabase_admin.table("part_vendors")
+        .select("part_id, vendor_id").eq("company_id", demo_id).is_("deleted_at", "null").execute().data
+    }
+    missing = [p["part_name"] for p in preferred if (p["id"], p["preferred_vendor_id"]) not in listed]
+    assert not missing, f"preferred vendors missing from the approved list: {missing}"
+
+
+def test_reset_clears_purchasing_twice_and_restarts_the_numbering(supabase_admin, demo):
+    """[S6] With a sent PO, an outside line linked to a slip, an "other" line on a machine, a
+    receipt with a heat and a certificate, and an RFQ invitation all present, reset succeeds —
+    twice, the #675 shape — leaves no purchasing row, lot or certificate behind, and the next PO
+    is PO-0001 again because the series went with it."""
+    demo_id, client, user = demo["demo_id"], demo["client"], demo["user"]
+    _stage_purchasing(supabase_admin, client, demo_id)
+    staged = {t: _count_rows(supabase_admin, t, demo_id) for t in PURCHASING_ROWS}
+    for table in ("vendor_purchase_orders", "vendor_purchase_order_receipts", "vendor_rfq_invitations",
+                  "material_lots", "lot_certificates", "purchasing_document_series"):
+        assert staged[table] > 0, f"the staging made no {table}, so the reset proves nothing about it"
+
+    args = {"p_source_company_id": demo["source_id"], "p_user_id": user["user_id"]}
+    client.rpc("reset_demo_company", args).execute()
+    client.rpc("reset_demo_company", args).execute()
+
+    left = {t: _count_rows(supabase_admin, t, demo_id) for t in PURCHASING_ROWS}
+    assert left == {t: 0 for t in PURCHASING_ROWS}, f"reset left purchasing rows behind: {left}"
+
+    vendor = (
+        supabase_admin.table("vendors").select("id").eq("company_id", demo_id).is_("deleted_at", "null")
+        .limit(1).execute().data[0]["id"]
+    )
+    today = date.today().isoformat()
+    created = _first(client.rpc("create_vendor_purchase_order", {
+        "p_vendor_id": vendor, "p_ordered_on": today, "p_today": today, "p_header": {},
+        "p_lines": [{"line_kind": "other", "description": "Freight", "quantity": 1, "unit": "each",
+                     "unit_price": 45, "price_source": "manual"}],
+    }).execute().data)
+    assert created["po_number"] == "PO-0001", "the numbering survived the reset"

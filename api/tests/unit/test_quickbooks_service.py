@@ -1133,3 +1133,28 @@ def test_an_unreadable_timestamp_forces_a_re_check(link_over, conn_over):
     "nothing to do" would show a stale balance as current, which is the single failure
     this whole feature exists to prevent."""
     assert qb.links_need_check([_link(**link_over)], _conn(**conn_over), _NOW) is True
+
+
+def test_list_qb_terms_never_reaches_intuit_in_fake_mode(monkeypatch):
+    """QUICKBOOKS_FAKE covers the payment-terms picker's list, as it covers term resolution on
+    a push. Found end to end (e2e/purchasing-quickbooks.spec.ts): a picker opened on the E2E
+    company's fake-connected QBO sent the fake token to Intuit, and the 401 plus the failed
+    refresh flagged the connection reconnect_required for every later spec in the run."""
+    monkeypatch.setenv("QUICKBOOKS_FAKE", "1")
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    monkeypatch.setattr(qb, "qb_query", lambda *a, **k: pytest.fail("reached Intuit"))
+    terms = qb.list_qb_terms(object(), "company-1")
+    assert [t["name"] for t in terms] == ["Due on receipt", "Net 10", "Net 15", "Net 30", "Net 60"]
+    # A copy each call: a caller that edits the list cannot change the next one.
+    terms[0]["name"] = "changed"
+    assert qb.list_qb_terms(object(), "company-1")[0]["name"] == "Due on receipt"
+
+
+def test_list_qb_terms_ignores_the_fake_flag_in_production(monkeypatch):
+    """A stray QUICKBOOKS_FAKE must never stand in for a real company's terms."""
+    monkeypatch.setenv("QUICKBOOKS_FAKE", "1")
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "production")
+    monkeypatch.setattr(
+        qb, "qb_query", lambda *a, **k: {"Term": [{"Id": "3", "Name": "Net 30", "DueDays": 30}]}
+    )
+    assert qb.list_qb_terms(object(), "company-1") == [{"id": "3", "name": "Net 30", "due_days": 30}]

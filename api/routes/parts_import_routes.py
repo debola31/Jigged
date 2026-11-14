@@ -86,7 +86,6 @@ def _has_routing_columns(mappings: dict[str, str]) -> bool:
         "cycle_minutes_per_unit",
         "labor_rate_override",
         "external_unit_price",
-        "external_setup_cost",
     }
     return bool(db_fields & routing_indicators)
 

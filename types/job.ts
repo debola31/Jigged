@@ -292,6 +292,8 @@ export interface JobPartWithRelations extends JobPart {
     id: string;
     part_name: string;
     description: string | null;
+    /** `made` or `bought`: a bought part with no operations shows its purchasing line. */
+    source: string;
   } | null;
   job_operations?: JobOperation[];
 }
@@ -408,6 +410,16 @@ export const PRODUCTION_STATUS_CONFIG: Record<
   completed: { label: 'Completed', color: 'success' },
   cancelled: { label: 'Cancelled', color: 'error' },
 };
+
+/**
+ * A production status in words, from a read that types it as a plain string (the operator
+ * traveler's). An unknown value prints as it came rather than as nothing.
+ */
+export function productionStatusLabel(status: string): string {
+  return status in PRODUCTION_STATUS_CONFIG
+    ? PRODUCTION_STATUS_CONFIG[status as ProductionStatus].label
+    : status;
+}
 
 /**
  * Fulfillment-status display configuration.

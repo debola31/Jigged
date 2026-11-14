@@ -159,6 +159,17 @@ SERVICES_AMBIGUOUS = SERVICES + [
         "vendors": {"name": "Great Lakes"},
     },
 ]
+# A live service of a vendor archived since. The routing editor's picker leaves it out
+# (getVendorServicesForRouting), so the importer must too.
+SERVICES_WITH_AN_ARCHIVED_VENDOR = SERVICES + [
+    {
+        "id": "vs-anodize-old",
+        "name": "Anodize",
+        "unit_price": 3.0,
+        "deleted_at": None,
+        "vendors": {"name": "Old Plater", "deleted_at": "2026-10-01T00:00:00+00:00"},
+    },
+]
 
 
 class TestRoutingsValidate:
@@ -381,6 +392,40 @@ class TestRoutingsExecute:
         assert r.status_code == 200
         op_inserts = [x for x in insert_log if x["table"] == "routing_operations"]
         assert op_inserts[0]["data"][0]["vendor_service_id"] == "vs-anodize-2"
+
+    @pytest.mark.unit
+    async def test_an_archived_vendors_service_is_never_a_target(self, test_client):
+        """An archived vendor's live service is as gone as an archived service: a name it shares
+        with a live vendor's service is that service -- not an ambiguity naming a vendor no screen
+        shows -- and naming the archived vendor finds nothing."""
+        insert_log = []
+        request = {
+            "company_id": "co1",
+            "mappings": {"Part": "part_name", "WC": "work_center_name"},
+            "rows": [{"Part": "PART001", "WC": "Anodize"}],
+            "skip_conflicts": False,
+        }
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS, vendor_services=SERVICES_WITH_AN_ARCHIVED_VENDOR, insert_log=insert_log
+        )
+        r = await test_client.post("/api/routings/import/execute", json=request)
+        app.dependency_overrides.clear()
+        assert r.status_code == 200
+        op_inserts = [x for x in insert_log if x["table"] == "routing_operations"]
+        assert op_inserts[0]["data"][0]["vendor_service_id"] == "vs-anodize"
+
+        app.dependency_overrides[get_supabase] = create_override(
+            parts=PARTS, vendor_services=SERVICES_WITH_AN_ARCHIVED_VENDOR
+        )
+        r = await call_validate({
+            "company_id": "co1",
+            "mappings": {"Part": "part_name", "WC": "work_center_name", "Vendor": "vendor_name"},
+            "rows": [{"Part": "PART001", "WC": "Anodize", "Vendor": "Old Plater"}],
+        })
+        app.dependency_overrides.clear()
+        assert [c["existing_value"] for c in r.json()["conflicts"]] == [
+            "'Anodize' is not a service offered by 'Old Plater'."
+        ]
 
     @pytest.mark.unit
     async def test_reimport_upserts_existing_operation_no_500(self, test_client):

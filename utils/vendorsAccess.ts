@@ -16,7 +16,7 @@ import type {
 } from '@/types/vendorContact';
 
 const VENDOR_COLUMNS =
-  'id, company_id, name, created_at, updated_at';
+  'id, company_id, name, default_payment_terms, created_at, updated_at';
 
 const VENDOR_CONTACT_COLUMNS =
   'id, vendor_id, name, role, role_label, email, phone, is_primary, created_at, updated_at';
@@ -377,6 +377,32 @@ export async function updateVendor(
     throw toFriendlyError(error, { entity: 'vendor' });
   }
   return data as Vendor;
+}
+
+/**
+ * The vendor's standing payment terms (`vendors.default_payment_terms`) — the vendor page's terms
+ * card, auto-saved. Copied onto a NEW purchase order whose create names no terms, and never read
+ * by an existing one: a PO keeps the terms it was raised on. Blank clears it to NULL, so a cleared
+ * field never prefills an empty string onto every new PO. A plain column write, like
+ * `updateVendor`: vendors are browser-writable. Returns what was stored.
+ */
+export async function setVendorDefaultPaymentTerms(
+  vendorId: string,
+  terms: string | null,
+): Promise<string | null> {
+  const supabase = getSupabase();
+  const { data, error } = await supabase
+    .from('vendors')
+    .update({
+      default_payment_terms: (terms ?? '').trim() || null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', vendorId)
+    .select('id, default_payment_terms')
+    .single();
+
+  if (error) throw toFriendlyError(error, { entity: 'vendor', fallback: "Failed to save the vendor's terms." });
+  return data.default_payment_terms;
 }
 
 /**

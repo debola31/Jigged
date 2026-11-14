@@ -97,14 +97,14 @@ states the requirement and links there rather than restating it.
 | ID | Title | Requirement | Priority | Status |
 |---|---|---|---|---|
 | FR-1 | Flexible Inventory Units | Multiple units of measure per part; depleting in any supported unit converts and decrements correctly (a steel bar in lbs, depleted 6 inches). See [inventory.md](modules/inventory.md) | Must | **Built** |
-| FR-2 | Reorder Threshold Alerts | Visual alert when an item falls below its reorder threshold, **and** email to designated users | Must | **Partial** — the low-stock badge and the parts-page shortage lens ship; **there is no email, no buy list and no on-order concept.** Completes in inventory Phase 3 (§8.1) |
+| FR-2 | Reorder Threshold Alerts | Visual alert when an item falls below its reorder threshold, **and** email to designated users | Must | **Partial** — **Shortages** lists every part at or under its reorder point, net of what is on order and on draft, and on order shows on the job's Materials card ([purchasing.md](modules/purchasing.md#the-buy-list), inventory Phase 3, 2026-11); **there is no email.** ⚠ *This cell credited a low-stock badge and the parts-page shortage lens. The badge went 2026-08-02 and the lens with `is_stocked` on 2026-08-18, so between then and Shortages FR-2 had no surface at all* |
 | FR-3 | Job Creation from Quote | Quote → job with no approval ceremony. Conversion captures a **required customer PO** — the authorization — and is blocked without it. An optional PO PDF attaches to the job. See [quotes.md](modules/quotes.md) | Must | **Built** |
 | FR-3a | Quote PDF Export | A branded, customer-facing PDF: shop FROM block, Customer · Ship-to (only when it differs) · contact, line items, validity, lead time, payment terms, and an acceptance block telling the customer to **reply with a purchase order** — no signature line. Internal cost, markup and routing are excluded. See [quotes.md](modules/quotes.md#printing) | Must | **Built.** *The emailing half of this row was **descoped** — there is no Email action and no server send; users send the downloaded PDF themselves* |
 | FR-3b | Direct Job Creation from PO | When a customer sends a PO with no prior quote: pick the customer, enter the PO #, add existing parts with quantity and agreed price, optionally attach the PDF. `quote_id` null; the job number comes from the same per-company counter quotes use | Must | **Built** (v1: existing parts that already have a routing) |
 | FR-4 | Quote Lifecycle | Active until `expiration_date` passes, then Expired — read-only but still convertible with a warning. Converting captures the due date; lead time is free text and does not imply a date. The pending-approval / approved / rejected states were removed in April 2026 | Must | **Built.** *This row's acceptance criterion used to cite `converted_to_job_id`; that column was **removed** in the same April 2026 change — a quote's jobs are found through `quote_line_items.id → jobs.source_quote_line_item_id`* |
 | FR-5 | Operator Station Sign-In | Email/password on the operator's own phone (session persists, so effectively one-time per device), then pick the work centre from the in-app selector. Remembered per device, changeable from the header. **No PIN, no badge, and nothing posted at the machine to scan** | Must | **Built** |
 | FR-6 | Pick Work from the Station Queue | The station's job list shows every (job, part) ready or in progress there, by due date; an **All Stations** lens covers the roaming operator. Tap a row, record **how many good pieces you finished** — no job entry, no start/stop, no timer (§4.3). Partial quantities are normal | Must | **Built** |
-| FR-6a | Outside (External-Vendor) Operations | A step at an `external` work centre is first-class, with **send/receive** instead of quantity capture: `pending → sent → completed`. Unmistakable everywhere it appears, never completable via the internal path, never auto-skipped. The **Vendors → Outside processing** tab is the shipping lead's worklist. *Deferred: vendor lead-time maths, PO generation, cost actuals, scheduling, split sends.* See §4.3 and [jobs.md](modules/jobs.md#outside-external-vendor-operations) | Must | **Built** |
+| FR-6a | Outside (External-Vendor) Operations | A step that targets a **vendor service** is first-class, with **send/receive** instead of quantity capture: `pending → sent → completed`. Unmistakable everywhere it appears, never completable via the internal path, never auto-skipped. The Jobs page's outside-work strip and drawer are the shipping lead's worklist. *Deferred: vendor lead-time maths, cost actuals, scheduling.* ⚠ *This cell said "a step at an `external` work centre" — that column was dropped 2026-08-23, and an op is outside work iff it targets a vendor service ([vendor-services.md](modules/vendor-services.md)). It also named a **Vendors → Outside processing** tab (deleted 2026-08-23) and deferred split sends (shipped 2026-09-03) and **PO generation** — built 2026-11: an outside step can be ordered on a vendor PO whose line its slips link to ([purchasing.md](modules/purchasing.md#outside-processing-one-source-of-truth-for-received)).* See §4.3, [jobs.md](modules/jobs.md#outside-external-vendor-operations) and [outside-processing.md](modules/outside-processing.md) | Must | **Built** |
 | FR-7 | File Attachment Support | Jobs accept PDFs; parts accept PDF/STEP/DWG on the workspace Files tab, with in-app PDF and STEP 3D viewing (STEP via `online-3d-viewer`). DWG is download-only — Contour standardises on PDF upstream | Must | **Partial** — office side delivered June 2026. **Operator-on-device viewing is not built**, and closing that is what closes this FR |
 | FR-8 | Job Status Lifecycle | Three **independent** axes, not one linear status: production (`not_started → in_progress → completed`, plus cancelled), fulfillment (`unshipped → partially_shipped → fully_shipped`), invoicing (`uninvoiced → partially_invoiced → fully_invoiced`). Invoicing is **partial**, not a terminal state — you bill what has shipped as it ships. An outside op's `sent` is an **operation-level** state, separate from all three; it simply holds its part at `in_progress` | Must | **Built** |
 | FR-9 | Invoice Generation | **Multiple invoices per job** (progressive billing). The bookkeeper picks the per-part quantity, capped at the **ordered** quantity not yet invoiced; the picker defaults to shipped-but-unbilled and nudges if you bill ahead. See [invoicing.md](modules/invoicing.md) | Must | **Built** |
@@ -135,10 +135,13 @@ marking, no rework flag, no QC queue, no `quality_inspections` table. Retained a
 of FR-19's intent; its fate is tied to the operator-side scrap/defect discovery — revive, reshape
 or drop, but decide there.
 
-**Flow 3: Inventory Reorder.** Operator depletes stock on a job → the item drops below its
-threshold → the owner sees it → approves a reorder → an admin orders externally → material
-arrives and is received → the alert clears. **Roughly two of these seven steps exist today**;
-Phase 3 (§8.1) delivers the rest.
+**Flow 3: Inventory Reorder.** Operator depletes stock on a job → the item reaches its threshold →
+it appears on **Shortages** → an office user creates a draft PO from it, and it leaves Shortages (drafts
+count) → the PDF goes by mailto and, optionally, the PO to QuickBooks → material arrives and is
+received against the PO, with heat and cert, moving from on order to on hand. **Built 2026-11** ([purchasing.md](modules/purchasing.md)),
+all but FR-2's email. **There is no "owner approves a reorder" step, by decision**: admins and users
+order without approval. ⚠ *This flow was written with that step, then "an admin orders externally",
+and said "roughly two of these seven steps exist today".*
 
 **Flow 4: Operator Station Sign-In.** Operator reaches CNC Lathe #2 → opens the operator view on
 their phone (a bookmark, or **Shop floor view** from the dashboard jobs list) → signs in if
@@ -316,11 +319,11 @@ this is only the index.
 |---|---|---|
 | **1 — close the loop** ✅ **2026-07-28** | J1 opening balances · J9 count sheet · J4 material check · J7 issue-to-job | Numbers get in, get used on a job, stay true. **Zero new tables, zero migrations** |
 | **2 — locations reshaped** | J2 | Incremental places, a permanent visual board and fill state; retires the structure-first wizard |
-| **3 — purchasing** | J5 POs · J6 receiving · J10 buy list + on-order · J4's shop-wide shortage view | Completes **Flow 3** and satisfies **FR-2** properly. This is issue #571 |
+| **3 — purchasing** ✅ **2026-11** | J5 POs · J6 receiving · J10 buy list + on-order · J4's shop-wide shortage view (as Shortages) | Completes **Flow 3** — with no approval step — and **FR-2** but its email. Issue #571; [purchasing.md](modules/purchasing.md) |
 | **4 — debt paydown** | J8 remnants | Remnants, reconciliation, one-stock-engine collapse, `job_materials` drop |
 
 **Already built:** J3 (material cost on a quote, FR-11), J11 (QR scan → bin view), and all of
-Phase 1.
+Phases 1 and 3.
 
 > Phase 1's schema cost was budgeted at one table and came in at **zero** — every figure J4 and J7
 > needed already existed on `parts_bom`, `parts` and `inventory_transactions`, and J9's count sheet

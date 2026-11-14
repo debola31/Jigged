@@ -95,13 +95,23 @@ seeder are unaffected.
 >
 > | SQL check → CI test | Catches | Fix |
 > |---|---|---|
-> | `tenant_tables_missing_write_gate()` → `test_no_tenant_table_left_ungated` | a `company_id` table with no `billing_gate_insert` policy | `SELECT public.apply_billing_write_gate('public.your_table');` in that table's own migration |
+> | `tenant_tables_missing_write_gate()` → `test_no_tenant_table_left_ungated` | a `company_id` table with no `billing_gate_insert` policy; **and** a parent-resolved child — no `company_id`, a foreign key into a gated table — the browser can write with no `billing_gate_*` policy for that verb | the helper below; for a child, the three hand-written policies |
 > | `definer_writers_missing_write_gate()` → `test_no_definer_function_walks_past_the_gate` | a `SECURITY DEFINER` function that writes a gated table without consulting the gate | `PERFORM public.inv_assert_can_write(<company>);` after the membership check |
 >
-> `apply_billing_write_gate` only works on a **direct `company_id`** table.
+> `apply_billing_write_gate` only works on a **direct `company_id`** table — `SELECT
+> public.apply_billing_write_gate('public.your_table');` in that table's own migration.
 > Parent-resolved children (no `company_id`) need hand-written policies that resolve
-> the parent's company — pattern in
-> [`20260725210136_stripe_write_enforcement.sql`](../../supabase/migrations/20260725210136_stripe_write_enforcement.sql).
+> the parent's company, plus the immutability trigger on the parent FK — the newest
+> complete example is
+> [`20261112194019_vendor_addresses_billing_gate.sql`](../../supabase/migrations/20261112194019_vendor_addresses_billing_gate.sql).
+>
+> **Withdrawn:** *`vendor_addresses` needs no gate — it keys on a `company_id` it does not have,
+> and "a lapsed shop cannot create the parent to hang one on"*
+> ([`20260824022226`](../../supabase/migrations/20260824022226_vendor_addresses.sql)) — wrong
+> because a lapsed shop's **existing** vendors went on taking new addresses, edits and deletes for
+> eleven weeks, with the guard green: it read only tables that have a `company_id`. Since
+> `20261112194019` the table is gated through its vendor, exactly as `vendor_contacts` is, and the
+> guard's child branch would name the next one.
 >
 > **The first guard checks that a policy *exists*, so it is blind to a definer function
 > walking past a policy that does.** That is how the five location-stock RPCs shipped
@@ -213,9 +223,11 @@ The DB refuses the write; the UI has to explain it. That path lives in
   `AdminGuard` and the Stripe routes call `_verify_company_admin`, so offering it to
   anyone else ends in a 403. Operators get wording pointing at the office rather than
   a page they cannot reach.
-- `SubscriptionRequiredNotice` says it up front on the five create routes, as an
+- `SubscriptionRequiredNotice` says it up front on every create route, as an
   explanation rather than a disabled control — see
-  [interaction-standards §4](../interaction-standards.md).
+  [interaction-standards §4](../interaction-standards.md), whose
+  `grep -l SubscriptionRequiredNotice app/` is the list. **Withdrawn:** "the five create
+  routes" — a count nothing checks; purchasing's PO and RFQ forms made it seven.
 - Chat explains the requirement above its composer with an admin-only billing action;
   others are directed to their shop admin. Send, starters, follow-ups, attachments and
   approvals check entitlement before any write. History stays readable, and a draft

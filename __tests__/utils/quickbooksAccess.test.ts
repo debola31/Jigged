@@ -50,13 +50,25 @@ const captureException = vi.fn();
 vi.mock('@sentry/nextjs', () => ({ captureException: (...a: unknown[]) => captureException(...a) }));
 
 import {
+  checkQuickBooksPreferences,
   correctInvoiceRecordedQuantities,
   getJobPartInvoiceSummaries,
   getQuickBooksInvoiceLinksForJob,
-  syncQuickBooksInvoiceStatus,
+  getQuickBooksPurchasingSetup,
   isQuickBooksUnreachable,
+  isQuickBooksUnverified,
+  isVendorPoPushRefusal,
+  listQuickBooksPurchaseAccounts,
+  listQuickBooksPurchaseItems,
+  preflightVendorPoPush,
+  pushVendorPo,
+  setQuickBooksApAccount,
+  setQuickBooksPurchaseItems,
+  syncQuickBooksInvoiceStatus,
+  verifyVendorPoLink,
   QuickBooksError,
   QB_ERROR,
+  VENDOR_PO_PUSH_REFUSAL_CODES,
 } from '@/utils/quickbooksAccess';
 
 describe('getJobPartInvoiceSummaries', () => {
@@ -482,5 +494,242 @@ describe('correctInvoiceRecordedQuantities', () => {
     await expect(correctInvoiceRecordedQuantities('link-1', [])).rejects.toThrow(
       /subscription isn't active/,
     );
+  });
+});
+
+/**
+ * Vendor purchase orders in QuickBooks (plan §3.11). Every call goes through the backend
+ * (`qbRequest`), and every one but the setup read reaches QuickBooks -- so each is a plain
+ * function a click calls, never a mount. QB1, QB7, QB10.
+ */
+describe('vendor PO QuickBooks access', () => {
+  const fetchMock = vi.fn();
+
+  function httpResponse(status: number, body: unknown) {
+    return { ok: status >= 200 && status < 300, status, json: async () => body };
+  }
+
+  async function expectQuickBooksError(p: Promise<unknown>): Promise<QuickBooksError> {
+    try {
+      await p;
+    } catch (e) {
+      if (e instanceof QuickBooksError) return e;
+      throw e;
+    }
+    throw new Error('expected the call to reject with a QuickBooksError');
+  }
+
+  function lastCall(): { url: string; method: string; body: unknown; headers: Record<string, string> } {
+    const [url, init] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    return {
+      url,
+      method: init.method,
+      body: init.body === undefined ? undefined : JSON.parse(init.body),
+      headers: init.headers,
+    };
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubGlobal('fetch', fetchMock);
+    mockSupabase.auth.getSession.mockResolvedValue({
+      data: { session: { access_token: 'token-123' } },
+    });
+    fetchMock.mockResolvedValue(httpResponse(200, {}));
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('reads the purchasing setup with a bare GET, the one call that is safe on mount (QB1)', async () => {
+    const setup = {
+      connected: true,
+      provider: 'qbo',
+      items: [],
+      one_item_for_all: false,
+      ap_account: null,
+      preferences: null,
+      missing: ['item:part', 'item:outside_service', 'item:other', 'ap_account'],
+    };
+    fetchMock.mockResolvedValue(httpResponse(200, setup));
+
+    await expect(getQuickBooksPurchasingSetup('co-1')).resolves.toEqual(setup);
+    const call = lastCall();
+    expect(call.url).toMatch(/\/api\/quickbooks\/co-1\/purchasing\/setup$/);
+    expect(call.method).toBe('GET');
+    expect(call.body).toBeUndefined();
+    expect(call.headers.Authorization).toBe('Bearer token-123');
+  });
+
+  it('lists purchase items and accounts with GETs, and only when called (QB1, QB7)', async () => {
+    fetchMock.mockResolvedValue(httpResponse(200, { items: [], accounts: [] }));
+    await listQuickBooksPurchaseItems('co-1');
+    expect(lastCall().url).toMatch(/\/api\/quickbooks\/co-1\/purchasing\/items$/);
+    expect(lastCall().method).toBe('GET');
+
+    fetchMock.mockResolvedValue(httpResponse(200, { accounts: [], ap_accounts: [] }));
+    await listQuickBooksPurchaseAccounts('co-1');
+    expect(lastCall().url).toMatch(/\/api\/quickbooks\/co-1\/purchasing\/accounts$/);
+    expect(lastCall().method).toBe('GET');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('sends one item for every line kind as all_kinds -- the default (QB7)', async () => {
+    await setQuickBooksPurchaseItems('co-1', {
+      allKinds: { action: 'use_existing', qb_item_id: 'ITEM-1' },
+    });
+    const call = lastCall();
+    expect(call.url).toMatch(/\/api\/quickbooks\/co-1\/purchasing\/items$/);
+    expect(call.method).toBe('POST');
+    expect(call.body).toEqual({ all_kinds: { action: 'use_existing', qb_item_id: 'ITEM-1' } });
+  });
+
+  it('sends the optional per-kind split as by_kind (QB7)', async () => {
+    await setQuickBooksPurchaseItems('co-1', {
+      byKind: {
+        part: { action: 'use_existing', qb_item_id: 'ITEM-1' },
+        outside_service: { action: 'create', qb_account_id: 'COGS-1' },
+      },
+    });
+    expect(lastCall().body).toEqual({
+      by_kind: {
+        part: { action: 'use_existing', qb_item_id: 'ITEM-1' },
+        outside_service: { action: 'create', qb_account_id: 'COGS-1' },
+      },
+    });
+  });
+
+  it('sends the chosen accounts-payable account and the preferences check (QB7)', async () => {
+    await setQuickBooksApAccount('co-1', 'AP-1');
+    expect(lastCall().url).toMatch(/\/purchasing\/ap-account$/);
+    expect(lastCall().body).toEqual({ qb_account_id: 'AP-1' });
+
+    await checkQuickBooksPreferences('co-1');
+    expect(lastCall().url).toMatch(/\/purchasing\/check-preferences$/);
+    expect(lastCall().method).toBe('POST');
+    expect(lastCall().body).toBeUndefined();
+  });
+
+  it('preflights a vendor PO with a POST the dialog makes when it opens', async () => {
+    await preflightVendorPoPush('co-1', 'po-1');
+    expect(lastCall().url).toMatch(/\/api\/quickbooks\/co-1\/vendor-pos\/po-1\/preflight$/);
+    expect(lastCall().method).toBe('POST');
+    expect(lastCall().body).toEqual({});
+  });
+
+  it('pushes without a request id: the server mints every one (QB4)', async () => {
+    fetchMock.mockResolvedValue(
+      httpResponse(200, { operation: 'create', qb_po_id: 'QB-1', doc_number: 'PO-1042' }),
+    );
+    await expect(pushVendorPo('co-1', 'po-1')).resolves.toMatchObject({ qb_po_id: 'QB-1' });
+    expect(lastCall().url).toMatch(/\/api\/quickbooks\/co-1\/vendor-pos\/po-1\/push$/);
+    expect(lastCall().body).toEqual({});
+
+    await pushVendorPo('co-1', 'po-1', { action: 'use_existing', qb_vendor_id: 'V-9' });
+    expect(lastCall().body).toEqual({ vendor: { action: 'use_existing', qb_vendor_id: 'V-9' } });
+  });
+
+  it('verifies an unconfirmed attempt by its link id', async () => {
+    fetchMock.mockResolvedValue(httpResponse(200, { outcome: 'adopted' }));
+    await expect(verifyVendorPoLink('co-1', 'link-1')).resolves.toEqual({ outcome: 'adopted' });
+    expect(lastCall().url).toMatch(/\/api\/quickbooks\/co-1\/vendor-po-links\/link-1\/verify$/);
+    expect(lastCall().method).toBe('POST');
+  });
+
+  // Every 409 the push can answer with (plan §3.11's error map), each mapped to a
+  // classified QuickBooksError the dialog shows as a sentence, never a Sentry report.
+  const PUSH_409S = [
+    'qb_not_connected',
+    'qbd_offline',
+    'qbo_purchase_orders_unavailable',
+    'qbo_busy',
+    'vendor_po_draft',
+    'vendor_po_unsent_revision',
+    'vendor_po_archived',
+    'vendor_po_line_unpriced',
+    'qbd_po_number_too_long',
+    'qb_setup_required',
+    'qb_item_name_taken',
+    'qb_reference_inactive',
+    'qb_vendor_choice_required',
+    'qb_vendor_name_invalid',
+    'qb_vendor_name_taken',
+    'qb_vendor_inactive',
+    'qb_po_missing',
+    'qb_foreign_lines',
+    'qb_line_in_use',
+    'qb_cannot_reopen',
+    'qb_changed_in_quickbooks',
+    'qbd_verify',
+    'qbd_blocked_unverified',
+  ];
+
+  it('knows every code in the error map, and no others (QB10)', () => {
+    expect([...VENDOR_PO_PUSH_REFUSAL_CODES].sort()).toEqual([...PUSH_409S].sort());
+    for (const code of PUSH_409S) {
+      expect(Object.values(QB_ERROR)).toContain(code);
+    }
+  });
+
+  it.each(PUSH_409S)('maps a 409 %s to a classified refusal carrying its sentence (QB10)', async (code) => {
+    fetchMock.mockResolvedValue(
+      httpResponse(409, { detail: { code, message: `The sentence for ${code}.` } }),
+    );
+    const err = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(err.status).toBe(409);
+    expect(err.code).toBe(code);
+    expect(err.message).toBe(`The sentence for ${code}.`);
+    expect(isVendorPoPushRefusal(err)).toBe(true);
+  });
+
+  it('keeps the fields a refusal carries: candidates, missing kinds, the link to verify', async () => {
+    const candidates = [{ qb_id: '1', display_name: 'Atlas Metals Inc' }];
+    fetchMock.mockResolvedValue(
+      httpResponse(409, {
+        detail: { code: 'qb_vendor_choice_required', message: 'Choose one.', candidates },
+      }),
+    );
+    const choice = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(choice.details?.candidates).toEqual(candidates);
+
+    fetchMock.mockResolvedValue(
+      httpResponse(409, {
+        detail: { code: 'qb_setup_required', message: 'Finish the setup.', missing: ['item:part'] },
+      }),
+    );
+    const setup = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(setup.details?.missing).toEqual(['item:part']);
+
+    fetchMock.mockResolvedValue(
+      httpResponse(409, {
+        detail: { code: 'qbd_verify', message: 'Check again.', link_id: 'link-7' },
+      }),
+    );
+    const unverified = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(unverified.details?.link_id).toBe('link-7');
+    expect(isQuickBooksUnverified(unverified)).toBe(true);
+  });
+
+  it('treats QuickBooks Online asking to slow down as unreachable, so the dialog offers a retry', async () => {
+    fetchMock.mockResolvedValue(
+      httpResponse(409, { detail: { code: QB_ERROR.onlineBusy, message: 'Wait a minute.' } }),
+    );
+    const busy = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(isQuickBooksUnreachable(busy)).toBe(true);
+
+    fetchMock.mockResolvedValue(
+      httpResponse(502, { detail: { code: QB_ERROR.onlineUnreachable, message: 'No answer.' } }),
+    );
+    const silent = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(isQuickBooksUnreachable(silent)).toBe(true);
+    expect(isVendorPoPushRefusal(silent)).toBe(false);
+  });
+
+  it('does not call a QuickBooks rejection (502) a refusal the shop can fix', async () => {
+    fetchMock.mockResolvedValue(
+      httpResponse(502, { detail: { code: 'qbd_rejected', message: 'Item name too long' } }),
+    );
+    const err = await expectQuickBooksError(pushVendorPo('co-1', 'po-1'));
+    expect(err.message).toBe('Item name too long');
+    expect(isVendorPoPushRefusal(err)).toBe(false);
+    expect(isQuickBooksUnreachable(err)).toBe(false);
   });
 });

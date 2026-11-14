@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import NextLink from 'next/link';
 import posthog from 'posthog-js';
 import { AgGridReact } from 'ag-grid-react';
 import {
@@ -18,6 +19,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Link from '@mui/material/Link';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 
 import { useLoad } from '@/hooks/useLoad';
 import { jiggedAgGridTheme } from '@/lib/agGridTheme';
@@ -343,6 +345,22 @@ export default function StorageInventoryTable({
             Clear filters
           </Button>
         )}
+        {/*
+          THE SHOP-WIDE COUNT, on the tab whose noun is the items.
+
+          It lived on the Parts toolbar until Parts stopped carrying quantities (2026-08-18), and
+          then only behind a part page's Storage tab, which went 2026-09-09 and left the worksheet
+          reachable by typed URL alone. Not on Places: that tab counts a cabinet at a time
+          (`Bulk Adjust` on a unit), and this sheet starts by picking parts, not places.
+        */}
+        <Button
+          variant="outlined"
+          component={NextLink}
+          href={`/dashboard/${companyId}/inventory/count`}
+          startIcon={<FactCheckOutlinedIcon />}
+        >
+          Count Inventory
+        </Button>
       </Stack>
 
       {truncated && (

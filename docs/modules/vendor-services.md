@@ -2,7 +2,8 @@
 
 A **vendor service** is a process an outside vendor performs on your parts — anodize, heat treat,
 wire EDM. It is owned by the vendor that performs it. **Built; in production.**
-Depends on [Vendors](vendors.md). Consumed by [Routings](routings.md) and [Jobs](jobs.md).
+Depends on [Vendors](vendors.md). Consumed by [Routings](routings.md), [Jobs](jobs.md) and, since
+2026-11, [Purchasing](purchasing.md) — an outside PO line prices from it.
 
 > **This replaces "external work centers."** Until 2026-08-23 an outsourced process was a
 > `work_centers` row with `kind='external'` and a `vendor_id`. That is gone — the rows moved, and
@@ -82,6 +83,13 @@ adjacent fields with opposite semantics, on one screen, for a 50–60 year old u
 `create_job_part_operations_from_routing` snapshots the **effective** price, so a shipped job freezes
 what was actually charged rather than a NULL that later reads as "never priced".
 
+**A vendor service is what an outside PO line prices from (2026-11).** A vendor PO's *outside
+service* line for a job step defaults to the service's **current** `unit_price`, else the step's
+frozen price, and says *"Job costed at $X"* when the two differ — the job keeps what it was costed
+at, the PO pays what the vendor charges now. The line freezes `vendor_service_id` (SET NULL) and
+`service_name` at insert, so a later rename or archive never changes a PO; the vendor must be the
+one that performs the step ([purchasing.md](purchasing.md#anodize-on-a-job-operation-through-the-vps-slip)).
+
 ## The two hazards the split had to close
 
 Both are silent-data-loss failures, and both come from leaving a function to infer "is this outside
@@ -136,8 +144,11 @@ naturally; outside ops never get intervals.
 
 [`utils/vendorServicesAccess.ts`](../../utils/vendorServicesAccess.ts) — the greppable landmark for
 this entity. Archive is universal: `deleted_at` is stamped, never a SQL `DELETE`, never blocked by a
-routing or job reference. Every list/picker/count filters `deleted_at IS NULL`; `getVendorService`
-(by id) does not, so a routing holding an archived service keeps resolving.
+routing or job reference. Every list/picker/count filters `deleted_at IS NULL` — the company-wide
+list and the routing picker the **vendor's** too, through `vendor:vendors!inner`, since a service
+belongs to its vendor (until 2026-11-12 the picker offered an archived vendor's services). The vendor
+page is that vendor's, archived or not, and `getVendorService` (by id) filters nothing, so a routing
+holding an archived service keeps resolving.
 
 - `getVendorServicesForVendor` — the vendor detail page. Just the services; the usage and open-job
   counts that once decorated them are gone, and with them two queries per page load to describe a
@@ -162,8 +173,9 @@ everywhere else.
 `WRITE_TIERS` gives services their own tier behind vendors, because every row names a vendor that
 must already exist.
 
-**Routing steps that target a service** resolve by name, in this order: an explicit `vendor_name`
-column wins; then an in-house station of that name; then a service, *only if exactly one matches*.
+**Routing steps that target a service** resolve by name, among the live services of live vendors
+the picker offers, in this order: an explicit `vendor_name` column wins; then an in-house station
+of that name; then a service, *only if exactly one matches*.
 Several matches is an **error naming the vendors**, never a guess — the old lookup was a last-wins
 dict that silently routed a cost-bearing step into whichever vendor PostgREST returned last.
 
@@ -180,3 +192,4 @@ dict that silently routed a cost-bearing step into whichever vendor PostgREST re
 - [Work Centers](work-centers.md) — in-house capacity, and what this is *not*.
 - [Routings](routings.md) — how a step targets one or the other.
 - [Jobs](jobs.md#outside-external-vendor-operations) — the send/receive lifecycle.
+- [Purchasing](purchasing.md) — the vendor PO an outside step can be ordered on.

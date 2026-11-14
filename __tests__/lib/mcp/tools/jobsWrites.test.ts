@@ -71,6 +71,12 @@ vi.mock('@/utils/quickbooksAccess', () => ({
   getJobPartInvoiceSummaries: (...a: unknown[]) => mockInvoiced(...a),
 }));
 
+// get_job (which every job write returns) lists the job's lines on purchase orders to vendors.
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/vendorPoAccess')>()),
+  listVendorPoLinesForJob: async () => [],
+}));
+
 /** Rows each table answers with: `maybeSingle` takes the first, an awaited query takes them all. */
 let db: Record<string, Array<Record<string, unknown>>> = {};
 vi.mock('@/lib/supabase', () => {
@@ -281,6 +287,14 @@ describe('create_job', () => {
     due_date: '2099-02-01',
     lines: [{ part_name: 'BRKT-100', quantity: 10, unit_price: 12.5 }],
   };
+
+  it("is titled and described as the CUSTOMER's PO, and sends buying from a vendor to create_vendor_po", () => {
+    expect(createJob.title).toBe("Create a job from a customer's PO");
+    expect(createJob.description).toMatch(/customer's purchase order/);
+    expect(createJob.description).toMatch(/create_vendor_po/);
+    // It never claimed a PDF truthfully: the customer's PO document is attached on the job's page.
+    expect(createJob.description).not.toMatch(/PDF is attached/);
+  });
 
   it('creates the job the Accept Purchase Order modal creates, and returns it with a link', async () => {
     const res = await createJob.run(order, env);

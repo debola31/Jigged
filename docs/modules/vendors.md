@@ -2,7 +2,7 @@
 
 # Vendors Module
 
-Master list of external suppliers and outsourced-process providers. **Built; in production.** No dependencies to create. Consumed by [Parts](parts.md) (`parts.preferred_vendor_id`) and [Vendor Services](vendor-services.md) (`vendor_services.vendor_id` — **that doc owns the services side**, not restated here).
+Master list of external suppliers and outsourced-process providers. **Built; in production.** No dependencies to create. Consumed by [Parts](parts.md) (`parts.preferred_vendor_id`), [Vendor Services](vendor-services.md) (`vendor_services.vendor_id` — **that doc owns the services side**, not restated here) and, since 2026-11, [Purchasing](purchasing.md) — vendor POs, RFQs and each part's approved vendor list (`part_vendors`), which that doc owns.
 
 > **⚠ Corrected 2026-08-23.** This doc previously pointed at `work_centers.vendor_id` for the
 > outsourced side. That column is **dropped**: a vendor's processes are `vendor_services` rows now,
@@ -10,7 +10,9 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 
 ## Data model
 
-**`vendors`** — `id` (uuid PK), `company_id`, `name` (required), `created_at`, `updated_at`, `deleted_at`. Unique `vendors_unique_per_company (company_id, name)`, kept FULL not partial — name is the identity the CSV importer upserts on, so re-import is idempotent and a re-create revives rather than duplicates.
+**`vendors`** — `id` (uuid PK), `company_id`, `name` (required), `default_payment_terms`, `created_at`, `updated_at`, `deleted_at`. Unique `vendors_unique_per_company (company_id, name)`, kept FULL not partial — name is the identity the CSV importer upserts on, so re-import is idempotent and a re-create revives rather than duplicates.
+
+**`default_payment_terms`** (2026-11) — the standing terms with this vendor ("Net 30"), free text in the vocabulary of `customers.default_payment_terms`. Copied onto a new vendor PO whose create names none, and editable there; **an existing PO never re-reads it** — a PO keeps the terms it was raised on. NULL means no standing agreement recorded.
 
 > **⚠ The six address columns are gone (2026-08-24).** `address_line1`…`country` sat on this row, so a vendor had exactly one address and a plater with two plants had nowhere to say so. They moved to **`vendor_addresses`**, backfilled one row per vendor that had any address data, marked default. A vendor row is identity only now: contacts, addresses and services are each their own 1-to-many table.
 
@@ -18,7 +20,7 @@ Master list of external suppliers and outsourced-process providers. **Built; in 
 
 **One `is_default`, not the `default_billing` / `default_shipping` pair customers carry.** For a customer an invoice and a pallet genuinely go to different places; the vendor equivalent would be "where we send parts" vs "where we send payment", and nothing in the product distinguishes those today. Two flags nothing reads is two flags nobody keeps true.
 
-Addresses are **hard-deleted, not archived**, matching `customer_addresses` and `vendor_contacts`. That is the archive-vs-delete test in [architecture.md §16](../architecture.md) applied, not an exception to it: nothing stores a `vendor_address_id`, so there is no retained reference to keep resolving. Deleting the default promotes the oldest survivor — a vendor with addresses and no default is a state the UI has no reading of.
+Addresses are **hard-deleted, not archived**, matching `customer_addresses` and `vendor_contacts`. That is the archive-vs-delete test in [architecture.md §16](../architecture.md) applied, not an exception to it: every row that names a `vendor_address_id` — `outside_shipments`, and `vendor_purchase_orders` for both the vendor and a drop-ship ship-to — holds it `ON DELETE SET NULL` beside a **frozen copy** of the address ([architecture.md §15](../architecture.md#15-document-snapshot-standard)), so deleting one leaves every document printing what it printed. Deleting the default promotes the oldest survivor — a vendor with addresses and no default is a state the UI has no reading of. *(⚠ This paragraph said "nothing stores a `vendor_address_id`" — untrue from the slips of 2026-09-03 on; the reasoning survives because each of those columns is a navigation link, never the read source.)*
 
 **`vendor_contacts`** — 1-to-many with `vendors`, `ON DELETE CASCADE`: `id`, `vendor_id`, `name` (required), `role`, `role_label`, `email`, `phone`, `is_primary`, `created_at`, `updated_at`.
 
@@ -33,7 +35,7 @@ Addresses are **hard-deleted, not archived**, matching `customer_addresses` and 
 | Route | Contents |
 |---|---|
 | `/dashboard/{companyId}/vendors` | **One grid, no tabs** *(⚠ Corrected 2026-08-23: the Directory / Outside processing tab strip and its actionable queue are **deleted** — see [jobs.md](jobs.md#outside-external-vendor-operations).)* AG Grid: Name, **Services** (derived, read-only), Primary Contact (`name · email`), Location (`city, state`), Updated. No send/receive lives on this page. Search name + city, sort name asc, pagination 25/50/100, bulk CSV export, bulk archive, row click → detail. |
-| `…/{vendorId}` | Header card — the **name is edited in place** ([`InlineNameEditor`](../../components/common/InlineNameEditor.tsx), shared with Customers): reads as a heading, pencil opens it, Enter or blur saves, Escape reverts. A duplicate name keeps the editor open with its error rather than closing; **Services** card — name, description and price per piece, **edited in place** ([`VendorServicesCard`](../../components/vendors/VendorServicesCard.tsx)); Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Parts supplied** card; **Open jobs** card — read-only, *At {vendor} now* sorted **oldest sent first** (chase order) and *Waiting to go out*, every row deep-linking to `?op=` on the job. Delete archives and is never disabled. |
+| `…/{vendorId}` | Header card — the **name is edited in place** ([`InlineNameEditor`](../../components/common/InlineNameEditor.tsx), shared with Customers): reads as a heading, pencil opens it, Enter or blur saves, Escape reverts. A duplicate name keeps the editor open with its error rather than closing; **Services** card — name, description and price per piece, **edited in place** ([`VendorServicesCard`](../../components/vendors/VendorServicesCard.tsx)); Contacts card (primary starred; per-row edit / set-primary / delete); Address card; **Parts supplied** card — read from the parts' **approved vendor lists** since 2026-11 (`listVendorParts`), so a second source counts, not only the parts naming this vendor preferred; **Open jobs** card — read-only, *At {vendor} now* sorted **oldest sent first** (chase order) and *Waiting to go out*, every row deep-linking to `?op=` on the job. Since 2026-11 also a **Payment terms** card ([`VendorTermsCard`](../../components/vendors/VendorTermsCard.tsx), the standing terms above), a **Purchase orders** card ([`VendorPurchaseOrdersCard`](../../components/vendors/VendorPurchaseOrdersCard.tsx)) and an **RFQs** card ([`VendorRfqsCard`](../../components/vendors/VendorRfqsCard.tsx)) — see [purchasing.md](purchasing.md#screens). Delete archives and is never disabled. |
 | `…/new` | `VendorForm` create mode plus an optional initial-contact sub-form; if filled, that contact is created `is_primary=true`. |
 
 *(There was a `…/import` page here — a vendor-specific CSV wizard. It is gone: vendors are imported through the one guided importer at `/dashboard/{companyId}/import` (see [data-import.md](data-import.md)), which writes via FastAPI `/api/vendors/import/execute`. That write upserts `ON CONFLICT (company_id, name)` case-insensitively, so an existing vendor **updates in place**; within-CSV duplicate names collapse to one row.)*
@@ -78,6 +80,7 @@ Signatures live in [`utils/vendorsAccess.ts`](../../utils/vendorsAccess.ts) (11 
 ## See also
 
 - [Parts](parts.md) — preferred-vendor link.
+- [Purchasing](purchasing.md) — vendor POs, RFQs, the approved vendor list and price sheets, and pushing POs to QuickBooks.
 - [Vendor Services](vendor-services.md) — owns a vendor's processes and their pricing.
 - [Work Centers](work-centers.md) — in-house capacity, which no longer references a vendor.
-- [Jobs](jobs.md#outside-external-vendor-operations) — the outside-operation lifecycle behind the Outside processing tab.
+- [Jobs](jobs.md#outside-external-vendor-operations) — the outside-operation lifecycle (the Outside processing tab it once sat behind was deleted 2026-08-23).

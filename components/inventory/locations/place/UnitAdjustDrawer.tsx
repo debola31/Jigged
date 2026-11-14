@@ -11,10 +11,10 @@
  * that threw the screen away, and it did it for the operation you are most likely to run *while
  * looking at the cabinet*.
  *
- * The worksheet still exists and is still reached from Parts as `Count Inventory` — the shop-wide
- * sheet over every stocked part, which is a genuinely different job with a genuinely different
- * shape (a choose step, paging over hundreds of parts, and a bulk put-away panel). What moved here
- * is the *place-scoped* half of it.
+ * The worksheet still exists, reached as `Count Inventory` on Storage's Inventory tab — the
+ * shop-wide sheet over every part, which is a genuinely different job with a genuinely different
+ * shape (a choose step, then a row per place for each part chosen). What moved here is the
+ * *place-scoped* half of it.
  *
  * ## The same write, from both doors
  *

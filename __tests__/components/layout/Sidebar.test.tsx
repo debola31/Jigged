@@ -93,6 +93,25 @@ describe('Sidebar', () => {
   // now lives on its job. Storage, gated on `inventory_locations`, was the last flag-gated entry
   // and went unconditional in Aug 2026; the flag-gating and Skeleton machinery went with it, so
   // MenuItem no longer carries a `featureFlag` field at all.
+  // One row for buying, for admins AND users: purchasing is office work for both roles (plan §2),
+  // so it must not be filtered with Team and Settings. Placed after Storage — buying is how stock
+  // gets in — and pointing at the hub, whose tabs hold the orders, receipts, Shortages and RFQs.
+  it.each([
+    ['admin', true],
+    ['user', false],
+  ])('shows one Purchasing row, after Storage, for %s', (role, isAdmin) => {
+    mockUseUserRole.mockReturnValue({ role, isAdmin, loading: false });
+
+    render(<Sidebar />);
+
+    const purchasing = screen.getAllByRole('link', { name: /^purchasing$/i });
+    expect(purchasing).toHaveLength(1);
+    expect(purchasing[0]).toHaveAttribute('href', '/dashboard/test-company-id/purchasing');
+
+    const names = screen.getAllByRole('link').map((a) => a.textContent ?? '');
+    expect(names.indexOf('Purchasing')).toBe(names.indexOf('Storage') + 1);
+  });
+
   it('does not render a Shipments nav item', () => {
     mockUseUserRole.mockReturnValue({ role: 'admin', isAdmin: true, loading: false });
 

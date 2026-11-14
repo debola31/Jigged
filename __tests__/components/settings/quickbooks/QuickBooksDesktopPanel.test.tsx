@@ -91,3 +91,27 @@ describe('QuickBooksDesktopPanel — waiting on the shop PC', () => {
     d.resolve({ accounts: [] });
   });
 });
+
+/**
+ * Vendor POs have a setup step of their own (the purchases item). The card reads it through the
+ * Purchasing panel — Jigged's database, no QuickBooks call — and hands this panel the answer.
+ */
+describe('QuickBooksDesktopPanel — the purchasing step', () => {
+  it('says "Purchasing setup needed" beside the income account, and draws the panel it points to', async () => {
+    render(
+      <QuickBooksDesktopPanel companyId="c1" onDisconnected={vi.fn()} purchasingSetupNeeded>
+        <p>Purchasing panel</p>
+      </QuickBooksDesktopPanel>,
+    );
+
+    expect(await screen.findByText('Purchasing setup needed')).toBeInTheDocument();
+    expect(screen.getByText('Purchasing panel')).toBeInTheDocument();
+  });
+
+  it('claims nothing about purchasing before the setup has been read', async () => {
+    render(<QuickBooksDesktopPanel companyId="c1" onDisconnected={vi.fn()} />);
+
+    await screen.findByRole('button', { name: /choose account/i });
+    expect(screen.queryByText(/Purchasing/)).not.toBeInTheDocument();
+  });
+});

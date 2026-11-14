@@ -57,7 +57,18 @@ const SHIPMENT_COLUMNS =
   'id, company_id, job_id, job_part_id, job_operation_id, vendor_id, vendor_address_id, ' +
   'vendor_contact_id, vendor_name, service_name, ship_to_address, ship_to_contact, ' +
   'slip_number, quantity, shipped_at, due_back_on, carrier, notes, created_by, ' +
-  'closed_at, closed_by, voided_at, voided_by, created_at, updated_at';
+  'closed_at, closed_by, voided_at, voided_by, created_at, updated_at, ' +
+  'vendor_purchase_order_line_id';
+
+/**
+ * The vendor PO line a slip ships against, and the PO's number — BY JOIN, never a frozen column on
+ * the slip: the link is set by `create_outside_shipment` (the single open line for the step and
+ * vendor), by the line's insert, or by the relink RPC, and is cleared when the PO is archived, so a
+ * copy would go stale. The slip PDF prints "PO: PO-1042" from this.
+ */
+const PO_LINE_EMBED =
+  'vendor_purchase_order_line:vendor_purchase_order_lines(id, line_number, vendor_purchase_order_id, ' +
+  'vendor_purchase_order:vendor_purchase_orders(id, po_number))';
 
 const RECEIPT_COLUMNS =
   'id, company_id, outside_shipment_id, job_operation_id, job_part_id, quantity_good, ' +
@@ -358,7 +369,8 @@ export async function getOutsideShipmentById(
        job:jobs(id, job_number),
        job_operation:job_operations(id, operation_name, sequence),
        job_part:job_parts(id, quantity, part:parts(id, part_name)),
-       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS})`,
+       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS}),
+       ${PO_LINE_EMBED}`,
     )
     .eq('id', shipmentId)
     .single();
@@ -399,7 +411,7 @@ export async function getOutsideShipmentsForOperation(
   const supabase = getSupabase();
   const { data, error } = await supabase
     .from('outside_shipments')
-    .select(`${SHIPMENT_COLUMNS}, receipts:outside_shipment_receipts(${RECEIPT_COLUMNS})`)
+    .select(`${SHIPMENT_COLUMNS}, receipts:outside_shipment_receipts(${RECEIPT_COLUMNS}), ${PO_LINE_EMBED}`)
     .eq('job_operation_id', jobOperationId)
     .order('shipped_at', { ascending: false })
     .order('created_at', { ascending: false });
@@ -407,10 +419,14 @@ export async function getOutsideShipmentsForOperation(
   return (data ?? []) as unknown as OutsideShipmentWithRelations[];
 }
 
-/** Slips with something still at the vendor, OLDEST FIRST (FIFO — chase order). */
+/**
+ * Slips with something still at the vendor, OLDEST FIRST (FIFO — chase order). Each is the full
+ * slip read of `getOutsideShipmentsForOperation` — its receipts and the vendor PO line it ships
+ * against (`PO_LINE_EMBED`) — plus what it still owes, so the receive dialog can name the line.
+ */
 export async function getOpenOutsideShipments(
   jobOperationId: string,
-): Promise<(OutsideShipment & { outstanding: number })[]> {
+): Promise<(OutsideShipmentWithRelations & { outstanding: number })[]> {
   const all = await getOutsideShipmentsForOperation(jobOperationId);
   return all
     .filter((s) => !s.voided_at && !s.closed_at)
@@ -435,7 +451,8 @@ export async function getOutsideShipmentsForJob(
       `${SHIPMENT_COLUMNS},
        job_operation:job_operations(id, operation_name, sequence),
        job_part:job_parts(id, quantity, part:parts(id, part_name)),
-       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS})`,
+       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS}),
+       ${PO_LINE_EMBED}`,
     )
     .eq('job_id', jobId)
     .order('shipped_at', { ascending: false })
@@ -606,7 +623,8 @@ export async function listOutsideShipmentsForCompany(
        job:jobs!inner(id, job_number, deleted_at, production_status),
        job_operation:job_operations(id, operation_name, sequence),
        job_part:job_parts(id, quantity, part:parts(id, part_name)),
-       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS})`,
+       receipts:outside_shipment_receipts(${RECEIPT_COLUMNS}),
+       ${PO_LINE_EMBED}`,
     )
     .eq('company_id', companyId)
     .is('job.deleted_at', null)
@@ -626,6 +644,16 @@ export async function listOutsideShipmentsForCompany(
   let rows = (data ?? []) as unknown as OutsideShipmentWithRelations[];
   if (filters.openOnly) rows = rows.filter((s) => outstandingOn(s) > 0);
   return rows;
+}
+
+/**
+ * The number of the vendor PO a slip ships against ("PO: PO-1042"), or null when it is not on one.
+ * Read through the join the slip reads above carry.
+ */
+export function outsideShipmentPoNumber(
+  s: Pick<OutsideShipmentWithRelations, 'vendor_purchase_order_line'>,
+): string | null {
+  return s.vendor_purchase_order_line?.vendor_purchase_order?.po_number ?? null;
 }
 
 /** What is still at the vendor on one slip. Shared so the grid and the card agree. */

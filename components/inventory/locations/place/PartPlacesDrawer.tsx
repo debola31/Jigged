@@ -36,6 +36,14 @@
  * row — expand here, navigate there — is the ambiguity this module removed from the grid; the bin
  * stays one click away without competing with the thing you came to do.
  *
+ * ## What is coming, as well as what is here
+ *
+ * One line under the header — "Also on order: 288 in · PO-1042 due 3/9/26" — from `part_on_order`
+ * through `getOnOrderForParts`, the figures the buy list and the job's Materials card read. Sent
+ * POs only: a draft has not gone to the vendor, so it is shown apart and muted, never as on order.
+ * A failed read says it could not check; silence would read as "nothing coming". The Storage table
+ * itself gets no column, because it shows what is on the shelves.
+ *
  * ## The put-away pile is not a shelf
  *
  * `Unassigned` is where stock with no home lands. It is listed — leaving it out would answer
@@ -53,6 +61,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import ButtonBase from '@mui/material/ButtonBase';
 import CloseIcon from '@mui/icons-material/Close';
+import FactCheckOutlinedIcon from '@mui/icons-material/FactCheckOutlined';
 import PlaceOutlinedIcon from '@mui/icons-material/PlaceOutlined';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
@@ -60,8 +69,10 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
+import NextLink from 'next/link';
 import Button from '@mui/material/Button';
+import MuiLink from '@mui/material/Link';
 import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 
 import { useLoad } from '@/hooks/useLoad';
@@ -74,6 +85,10 @@ import PartHeatsSection from '@/components/inventory/PartHeatsSection';
 import LotCertificateControl from '@/components/inventory/LotCertificateControl';
 import { listLotCertificatesForLots } from '@/utils/lotCertificatesAccess';
 import type { LotCertificate } from '@/types/inventoryLocations';
+import { getOnOrderForParts } from '@/utils/vendorPoAccess';
+import type { PartOnOrder } from '@/types/vendorPo';
+import { vendorPoPath } from '@/lib/purchasingRoutes';
+import { formatShortDate } from '@/lib/purchasing/priceDefault';
 
 const EMPTY_CERTS = new Map<string, LotCertificate[]>();
 import PlaceAdjustForm from './PlaceAdjustForm';
@@ -102,6 +117,61 @@ export interface PartPlacesDrawerProps {
  */
 type OpenAction = { rowKey: string; action: PlaceStockAction | 'adjust' } | null;
 
+/** How many POs the on-order line names before "+N more". */
+const PO_REFS_NAMED = 2;
+
+/** "Also on order: 288 in · PO-1042 due 3/9/26", and drafts apart. */
+function AlsoOnOrder({
+  entry,
+  failed,
+  unit,
+  companyId,
+}: {
+  entry: PartOnOrder | null;
+  failed: boolean;
+  unit: string;
+  companyId: string;
+}) {
+  if (failed) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        Couldn&apos;t check what&apos;s on order.
+      </Typography>
+    );
+  }
+  if (!entry || (entry.onOrder <= 0 && entry.onDraft <= 0)) return null;
+  // One mention per PO: two lines of the part on one PO are one place it is coming from.
+  const sent = entry.refs
+    .filter((r) => !r.isDraft)
+    .filter((r, i, all) => all.findIndex((o) => o.vendorPurchaseOrderId === r.vendorPurchaseOrderId) === i);
+  const named = sent.slice(0, PO_REFS_NAMED);
+  const inUnit = unit ? ` ${unit}` : '';
+  return (
+    <Box sx={{ mb: 1.5 }}>
+      {entry.onOrder > 0 && (
+        <Typography variant="body2">
+          {`Also on order: ${num(entry.onOrder)}${inUnit}`}
+          {named.map((r) => (
+            <Fragment key={r.vendorPurchaseOrderId}>
+              {' · '}
+              <MuiLink component={NextLink} href={vendorPoPath(companyId, r.vendorPurchaseOrderId)}>
+                {r.poNumber}
+              </MuiLink>
+              {r.expectedOn ? ` due ${formatShortDate(r.expectedOn)}` : ''}
+            </Fragment>
+          ))}
+          {sent.length > named.length ? ` · +${sent.length - named.length} more` : ''}
+        </Typography>
+      )}
+      {entry.onDraft > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: 'block' }}>
+          {`+${num(entry.onDraft)}${inUnit} on a draft PO, not sent yet`}
+        </Typography>
+      )}
+    </Box>
+  );
+}
+
 function PartPlacesBody({
   part,
   companyId,
@@ -122,6 +192,12 @@ function PartPlacesBody({
     setStamp((n) => n + 1);
     await onChanged();
   };
+
+  // Not re-read after a stock write here: moving stock between shelves changes nothing on order.
+  const { data: onOrderData, error: onOrderError } = useLoad(
+    () => getOnOrderForParts(companyId, [part.id]),
+    [companyId, part.id],
+  );
 
   const balances = data ?? [];
 
@@ -209,6 +285,13 @@ function PartPlacesBody({
       />
 
       <Box sx={{ p: 2, overflowY: 'auto' }}>
+        <AlsoOnOrder
+          entry={onOrderData?.get(part.id) ?? null}
+          failed={Boolean(onOrderError)}
+          unit={part.unit ?? onOrderData?.get(part.id)?.stockUnit ?? ''}
+          companyId={companyId}
+        />
+
         <Typography variant="overline" color="text.secondary">
           Where it is
         </Typography>
@@ -391,14 +474,30 @@ function PartPlacesBody({
           not do without navigating away and re-finding the part in a bin.
         */}
         {!loading && !error && (
-          <Button
-            startIcon={<PlaceOutlinedIcon />}
-            onClick={() => setPickerOpen(true)}
-            disabled={moveDestinations.length === 0}
-            sx={{ mt: 1.5 }}
-          >
-            Add at another location&hellip;
-          </Button>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
+            <Button
+              startIcon={<PlaceOutlinedIcon />}
+              onClick={() => setPickerOpen(true)}
+              disabled={moveDestinations.length === 0}
+            >
+              Add at another location&hellip;
+            </Button>
+            {/*
+              One sheet with a row per location, each committing to its own shelf — the door the
+              part page's Storage tab carried until 2026-09-09, and nothing did after it.
+              Only once the part is actually split: in one place, that row's `Adjust` already IS
+              counting it everywhere, and two controls doing one thing is worse than one.
+            */}
+            {placeCount > 1 && (
+              <Button
+                component={NextLink}
+                href={`/dashboard/${companyId}/inventory/count?part=${part.id}`}
+                startIcon={<FactCheckOutlinedIcon />}
+              >
+                Count all {placeCount} locations
+              </Button>
+            )}
+          </Stack>
         )}
 
         {/*

@@ -15,6 +15,7 @@ import WorkIcon from '@mui/icons-material/Work';
 import BusinessIcon from '@mui/icons-material/Business';
 import CategoryIcon from '@mui/icons-material/Category';
 import WarehouseIcon from '@mui/icons-material/WarehouseOutlined';
+import ShoppingCartIcon from '@mui/icons-material/ShoppingCartOutlined';
 import PrecisionManufacturingIcon from '@mui/icons-material/PrecisionManufacturing';
 import FactoryIcon from '@mui/icons-material/Factory';
 import RequestQuoteIcon from '@mui/icons-material/RequestQuote';
@@ -56,6 +57,11 @@ const menuItems: MenuItem[] = [
   // split above still holds — Parts is the catalogue, Storage is where things live — and the tab
   // names a view within the places area rather than a second list of items.
   { name: 'Storage', path: '/inventory/locations', icon: WarehouseIcon },
+  // ONE row for buying: the purchase orders, the receipts, Shortages and the RFQs are tabs of one
+  // hub (`?view=`), not four rows on a sidebar that already has twelve. Not adminOnly — admins and
+  // users both buy (plan §2); operators never reach /dashboard. After Storage because buying is
+  // how stock gets in.
+  { name: 'Purchasing', path: '/purchasing', icon: ShoppingCartIcon },
   { name: 'Work Centers', path: '/work-centers', icon: PrecisionManufacturingIcon },
   { name: 'Vendors', path: '/vendors', icon: FactoryIcon },
   { name: 'Customers', path: '/customers', icon: BusinessIcon },

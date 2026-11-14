@@ -120,6 +120,13 @@ describe('PartIdentitySection', () => {
   });
 
   describe('existing mode', () => {
+    /** The reorder point now feeds the buy list (plan §3.10): stock PLUS orders, not stock alone. */
+    it('says the reorder point lists the part under Shortages', () => {
+      render(<PartIdentitySection mode="existing" companyId="test-company-id" part={mockPart()} />);
+      expect(screen.getByText('Optional. Lists this part under Purchasing → Shortages when stock plus orders reach it.')).toBeInTheDocument();
+      expect(screen.queryByText(/low-stock alerts/i)).not.toBeInTheDocument();
+    });
+
     it('pre-fills from the part and has no Create button', () => {
       render(<PartIdentitySection mode="existing" companyId="test-company-id" part={mockPart()} />);
 

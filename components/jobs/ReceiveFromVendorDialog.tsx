@@ -17,12 +17,36 @@ import {
   outsideReceiptCaption,
   outsideReceiptConsequence,
 } from '@/components/operations/operationMath';
+import {
+  closeVendorPoLines,
+  isAlreadyClosedRefusal,
+  isNothingLeftToReceiveRefusal,
+  isPoClosedRefusal,
+} from '@/utils/vendorPoAccess';
+import type { OutsideShipmentWithRelations } from '@/types/outsideShipment';
+import type { VendorPoJobLine } from '@/types/vendorPo';
+
+/** The vendor PO line a slip ships against (by join on the slip — see outsideShipmentsAccess). */
+export interface ReceivePoLine {
+  vendorPurchaseOrderId: string;
+  poNumber: string;
+  lineId: string;
+  lineNumber: number;
+  /**
+   * What the line still expected BEFORE this receipt, in pieces — known where the caller has read
+   * the line itself (the PO page; the job page's own read of its PO lines), `null` where it has not
+   * (the outside-work drawer reads slips only). A receipt that covers it leaves nothing to close.
+   */
+  remainingQuantity: number | null;
+}
 
 export interface OpenSlipOption {
   id: string;
   slip_number: string;
   shipped_at: string;
   outstanding: number;
+  /** The vendor PO line the slip ships against, when it is on one. */
+  poLine?: ReceivePoLine | null;
 }
 
 export interface ReceiveFromVendorSubmit {
@@ -30,6 +54,153 @@ export interface ReceiveFromVendorSubmit {
   quantityGood: number;
   /** Short-close: nothing more is coming back on this slip. */
   closeShipment: boolean;
+  /**
+   * Also close the slip's vendor PO line: nothing more is expected on it at all. Only ever set
+   * alongside `closeShipment`; the caller closes it AFTER the receipt lands
+   * (`closePoLineAfterReceipt`).
+   */
+  closePoLine: ReceivePoLine | null;
+}
+
+/**
+ * A slip's vendor PO line: its link column, and the join every slip read carries
+ * (`vendor_purchase_order_line`, with its PO) — `null` when the slip is on no PO, or when the join
+ * no longer names the linked line. Both callers hand it a full slip read (`getOpenOutsideShipments`
+ * and the drawer's `listOutsideShipmentsForCompany`); the join is optional only because it is
+ * optional on `OutsideShipmentWithRelations` itself.
+ *
+ * `lines` is the caller's own read of the job's vendor PO lines, when it has one (the operation
+ * card's panel does; the drawer does not): it says how much the line still expects, which is what
+ * lets a receipt that completes the line skip its close. A slip alone cannot say — a line can
+ * have several slips.
+ */
+export function receivePoLineFor(
+  slip: Pick<OutsideShipmentWithRelations, 'vendor_purchase_order_line_id' | 'vendor_purchase_order_line'>,
+  lines?: readonly Pick<VendorPoJobLine, 'lineId' | 'quantity' | 'receivedQuantity'>[] | null,
+): ReceivePoLine | null {
+  const line = slip.vendor_purchase_order_line;
+  const po = line?.vendor_purchase_order;
+  if (!slip.vendor_purchase_order_line_id || !line || !po || line.id !== slip.vendor_purchase_order_line_id) return null;
+  const known = lines?.find((l) => l.lineId === line.id);
+  return {
+    vendorPurchaseOrderId: po.id,
+    poNumber: po.po_number,
+    lineId: line.id,
+    lineNumber: line.line_number,
+    remainingQuantity: known ? Math.max(0, known.quantity - known.receivedQuantity) : null,
+  };
+}
+
+/** "VPS-0141-2 · PO-1042" — the slip, and the PO it ships against when there is one. */
+function slipLabel(s: OpenSlipOption): string {
+  return s.poLine ? `${s.slip_number} · ${s.poLine.poNumber}` : s.slip_number;
+}
+
+/** What became of "Also close PO-1042 line 2" once the receipt had landed. */
+export type PoLineCloseOutcome =
+  /** The line is closed: nothing more is expected on it. */
+  | { kind: 'closed' }
+  /**
+   * The receipt left nothing on the line to close — it is received in full. That is the end the box
+   * asked for ("nothing more expected"), reached by the pieces rather than by a close: done.
+   */
+  | { kind: 'received' }
+  /**
+   * The line was closed before this receipt — on the PO page, or by another slip's "Also close".
+   * Nothing more is expected on it, which is what the box asked: done, said as what happened.
+   */
+  | { kind: 'already_closed' }
+  /**
+   * The whole PO was closed before this receipt, on the PO page. Nothing more is expected on any of
+   * its lines, this one included: done, said as what happened to the PO.
+   */
+  | { kind: 'po_already_closed' }
+  /** The line is still open; the sentence says so, and that the receipt stands. */
+  | { kind: 'failed'; message: string };
+
+/** "PO-1042 line 2 is closed." — what became of the line, for a close that did not fail. */
+export function poLineCloseSentence(
+  target: ReceivePoLine,
+  outcome: Exclude<PoLineCloseOutcome, { kind: 'failed' }>,
+): string {
+  const line = `${target.poNumber} line ${target.lineNumber}`;
+  switch (outcome.kind) {
+    case 'closed':
+      return `${line} is closed.`;
+    case 'received':
+      return `${line} is received in full.`;
+    case 'already_closed':
+      return `${line} was already closed.`;
+    case 'po_already_closed':
+      return `${target.poNumber} was already closed.`;
+  }
+}
+
+/** Float noise in a difference of two quantities must not leave "0.0000000001 still to come". */
+const QUANTITY_TOLERANCE = 1e-9;
+
+/**
+ * Close a slip's vendor PO line once its receipt has landed — the "Also close PO-1042 line 2" box.
+ *
+ * AFTER the receipt, never before or instead: the receipt is the movement and must stand whatever
+ * happens here. So a failure is not thrown — it comes back as a sentence saying the receipt was
+ * recorded and the line was not, for the caller to show. Retrying the receipt would record the
+ * pieces twice. One shared step for every surface that offers the box (the operation card's panel,
+ * the outside-work drawer and the PO page), so they cannot drift.
+ *
+ * A RECEIPT THAT COMPLETES THE LINE IS DONE, NOT A FAILURE. The database refuses to close a line
+ * with nothing left to receive ("Line 2 has nothing left to receive."), so the person who received
+ * the last pieces and ticked the box was told the line "could not be closed … Close it on the PO" —
+ * about a line already finished. Two layers, so that never happens:
+ *   1. when the caller knows what the line still expected (`remainingQuantity`) and this receipt
+ *      covers it, no close is sent at all;
+ *   2. when it could not know (the drawer), or the line had less left than the screen knew (a
+ *      receipt landed elsewhere meanwhile), that one refusal — for this line — counts as done too.
+ * The RPC's refusal is unchanged: closing a received line really is meaningless.
+ *
+ * A LINE CLOSED FIRST IS DONE TOO. "Also close" on a slip whose line was already closed — on the PO
+ * page, or by another slip's "Also close" — is refused ("Line 2 is already closed.") and warned the
+ * same contradiction. The operation card and the drawer offer the box without reading whether the
+ * line is still open, and any screen can be behind, so that refusal — for this line — counts as done,
+ * said as what happened ("was already closed") rather than as a close this receipt made.
+ *
+ * SO DOES A PO CLOSED FIRST. A whole PO closed on its page refuses every line close before looking
+ * at any line ("PO-1042 is closed. Reopen it first."); reopening it to close one line would contradict
+ * the box, which asked for nothing more expected — already true of every line of a closed PO. That
+ * refusal — for this slip's PO — counts as done, said as "PO-1042 was already closed."
+ *
+ * Returns `null` when no line was ticked.
+ *
+ * NOT CAPTURED as `vendor po lines closed`, deliberately: that event is the PO page's Close dialog,
+ * and its `had_receipts` is a fact about the whole line, which the outside-work drawer cannot see
+ * (it holds one slip). The movement itself is already captured, as `outside shipment received`
+ * with `short_closed`.
+ */
+export async function closePoLineAfterReceipt(
+  target: ReceivePoLine | null,
+  quantityReceived: number,
+): Promise<PoLineCloseOutcome | null> {
+  if (!target) return null;
+  if (target.remainingQuantity !== null && quantityReceived + QUANTITY_TOLERANCE >= target.remainingQuantity) {
+    return { kind: 'received' };
+  }
+  try {
+    await closeVendorPoLines(
+      target.vendorPurchaseOrderId,
+      [target.lineId],
+      'Closed when the parts came back: nothing more expected from the vendor.',
+    );
+    return { kind: 'closed' };
+  } catch (err) {
+    if (isNothingLeftToReceiveRefusal(err, target.lineNumber)) return { kind: 'received' };
+    if (isAlreadyClosedRefusal(err, target.lineNumber)) return { kind: 'already_closed' };
+    if (isPoClosedRefusal(err, target.poNumber)) return { kind: 'po_already_closed' };
+    const why = err instanceof Error && err.message ? err.message : 'Something went wrong.';
+    return {
+      kind: 'failed',
+      message: `The receipt was recorded, but ${target.poNumber} line ${target.lineNumber} could not be closed: ${why} Close it on the PO.`,
+    };
+  }
 }
 
 interface ReceiveFromVendorDialogProps {
@@ -50,6 +221,12 @@ interface ReceiveFromVendorDialogProps {
  * OLDEST SLIP FIRST, and it is the default. A plater returns the first batch
  * first, and it is the one whose due-back has aged — so FIFO is both what
  * happened and what the shop is chasing.
+ *
+ * CLOSING THE SLIP DOES NOT CLOSE THE PO LINE. The slip says what came back on
+ * one box; the vendor PO line says what the shop still expects from the vendor,
+ * and the two close independently (plan §3.6). So under a ticked short-close a
+ * slip on a PO offers a second, UNTICKED box — "Also close PO-1042 line 2" —
+ * because writing off one box is not always the end of the order.
  *
  * A SHORT RETURN IS A CLOSE, NOT A SCRAP NUMBER. "That's everything we're
  * getting" settles the slip's remainder without pretending it came back -- the
@@ -81,6 +258,7 @@ export default function ReceiveFromVendorDialog({
     first && first.outstanding > 0 ? String(first.outstanding) : '',
   );
   const [closeSlip, setCloseSlip] = useState(false);
+  const [closeLine, setCloseLine] = useState(false);
 
   const slip = openSlips.find((s) => s.id === slipId) ?? first;
   const outstanding = slip?.outstanding ?? 0;
@@ -100,6 +278,9 @@ export default function ReceiveFromVendorDialog({
   // `canClose &&` is not belt-and-braces: tick the box, then raise the quantity
   // back to full, and the control is gone while the state it set is not.
   const willClose = canClose && closeSlip;
+  // Hangs off the slip close the same way: untick that, and this goes with it.
+  const poLine = slip?.poLine ?? null;
+  const willClosePoLine = willClose && closeLine && poLine !== null;
   // A close with no receipt is legitimate -- the vendor returned nothing and the
   // shop is writing the slip off.
   const canSubmit = (good > 0 || willClose) && !busy;
@@ -128,6 +309,7 @@ export default function ReceiveFromVendorDialog({
               const next = openSlips.find((s) => s.id === e.target.value);
               setSlipId(e.target.value);
               setGoodInput(next && next.outstanding > 0 ? String(next.outstanding) : '');
+              setCloseLine(false);
             }}
             fullWidth
             helperText="Oldest first — that is usually the batch coming back."
@@ -135,14 +317,14 @@ export default function ReceiveFromVendorDialog({
           >
             {openSlips.map((s) => (
               <MenuItem key={s.id} value={s.id}>
-                {s.slip_number} — {s.outstanding} still out
+                {slipLabel(s)} — {s.outstanding} still out
               </MenuItem>
             ))}
           </TextField>
         )}
         {openSlips.length === 1 && (
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Against {openSlips[0].slip_number} — {openSlips[0].outstanding} still out
+            Against {slipLabel(openSlips[0])} — {openSlips[0].outstanding} still out
           </Typography>
         )}
 
@@ -171,7 +353,18 @@ export default function ReceiveFromVendorDialog({
                 That&apos;s everything we&apos;re getting — writes off {outstanding - good}
               </Typography>
             }
-            sx={{ mb: 1 }}
+            sx={{ mb: willClose && poLine ? 0 : 1 }}
+          />
+        )}
+        {willClose && poLine && (
+          <FormControlLabel
+            control={<Checkbox checked={closeLine} onChange={(e) => setCloseLine(e.target.checked)} />}
+            label={
+              <Typography variant="body2">
+                Also close {poLine.poNumber} line {poLine.lineNumber} — nothing more expected
+              </Typography>
+            }
+            sx={{ mb: 1, ml: 3 }}
           />
         )}
 
@@ -197,6 +390,7 @@ export default function ReceiveFromVendorDialog({
               shipmentId: slip?.id ?? null,
               quantityGood: good,
               closeShipment: willClose,
+              closePoLine: willClosePoLine ? poLine : null,
             })
           }
           variant="contained"

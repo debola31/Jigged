@@ -71,7 +71,8 @@ SCHEMA_CONTEXT = """
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 - NOTE: vendors do NOT carry capability flags. Whether a vendor supplies
   materials vs. performs outside ops is derived from references:
-    * "supplies materials" = some part has parts.preferred_vendor_id = vendor.id
+    * "supplies materials" = some part_vendors row has vendor_id = vendor.id (the parts'
+      approved vendor lists; a part's preferred vendor is always on its list)
     * "performs outside ops" = some vendor_services row has vendor_id = vendor.id
 
 ### parts (UNIFIED — absorbs the old `inventory_items` table)
@@ -92,6 +93,7 @@ SCHEMA_CONTEXT = """
 - There is no is_stocked column. EVERY part can carry stock and starts at quantity 0, so
   "is this part stocked" is answered by quantity > 0, never by a flag. `source` is the only
   classification axis: 'made' parts are produced in-shop, 'bought' parts are procured.
+- NOTE: quantity is on hand only; what is coming from vendors is part_on_order.
 
 ### part_pricing_tiers (one tier ladder per part: cost AND markup per quantity band)
 - id: UUID (PK)
@@ -162,7 +164,7 @@ SCHEMA_CONTEXT = """
 - job_number: TEXT (unique per company, e.g. 'J-001')
 - quote_id: UUID (FK -> quotes.id, nullable)
 - customer_id: UUID (FK -> customers.id, nullable)
-- customer_po_number: TEXT (set during quote-to-job conversion)
+- customer_po_number: TEXT -- the CUSTOMER's PO number. A purchase order to a vendor is vendor_purchase_orders.
 - production_status: TEXT -- one of: 'not_started', 'in_progress', 'completed', 'cancelled'
   (operator-driven; aggregated from job_parts.production_status)
 - fulfillment_status: TEXT -- one of: 'unshipped', 'partially_shipped', 'fully_shipped'
@@ -208,7 +210,7 @@ SCHEMA_CONTEXT = """
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
 - customer_id: UUID (FK -> customers.id)
-- job_id: UUID (FK -> jobs.id, nullable)
+- job_id: UUID (FK -> jobs.id, NOT NULL)
 - packing_slip_number: TEXT
 - ship_date: DATE
 - carrier: TEXT, shipping_method: TEXT, freight_terms: TEXT
@@ -291,6 +293,22 @@ SCHEMA_CONTEXT = """
   are already invisible to this connection)
 - created_at: TIMESTAMPTZ, updated_at: TIMESTAMPTZ
 
+### outside_shipments (vendor packing slips: one send of a job operation's parts to an outside vendor)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- job_id: UUID, job_part_id: UUID, job_operation_id: UUID, vendor_id: UUID
+- vendor_name: TEXT, service_name: TEXT (as printed on the slip), slip_number: TEXT
+- quantity: NUMERIC (pieces sent), shipped_at: TIMESTAMPTZ, due_back_on: DATE, carrier: TEXT
+- closed_at: TIMESTAMPTZ -- short-closed: nothing more is coming back on this slip
+- vendor_purchase_order_line_id: UUID -- the outside-service PO line it ships against, or NULL
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any count or total.
+- NOTE: still at the vendor = quantity - SUM(its live receipts' quantity_good), on slips with closed_at IS NULL.
+
+### outside_shipment_receipts (parts back from an outside vendor against one slip)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- outside_shipment_id: UUID (FK -> outside_shipments.id), job_operation_id: UUID, job_part_id: UUID
+- quantity_good: NUMERIC, received_at: TIMESTAMPTZ
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any count or total.
+
 ### routings (1:1 with manufacturable parts)
 - id: UUID (PK)
 - company_id: UUID -- ALWAYS filter with $1
@@ -355,6 +373,82 @@ SCHEMA_CONTEXT = """
   only to a tracked part; for an untracked one the answer is not zero, it is that the question
   does not apply. Say that rather than reporting a zero, which reads as "none left".
 
+### vendor_purchase_orders (a purchase order TO A VENDOR, e.g. 'PO-1042'; never the customer's PO)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- po_number: TEXT, vendor_id: UUID (FK -> vendors.id)
+- NOTE: query vendor_purchase_order_status instead. It has every column of this table plus the
+  status, amounts and dates, computed once for the app and for you: never re-derive them here.
+
+### vendor_purchase_order_status (one row per vendor PO: query POs here)
+- id: UUID (= vendor_purchase_orders.id), company_id: UUID -- ALWAYS filter with $1
+- po_number: TEXT, vendor_id: UUID, vendor_name: TEXT (as printed on the PO)
+- status: TEXT -- 'draft' (never sent), 'sent', 'partially_received', 'received' or 'closed'
+- ordered_on: DATE, need_by_on: DATE, issued_at: TIMESTAMPTZ (first sent), closed_at: TIMESTAMPTZ
+- next_expected_on: DATE -- the earliest expected date among the lines still owed
+- line_count: BIGINT, outstanding_line_count: BIGINT (lines still owed something)
+- ordered_amount: NUMERIC (the PO total), open_amount: NUMERIC (the value still to arrive)
+- has_unpriced_lines: BOOLEAN (a price is TBC), has_unsent_changes: BOOLEAN
+- quickbooks_state: TEXT -- 'not_sent', 'in_quickbooks', 'out_of_date', 'pending', 'needs_checking' or 'failed'
+- ship_to_kind: TEXT ('shop', 'vendor' or 'customer'), ship_to_name: TEXT
+- job_numbers: TEXT[], payment_terms: TEXT, ship_via: TEXT, vendor_rfq_id: UUID
+- NOTE: late is public.is_vendor_purchase_order_late(status, next_expected_on, $2).
+
+### vendor_purchase_order_lines (a vendor PO's lines: query vendor_purchase_order_line_status instead)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- vendor_purchase_order_id: UUID (FK -> vendor_purchase_orders.id)
+- NOTE: part and other lines are received on vendor_purchase_order_receipts. OUTSIDE-SERVICE
+  lines are not: their parts go out and come back on the job's outside_shipments slips, which
+  the view's sent_quantity, at_vendor_quantity and received_quantity already net.
+
+### vendor_purchase_order_line_status (one row per vendor PO line, with its progress: query lines here)
+- id: UUID (= vendor_purchase_order_lines.id), company_id: UUID -- ALWAYS filter with $1
+- vendor_purchase_order_id: UUID, po_number: TEXT, vendor_id: UUID, line_number: INTEGER
+- line_kind: TEXT -- 'part', 'outside_service' (an outside step on a job) or 'other' (freight, a fee)
+- part_id: UUID, part_name: TEXT, service_name: TEXT, description: TEXT, vendor_part_number: TEXT
+- status: TEXT -- 'draft', 'open', 'partially_received', 'received', 'closed' or 'no_receipt'
+- quantity: NUMERIC, unit: TEXT, unit_price: NUMERIC (per unit; NULL = TBC), amount: NUMERIC
+- received_quantity: NUMERIC, open_quantity: NUMERIC, open_amount: NUMERIC -- in the line's unit
+- stock_unit: TEXT, ordered_stock_quantity: NUMERIC, received_stock_quantity: NUMERIC, open_stock_quantity: NUMERIC -- part lines
+- sent_quantity: NUMERIC, at_vendor_quantity: NUMERIC -- outside-service lines, from their slips
+- need_by_on: DATE, promised_on: DATE, expected_on: DATE (what lateness is judged on)
+- job_id: UUID, job_number: TEXT, job_operation_id: UUID
+- NOTE: a late line is public.is_vendor_purchase_order_late(status, expected_on, $2).
+
+### vendor_purchase_order_receipts (a delivery against a part or other line of a vendor PO)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- vendor_purchase_order_id: UUID, vendor_purchase_order_line_id: UUID, part_id: UUID
+- quantity: NUMERIC, unit: TEXT, stock_quantity: NUMERIC, stock_unit: TEXT
+- location_name: TEXT, lot_code: TEXT, heat_number: TEXT, vendor_packing_slip: TEXT, received_at: TIMESTAMPTZ
+- voided_at: TIMESTAMPTZ -- VOIDED when set. Filter `voided_at IS NULL` for any count or total.
+
+### part_on_order (per part: what is coming on SENT vendor POs, in its stock unit; no row means nothing)
+- company_id: UUID -- ALWAYS filter with $1
+- part_id: UUID, stock_unit: TEXT, on_order_quantity: NUMERIC, next_expected_on: DATE
+- on_draft_quantity: NUMERIC -- on drafts not sent yet: report apart, never add in
+- unit_mismatch_line_count: BIGINT -- lines in neither quantity, their unit no longer converting
+
+### part_vendor_last_purchase ("Last PO price": per part and vendor, the newest priced line on a sent PO)
+- company_id: UUID -- ALWAYS filter with $1
+- part_id: UUID, vendor_id: UUID, vendor_purchase_order_id: UUID, po_number: TEXT, ordered_on: DATE
+- quantity: NUMERIC, unit: TEXT, unit_price: NUMERIC (per unit), stock_unit: TEXT, unit_price_per_stock_unit: NUMERIC
+
+### part_vendors (a part's approved vendor list: who may supply it, on what terms)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- part_id: UUID, vendor_id: UUID, vendor_part_number: TEXT, purchase_unit: TEXT
+- status: TEXT -- 'approved', 'conditional' or 'disapproved' (the app's "Do not use")
+- lead_time_days: INTEGER, minimum_order_quantity: NUMERIC, quoted_on: DATE, valid_until: DATE
+- NOTE: a price sheet whose valid_until is before $2 has expired and is never a current price.
+
+### part_vendor_price_breaks (a vendor's price sheet for a part, one row per quantity break)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- part_vendor_id: UUID (FK -> part_vendors.id), min_quantity: NUMERIC, unit_price: NUMERIC, source: TEXT
+
+### vendor_rfq_status (a request for quote sent to vendors, with its status)
+- id: UUID (PK), company_id: UUID -- ALWAYS filter with $1
+- rfq_number: TEXT, title: TEXT, needed_by_on: DATE, respond_by_on: DATE, closed_at: TIMESTAMPTZ
+- status: TEXT -- 'draft', 'sent', 'quoted', 'awarded' or 'closed'
+- line_count: BIGINT, awarded_line_count: BIGINT, invited_count: BIGINT, responded_count: BIGINT, declined_count: BIGINT
+
 ## Key Relationships
 - jobs.quote_id -> quotes.id (a job may come from a quote)
 - jobs.customer_id -> customers.id
@@ -410,13 +504,16 @@ otherwise pick.
   parts_bom, parts_unit_conversions, shipment_line_items, customer_addresses,
   customer_contacts. Filter these via JOIN to their parent table.
   Example: `SELECT jo.* FROM job_operations jo JOIN jobs j ON jo.job_id = j.id WHERE j.company_id = $1`
+- PURCHASING. "PO" alone is the CUSTOMER's PO (jobs.customer_po_number); what the shop buys is
+  a purchase order TO A VENDOR. Its status, progress, on order and lateness come from the
+  *_status views and part_on_order, the ones the app's screens read: never re-derive them.
 - Time fields are MINUTES on both routing_operations (setup_minutes,
   cycle_minutes_per_unit) and job_operations (estimated_setup_minutes,
   estimated_run_minutes_per_unit).
   Divide by 60 before multiplying by an hourly labor_rate.
 - Cost inputs for internal routing/job operations:
     labor_rate = COALESCE(routing_operations.labor_rate_override, work_centers.labor_rate)
-  For external operations the inputs are external_unit_price and external_setup_cost.
+  For external operations the input is external_unit_price (per piece; there is no setup cost).
   What to USE for a cost or profit answer is in the semantics section -- prefer the
   frozen job_parts.true_cost_per_unit over recomputing from current rates.
 
@@ -514,6 +611,17 @@ SENSITIVE_TABLES = frozenset({
     "demo_data_templates",
     "quickbooks_connections",
     "quickbooks_customer_map",
+    # The purchasing push's QuickBooks plumbing (20261110043600): the vendor map, the
+    # item / AP-account choices, and the PO links with their sync tokens. Third-party ids,
+    # like the customer map above. Blocked at both layers: the migration REVOKEs SELECT from
+    # jigged_ai_readonly and adds no ai_readonly_select policy (all four are on the exempt
+    # list of tenant_tables_missing_ai_decision), and these whole-word entries refuse a
+    # query that names them before it runs. "Is this PO in QuickBooks?" is answered by
+    # vendor_purchase_order_status.quickbooks_state, which carries no QuickBooks id.
+    "quickbooks_vendor_map",
+    "quickbooks_purchasing_setup",
+    "quickbooks_purchase_order_links",
+    "quickbooks_purchase_order_line_links",
     # The customer's own carrier account number — their shared secret, not ours.
     # "Which customers ship on their own UPS account?" is a reasonable question
     # for an owner to type, and answering it from this table would put account

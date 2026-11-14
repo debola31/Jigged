@@ -8,7 +8,7 @@ import {
 } from '@/components/operations/operationMath';
 import { carrierAccountMismatch } from '@/components/shipments/shipmentMath';
 import { defineCompanyTool, registerCompanyTool, type CompanyToolEnv, type ToolTarget } from '@/lib/mcp/defineTool';
-import { addressOf, companyLink } from '@/lib/mcp/tools/shared';
+import { addressOf, companyLink, urlOutput } from '@/lib/mcp/tools/shared';
 import {
   FREIGHT_TERMS,
   SHIPPING_METHODS,
@@ -16,6 +16,8 @@ import {
   outsideStatus,
   shipmentOutput,
 } from '@/lib/mcp/tools/shipping';
+import { VENDOR_PO_LINE_STATUSES } from '@/lib/purchasing/vendorPoStatus';
+import { vendorPoPath } from '@/lib/purchasingRoutes';
 import { getSupabase } from '@/lib/supabase';
 import { toCreditStatus } from '@/types/customer';
 import { toBillToParty, type CustomerCarrierAccount } from '@/types/customerCarrierAccount';
@@ -33,6 +35,7 @@ import {
   getOpenOutsideShipments,
   getOutsideShipmentById,
   getOutsideSummariesForPart,
+  outsideShipmentPoNumber,
   outstandingOn,
   receiveOutsideOperation,
   receiveOutsideShipment,
@@ -47,6 +50,7 @@ import {
   resolveFreightLine,
   voidShipment,
 } from '@/utils/shipmentsAccess';
+import { listVendorPoLinesForJob } from '@/utils/vendorPoAccess';
 
 /**
  * Shipping write tools: packing slips to customers, and parts out to (and back from) vendors for
@@ -71,6 +75,11 @@ import {
  *
  * WHO shipped, sent or received is never returned (the surveillance guardrail); the outputs are
  * the read tools' shipment shapes.
+ *
+ * PURCHASE ORDERS TO A VENDOR (plan §3.6): the slip stays the only record of movement. A send links
+ * ITSELF to the step's single open outside-service line for that vendor (`create_outside_shipment`
+ * does it; there is no input for it), so send_outside only REPORTS the line, read back from the
+ * slip by id; receive_outside reports how that line stands afterwards. No second receipt record.
  */
 
 const NAME_THE_JOB = 'Give a job_id or a job_number.';
@@ -469,7 +478,67 @@ function outsideRecord(s: OutsideShipmentWithRelations, env: CompanyToolEnv): z.
     expected_back: s.due_back_on,
     carrier: s.carrier,
     notes: s.notes,
+    po_number: outsideShipmentPoNumber(s),
     url: companyLink(env, `/jobs/${s.job_id}`),
+  };
+}
+
+const vendorPoLineRefOutput = z
+  .object({
+    vendor_po_id: z.string(),
+    po_number: z.string(),
+    line_number: z.number(),
+    url: urlOutput.describe('The purchase order in Jigged.'),
+  })
+  .nullable()
+  .describe(
+    "The outside-service line of a purchase order to a vendor this slip ships against: the send linked " +
+      "itself to the step's open line for this vendor. Null when the step is on no PO.",
+  );
+
+/** The PO line a slip ships against, read from the slip's own join. */
+function linkedPoLine(s: OutsideShipmentWithRelations, env: CompanyToolEnv): z.infer<typeof vendorPoLineRefOutput> {
+  const line = s.vendor_purchase_order_line;
+  const po = line?.vendor_purchase_order;
+  if (!line || !po) return null;
+  return {
+    vendor_po_id: po.id,
+    po_number: po.po_number,
+    line_number: line.line_number,
+    url: env.link(vendorPoPath(env.company.id, po.id)),
+  };
+}
+
+const vendorPoLineProgressOutput = z
+  .object({
+    vendor_po_id: z.string(),
+    po_number: z.string(),
+    line_number: z.number(),
+    quantity: z.number().describe('Pieces the PO line pays for.'),
+    received_quantity: z.number().describe('Good pieces back on its slips.'),
+    open_quantity: z.number().describe('Still to come back; 0 once received or closed.'),
+    status: z.enum(VENDOR_PO_LINE_STATUSES),
+    url: urlOutput.describe('The purchase order in Jigged.'),
+  })
+  .nullable()
+  .describe('How the line of a purchase order to a vendor this slip ships against stands now. Null when it is on no PO.');
+
+/** The slip's PO line with its progress, as the job page's "Vendor POs" row reads it. */
+async function poLineProgress(
+  s: OutsideShipmentWithRelations,
+  env: CompanyToolEnv,
+): Promise<z.infer<typeof vendorPoLineProgressOutput>> {
+  const ref = linkedPoLine(s, env);
+  if (!ref || !s.vendor_purchase_order_line) return null;
+  const lineId = s.vendor_purchase_order_line.id;
+  const line = (await listVendorPoLinesForJob(s.job_id, { today: todayUtc() })).find((l) => l.lineId === lineId);
+  if (!line) return null;
+  return {
+    ...ref,
+    quantity: line.quantity,
+    received_quantity: line.receivedQuantity,
+    open_quantity: line.openQuantity,
+    status: line.status,
   };
 }
 
@@ -613,7 +682,9 @@ export const sendOutside = defineCompanyTool({
     'the quantity (defaults to everything the step still has to send), an optional due-back ' +
     'date, and the instructions printed for the vendor (defaults to the routing step\'s own). ' +
     'Ships to the vendor\'s default address, or its only one. Sending more than the step needs is ' +
-    'allowed and comes back in `warnings`. Returns the new slip.',
+    'allowed and comes back in `warnings`. When the step is on a purchase order to a vendor (an open ' +
+    'outside-service line for this step and vendor), the slip links itself to that line and ' +
+    '`vendor_po_line` names it. Returns the new slip.',
   access: 'write',
   input: {
     ...stepRef,
@@ -629,7 +700,7 @@ export const sendOutside = defineCompanyTool({
       .optional()
       .describe('Where the parts go, when the vendor has several addresses and none is its default. This tool lists the choices when one is needed.'),
   },
-  output: { ...outsideShipmentOutput.shape, warnings: warningsOutput },
+  output: { ...outsideShipmentOutput.shape, vendor_po_line: vendorPoLineRefOutput, warnings: warningsOutput },
   run: async (args, env) => {
     const resolved = await findOutsideStep(args, env, 'nothing was sent');
     if ('message' in resolved) return { ok: false, message: resolved.message };
@@ -695,8 +766,9 @@ export const sendOutside = defineCompanyTool({
       vendorAddressId,
       notes,
     });
+    // Read back BY ID: the slip carries the PO line the send linked it to, by join.
     const slip = await getOutsideShipmentById(shipmentId);
-    return { ok: true, data: { ...outsideRecord(slip, env), warnings } };
+    return { ok: true, data: { ...outsideRecord(slip, env), vendor_po_line: linkedPoLine(slip, env), warnings } };
   },
 });
 
@@ -738,8 +810,9 @@ export const receiveOutside = defineCompanyTool({
     'The quantity defaults to everything still out on the slip. `close_slip` with a smaller ' +
     'quantity, or 0, says nothing more is coming back: the rest is written off and the step ' +
     'stays short. When a step was never sent through Jigged, receiving it also records the send. ' +
-    'More back than went out is allowed and comes back in `warnings`. Returns the slip as it ' +
-    'stands afterwards.',
+    'More back than went out is allowed and comes back in `warnings`. When the slip ships against a ' +
+    'purchase order to a vendor, `vendor_po_line` shows how that line stands: the slip is the only ' +
+    'record of what came back. Returns the slip as it stands afterwards.',
   access: 'write',
   input: {
     ...slipRef,
@@ -759,6 +832,7 @@ export const receiveOutside = defineCompanyTool({
     received: z.number().describe('Good pieces this call recorded.'),
     closed_short: z.boolean().describe('The slip was closed with pieces written off.'),
     send_recorded: z.boolean().describe('No slip was open, so Jigged recorded the send alongside the receipt.'),
+    vendor_po_line: vendorPoLineProgressOutput,
     warnings: warningsOutput,
   },
   run: async (args, env) => {
@@ -847,6 +921,7 @@ export const receiveOutside = defineCompanyTool({
         received: good,
         closed_short: closeShipment,
         send_recorded: sendRecorded,
+        vendor_po_line: await poLineProgress(after, env),
         warnings,
       },
     };

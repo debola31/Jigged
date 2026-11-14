@@ -19,6 +19,12 @@ export interface Vendor {
   id: string;
   company_id: string;
   name: string;
+  /**
+   * Standing payment terms with this vendor ("Net 30"), copied onto a new vendor purchase order
+   * that names none. Optional only because older call sites build a Vendor by hand; every read
+   * through `VENDOR_COLUMNS` carries it.
+   */
+  default_payment_terms?: string | null;
   created_at: string;
   updated_at: string;
 }

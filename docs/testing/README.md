@@ -53,7 +53,7 @@ That shape is this repo's main defence against silent breakage, and it is the on
 | Guard | Asserts |
 |---|---|
 | `function_execute_leaks()` | No `SECURITY DEFINER` function in `public` is browser-executable unless allowlisted |
-| `tenant_tables_missing_write_gate()` | Every `company_id` table is billing-gated or explicitly exempt |
+| `tenant_tables_missing_write_gate()` | Every `company_id` table is billing-gated or explicitly exempt, and every browser-writable child of a gated table carries the gate for each write it allows |
 | `definer_writers_missing_write_gate()` | A definer function writing a gated table calls `company_can_write` |
 | `note_counter_write_leaks()` | Only `notes.body` is browser-updatable; the view counters are not |
 | [`legalDocumentsCheck.ts`](../../scripts/legalDocumentsCheck.ts) | A published legal document's bytes AND its metadata are frozen; every file under `public/legal` is declared; the frozen text says the same words as the vendor export it came from |

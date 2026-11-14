@@ -44,6 +44,12 @@ vi.mock('@/utils/partsAccess', () => ({
   getPartTransactions: (...a: unknown[]) => mockTransactions(...a),
 }));
 
+const mockOnOrder = vi.fn();
+vi.mock('@/utils/vendorPoAccess', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/utils/vendorPoAccess')>()),
+  getOnOrderForParts: (...a: unknown[]) => mockOnOrder(...a),
+}));
+
 /** Rows a list read of each table returns, and what a `.maybeSingle()` returns. */
 let tables: Record<string, unknown[]> = {};
 let single: Record<string, unknown> | null = null;
@@ -141,6 +147,7 @@ function resetData() {
   tables = { parts: PART_DETAILS };
   mockGetLocations.mockResolvedValue(LOCATIONS);
   mockOnHand.mockResolvedValue({ rows: ON_HAND, truncated: false });
+  mockOnOrder.mockResolvedValue(new Map());
 }
 
 describe('search_inventory', () => {
@@ -186,6 +193,38 @@ describe('search_inventory', () => {
     }
     // The gap disclosure is not money; the Storage page shows it to everyone.
     expect(res.data.parts[2].cost_gap).toBe('made');
+  });
+
+  it('says what is on order to vendors for each part on the page, in its stock unit, with drafts apart', async () => {
+    mockOnOrder.mockResolvedValue(
+      new Map([
+        [
+          'part-b',
+          {
+            partId: 'part-b',
+            stockUnit: 'in',
+            onOrder: 288,
+            onDraft: 144,
+            nextExpectedOn: '2026-11-18',
+            openLineCount: 1,
+            draftLineCount: 1,
+            unitMismatchLineCount: 0,
+            refs: [],
+          },
+        ],
+      ]),
+    );
+    const res = await searchInventory.run({}, userEnv);
+    if (!res.ok) throw new Error('expected a page');
+    expect(mockOnOrder).toHaveBeenCalledWith('co-1', ['part-b', 'part-a', 'part-c']);
+    expect(res.data.parts.map((p) => [p.part_name, p.on_order, p.on_draft, p.next_expected_on])).toEqual([
+      ['6061-T6 BAR', 288, 144, '2026-11-18'],
+      ['BRKT-100', 0, 0, null],
+      ['WIDGET-9', 0, 0, null],
+    ]);
+    // Prices on a PO go to every office user; the stock's own value still does not.
+    expect(res.data.parts[0].inventory_value).toBeNull();
+    expect(() => z.object(searchInventory.output).parse(res.data)).not.toThrow();
   });
 
   it('gives an admin the cost and the value, and null where no cost is on file', async () => {

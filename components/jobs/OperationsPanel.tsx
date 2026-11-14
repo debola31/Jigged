@@ -36,10 +36,15 @@ import { daysAtVendorBucket } from './outsideWorkMetrics';
 import { getOperationActuals } from '@/utils/operationIntervalsAccess';
 import type { OperationActuals } from '@/types/operationInterval';
 import { useSearchParams } from 'next/navigation';
-import OperationCard from './OperationCard';
+import { newVendorPoPath, vendorPoPath } from '@/lib/purchasingRoutes';
+import type { VendorPoJobLine } from '@/types/vendorPo';
+import OperationCard, { outsidePoLineForOperation, type OperationPoLink } from './OperationCard';
 import OperationCompleteDialog from './OperationCompleteDialog';
-import SendToVendorDialog, { type SendToVendorSubmit } from './SendToVendorDialog';
+import SendToVendorDialog, { type SendToVendorPoLine, type SendToVendorSubmit } from './SendToVendorDialog';
 import ReceiveFromVendorDialog, {
+  closePoLineAfterReceipt,
+  poLineCloseSentence,
+  receivePoLineFor,
   type OpenSlipOption,
   type ReceiveFromVendorSubmit,
 } from './ReceiveFromVendorDialog';
@@ -75,6 +80,13 @@ interface OperationsPanelProps {
   refreshSignal?: number;
   /** The part these operations belong to. Names the part on the outside-send dialog. */
   partName?: string | null;
+  /**
+   * The job's vendor PO lines (`listVendorPoLinesForJob`), read ONCE by the page and shared with
+   * the bought-part line and the Vendor POs row. An outside step's card names the line it ships
+   * against, or offers "Create PO". `null` or absent: unknown, and the cards say nothing about POs
+   * — "Create PO" on a failed read is how a step ends up on two.
+   */
+  vendorPoLines?: readonly VendorPoJobLine[] | null;
 }
 
 interface SnackbarState {
@@ -92,6 +104,7 @@ export default function OperationsPanel({
   onShowActivity,
   refreshSignal = 0,
   partName,
+  vendorPoLines,
 }: OperationsPanelProps) {
   const [loading, setLoading] = useState(false);
   const [snackbar, setSnackbar] = useState<SnackbarState>({
@@ -326,6 +339,51 @@ export default function OperationsPanel({
     setSendOp(operations.find((o) => o.id === operationId) ?? null);
   };
 
+  /** The open vendor PO line a slip sent on this step would link to; undefined while unknown. */
+  const poLineFor = (operation: JobOperation): VendorPoJobLine | null | undefined => {
+    if (!vendorPoLines || !isOutsideOperation(operation)) return undefined;
+    return outsidePoLineForOperation(vendorPoLines, operation.id, operation.vendor_service?.vendor?.id ?? null);
+  };
+
+  const poLinkFor = (operation: JobOperation): OperationPoLink | null | undefined => {
+    const line = poLineFor(operation);
+    if (!line) return line;
+    return {
+      poNumber: line.poNumber,
+      lineNumber: line.lineNumber,
+      href: vendorPoPath(job.company_id, line.vendorPurchaseOrderId),
+      expectedOn: line.expectedOn,
+      isLate: line.isLate,
+    };
+  };
+
+  /**
+   * "Create PO" carries the step's VENDOR as well as the step: the form fills its outside line
+   * from that vendor's open steps, so a link with the step alone opened a blank form.
+   */
+  const createPoHrefFor = (operation: JobOperation) =>
+    newVendorPoPath(job.company_id, {
+      vendorId: operation.vendor_service?.vendor?.id ?? null,
+      jobOperationId: operation.id,
+    });
+
+  /**
+   * The send dialog's view of the line. Due back prefills from the line's own NEED-BY date —
+   * whenever the step has an eligible line, a batch already out or not. Never from `expectedOn`:
+   * for an outside line that is the earliest due-back among its slips still out, which is an
+   * earlier batch's promise rather than a date anyone chose for this one.
+   */
+  const sendPoLineFor = (operation: JobOperation): SendToVendorPoLine | null | undefined => {
+    const line = poLineFor(operation);
+    if (!line) return line;
+    return {
+      poNumber: line.poNumber,
+      lineNumber: line.lineNumber,
+      href: vendorPoPath(job.company_id, line.vendorPurchaseOrderId),
+      needByOn: line.needByOn,
+    };
+  };
+
   const handleReceive = async (operationId: string) => {
     const op = operations.find((o) => o.id === operationId) ?? null;
     setLoading(true);
@@ -337,6 +395,9 @@ export default function OperationsPanel({
           slip_number: s.slip_number,
           shipped_at: s.shipped_at,
           outstanding: s.outstanding,
+          // The job's own PO lines say what the slip's line still expects, so a receipt that
+          // completes it skips the close instead of being refused one.
+          poLine: receivePoLineFor(s, vendorPoLines),
         })),
       );
       setReceiveOp(op);
@@ -352,6 +413,10 @@ export default function OperationsPanel({
     setLoading(true);
     try {
       const before = outsideByOp.get(sendOp.id);
+      // What the database links the slip to: the step's one open line, by the same rule.
+      // `undefined` while the job's PO lines are unknown — reported as null, never as "no line".
+      const knownLine = poLineFor(sendOp);
+      const shipsAgainst = knownLine ?? null;
       const { shipmentId, slipNumber } = await createOutsideShipment({
         jobOperationId: sendOp.id,
         quantity: v.quantity,
@@ -366,9 +431,15 @@ export default function OperationsPanel({
         has_due_back_date: Boolean(v.dueBackOn),
         has_instructions: Boolean(v.notes),
         has_ship_to_address: Boolean(v.vendorAddressId),
+        has_po_line: knownLine === undefined ? null : knownLine !== null,
       });
       setSendOp(null);
-      showSnackbar(`Sent ${v.quantity} — slip ${slipNumber}`, 'success');
+      showSnackbar(
+        shipsAgainst
+          ? `Sent ${v.quantity} — slip ${slipNumber}, on ${shipsAgainst.poNumber}`
+          : `Sent ${v.quantity} — slip ${slipNumber}`,
+        'success',
+      );
       await Promise.all([reloadSummaries(), reloadActuals(), reloadOutside()]);
       onOperationUpdate();
       // Open the slip straight away: it has to go in the box, and making the
@@ -403,8 +474,23 @@ export default function OperationsPanel({
         was_backfilled: result.wasBackfilled,
         days_at_vendor_bucket: daysAtVendorBucket(shippedAt),
       });
+      // After the receipt, and never instead of it: a failure here leaves the receipt standing and
+      // says so, rather than inviting a second receipt of the same pieces.
+      const lineClose = await closePoLineAfterReceipt(v.closePoLine, v.quantityGood);
       setReceiveOp(null);
-      showSnackbar(`Recorded ${v.quantityGood} back from the vendor.`, 'success');
+      if (lineClose?.kind === 'failed') {
+        showSnackbar(lineClose.message, 'warning');
+      } else if (lineClose && v.closePoLine) {
+        // Received in full, or closed before this receipt (the line, or its whole PO), is the same
+        // "nothing more expected" the box asked for — said as what happened, not as a close that
+        // never happened.
+        showSnackbar(
+          `Recorded ${v.quantityGood} back from the vendor. ${poLineCloseSentence(v.closePoLine, lineClose)}`,
+          'success',
+        );
+      } else {
+        showSnackbar(`Recorded ${v.quantityGood} back from the vendor.`, 'success');
+      }
       await Promise.all([reloadSummaries(), reloadActuals(), reloadOutside()]);
       onOperationUpdate();
     } catch (err) {
@@ -488,6 +574,8 @@ export default function OperationsPanel({
                 onSend={handleSend}
                 onReceive={handleReceive}
                 actuals={actualsByOp.get(operation.id)}
+                purchaseOrder={poLinkFor(operation)}
+                createPoHref={createPoHrefFor(operation)}
               />
               </Box>
             ))}
@@ -504,6 +592,8 @@ export default function OperationsPanel({
           partName={partName ?? 'this part'}
           qtyToSend={outsideByOp.get(sendOp.id)?.qty_to_send ?? 0}
           defaultInstructions={sendOp.instructions}
+          poLine={sendPoLineFor(sendOp)}
+          createPoHref={createPoHrefFor(sendOp)}
           busy={loading}
           onClose={() => setSendOp(null)}
           onSubmit={submitSend}

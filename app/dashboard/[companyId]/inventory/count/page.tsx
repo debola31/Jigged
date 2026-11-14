@@ -29,16 +29,17 @@
  *
  * ## Two ways in, one worksheet
  *
- * **Storage is no longer one of them.** Auditing a bin and auditing a whole cabinet both happen in a
- * drawer on the Storage page itself as of 2026-08-10 — same `commitCount`, same `adjustment` rows,
- * without leaving the grid you are auditing. What still arrives here is the shop-wide sheet from the
- * Parts toolbar, and one part at one place from its own balance row.
+ * **Both are on Storage's Inventory tab**: `Count Inventory` in its toolbar opens the shop-wide
+ * sheet, and `Count all N locations` in a split part's side rail opens `?part=`. The Places tab is
+ * not a door: auditing a bin and auditing a whole cabinet both happen in a drawer there as of
+ * 2026-08-10 — same `commitCount`, same `adjustment` rows, without leaving the grid you are auditing.
  *
  * With no `?location=`, this is the company-wide sheet described above: pick parts across the shop.
  *
  * With `?location=<id>`, it is **place-scoped**, which is what §5.11 asked for all along — you walk
- * a shop bin by bin, not part by part. Three things change, and they're all consequences of
- * standing at one place rather than looking at the whole catalogue:
+ * a shop bin by bin, not part by part. Nothing links to this mode any more: `Bulk Adjust` became
+ * that drawer, and the part page's `Count here` went with its Storage tab. Three things change, and
+ * they're all consequences of standing at one place rather than looking at the whole catalogue:
  *
  *  - **Nothing is excluded.** Company-wide, a part split across bins can't be counted item-by-item
  *    (count 38 against 10+20+10 and no bin defensibly absorbs the −2). At one bin that ambiguity
@@ -171,8 +172,8 @@ export default function InventoryCountPage() {
   /**
    * Where "back" goes depends on where counting is entered from.
    *
-   * Two entry points are the Storage board — `Count everything` in its toolbar, and `Count what's
-   * here` on a tile's sheet — and the rest arrive from a part page or another count.
+   * Both doors are on Storage's Inventory tab — `Count Inventory` in its toolbar, and `Count all N
+   * locations` in a part's side rail — so Storage is the default for every sheet.
    *
    * This used to be a single hardcoded push to `/dashboard/{id}/inventory`, which now redirects to
    * Parts — so a user who arrived from Storage was silently dumped on a different page than the
@@ -192,8 +193,9 @@ export default function InventoryCountPage() {
   const locationMode = Boolean(locationId);
 
   /**
-   * `?part=<id>` narrows a place-scoped count to ONE part — the sheet you reach from "Count here"
-   * on the part page. Meaningless without a location: counting a part means counting it somewhere.
+   * `?part=<id>` narrows a place-scoped count to ONE part — the sheet "Count here" opened from the
+   * part page's Storage tab until 2026-09-09; a side-rail row's `Adjust` does that job now.
+   * Meaningless without a location: counting a part means counting it somewhere.
    */
   const partIdParam = searchParams.get('part');
   const partScope = Boolean(locationId && partIdParam);
@@ -213,22 +215,21 @@ export default function InventoryCountPage() {
   /**
    * Where "back" goes, and where a finished count lands.
    *
-   * `?from=` is set by whoever sent you here, because the destination is not derivable: the same
-   * one-row sheet is reachable from a part page and from an excluded-part chip on another count,
-   * and dumping someone on Storage from either is the bug this branch already exists to prevent.
+   * Storage, unless `?from=` says otherwise. The part-first sheets went back to the part's Storage
+   * tab, and kept doing so after that tab was removed (2026-09-09) — `?tab=` named a slug the
+   * workspace no longer had, so "Back to part" landed on its Workspace tab. Their door is Storage's
+   * side rail now, so they go back where they came from like every other sheet.
    *
    * Every arm resolves synchronously from the URL, so the Back button renders on first paint. It
    * used to carry a `flagged` marker and a visibility guard for the one arm that had to wait on a
    * feature flag; that flag is gone and so is the wait.
    */
   const from = searchParams.get('from');
-  const returnTo = partFirst && partIdParam
-    ? { href: `/dashboard/${companyId}/parts/${partIdParam}?tab=inventory`, label: 'Back to part' }
-    : from === 'count'
-      ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count' }
-      : from === 'parts'
-        ? { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' }
-        : { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' };
+  const returnTo = from === 'count'
+    ? { href: `/dashboard/${companyId}/inventory/count`, label: 'Back to the count' }
+    : from === 'parts'
+      ? { href: `/dashboard/${companyId}/parts`, label: 'Back to parts' }
+      : { href: `/dashboard/${companyId}/inventory/locations`, label: 'Back to storage' };
 
   /**
    * Which page of this bin we are looking at.
@@ -269,7 +270,8 @@ export default function InventoryCountPage() {
     // `Bulk Adjust`, matching the button that opens it. A count IS a batch of adjustments —
     // `commitCount` writes one `adjustStockAtLocation` per line — so naming the page for the tool
     // while the button named the outcome made two names for one thing. The shop-wide entry keeps
-    // `Count Inventory`: it is reached from Parts, where the noun is the items, not the places.
+    // `Count Inventory`, the button that opens it on Storage's Inventory tab, where the noun is the
+    // items, not the places.
     else if (locationMode && locationName) setTitle(`Bulk Adjust ${locationName}`);
     else setTitle('Count Inventory');
     return () => setTitle(null);
@@ -1025,7 +1027,7 @@ export default function InventoryCountPage() {
    * *"a user count even just select where a part is and how much is there."*
    *
    * An affordance on the sheet, deliberately not a picker STEP. On `?part=` the user already
-   * chose the part by pressing "Count all N places"; inserting a step would re-ask a question
+   * chose the part by pressing "Count all N locations"; inserting a step would re-ask a question
    * they answered. And a place the part has never been in is exactly the one you need when the
    * system is wrong about where something lives.
    *

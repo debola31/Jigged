@@ -1,0 +1,42 @@
+{
+  "$comment": [
+    "ONE FILE, TWO RUNNERS. __tests__/lib/purchasing/late.test.ts feeds these to",
+    "isVendorPoLate() (lib/purchasing/late.ts); api/tests/integration/test_vendor_purchase_orders.py",
+    "feeds the same rows to public.is_vendor_purchase_order_late(status, expected_on, today).",
+    "If the TypeScript mirror and the SQL definition ever disagree, one suite fails on the",
+    "case that separates them (plan 3.4, criterion P7). Add a case here, never inline.",
+    "",
+    "Late = still owed something (a PO that is sent or partially_received, a line that is",
+    "open or partially_received), an expected date, and that date STRICTLY before the",
+    "caller's local date. One predicate serves POs and lines, so both kinds of status are",
+    "here. Dates are plain calendar dates on both sides -- no timezone conversion happens",
+    "here, which is the point: the caller supplies the day.",
+    "",
+    "Shape: { today, cases: [{ name, status, expected_on, today?, late }] }. A case's own",
+    "`today` wins; the top-level `today` is the default. Every case here carries its own."
+  ],
+  "today": "2026-11-09",
+  "cases": [
+    { "name": "sent, expected yesterday", "status": "sent", "expected_on": "2026-11-08", "today": "2026-11-09", "late": true },
+    { "name": "sent, expected today -- not late until tomorrow", "status": "sent", "expected_on": "2026-11-09", "today": "2026-11-09", "late": false },
+    { "name": "sent, expected tomorrow", "status": "sent", "expected_on": "2026-11-10", "today": "2026-11-09", "late": false },
+    { "name": "partly received, expected last week", "status": "partially_received", "expected_on": "2026-11-02", "today": "2026-11-09", "late": true },
+    { "name": "partly received, expected today", "status": "partially_received", "expected_on": "2026-11-09", "today": "2026-11-09", "late": false },
+    { "name": "partly received, expected next month", "status": "partially_received", "expected_on": "2026-12-01", "today": "2026-11-09", "late": false },
+    { "name": "draft -- never promised, never late", "status": "draft", "expected_on": "2026-10-01", "today": "2026-11-09", "late": false },
+    { "name": "received -- owes nothing", "status": "received", "expected_on": "2026-10-01", "today": "2026-11-09", "late": false },
+    { "name": "closed -- nothing more expected", "status": "closed", "expected_on": "2026-10-01", "today": "2026-11-09", "late": false },
+    { "name": "sent with no expected date", "status": "sent", "expected_on": null, "today": "2026-11-09", "late": false },
+    { "name": "partly received with no expected date", "status": "partially_received", "expected_on": null, "today": "2026-11-09", "late": false },
+    { "name": "draft with no expected date", "status": "draft", "expected_on": null, "today": "2026-11-09", "late": false },
+    { "name": "across the year boundary, late", "status": "sent", "expected_on": "2026-12-31", "today": "2027-01-01", "late": true },
+    { "name": "across the year boundary, not yet", "status": "sent", "expected_on": "2027-01-01", "today": "2026-12-31", "late": false },
+    { "name": "across a month boundary", "status": "sent", "expected_on": "2026-11-30", "today": "2026-12-01", "late": true },
+    { "name": "leap day, the day after", "status": "partially_received", "expected_on": "2028-02-29", "today": "2028-03-01", "late": true },
+    { "name": "leap day, on the day", "status": "partially_received", "expected_on": "2028-02-29", "today": "2028-02-29", "late": false },
+    { "name": "open line, expected yesterday", "status": "open", "expected_on": "2026-11-08", "today": "2026-11-09", "late": true },
+    { "name": "open line, expected today", "status": "open", "expected_on": "2026-11-09", "today": "2026-11-09", "late": false },
+    { "name": "open line with no expected date", "status": "open", "expected_on": null, "today": "2026-11-09", "late": false },
+    { "name": "no-receipt line (freight) -- owes no delivery", "status": "no_receipt", "expected_on": "2026-10-01", "today": "2026-11-09", "late": false }
+  ]
+}

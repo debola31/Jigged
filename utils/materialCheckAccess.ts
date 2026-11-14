@@ -14,12 +14,28 @@
  * **Top-level BOM only** — one level of `parts_bom`, matching J4's spec and the card that
  * exists today. A pump job reads "needs 1 pump core", not the aluminium inside it. The card
  * says so on screen.
+ *
+ * **On order rides alongside** (plan §3.10, criterion B4): each material carries what is on SENT
+ * purchase orders and, apart, what is on drafts, with the POs behind them — read from
+ * `part_on_order` through `getOnOrderForParts`, the same figures the buy list and MCP use.
+ * "Short by" is untouched by it: stock on a PO is not on the shelf.
+ *
+ * **A failed read THROWS**, every one of them, as a real Error. An empty list renders "No
+ * materials on this part's BOM", which is the one thing a failure must never say.
  */
 import { getSupabase } from '@/lib/supabase';
 import { ID_CHUNK } from '@/lib/queryLimits';
+import { toFriendlyError } from '@/lib/supabaseErrors';
 
-import { buildRequirement } from '@/lib/materialRequirements';
-import type { MaterialRequirement, MaterialStockFacts } from '@/types/materialCheck';
+import { buildRequirement, type MaterialOnOrderRef } from '@/lib/materialRequirements';
+import type { MaterialCheckRow, MaterialStockFacts } from '@/types/materialCheck';
+import type { PartOnOrder } from '@/types/vendorPo';
+import { getOnOrderForParts } from '@/utils/vendorPoAccess';
+
+/** Every read failure here: translated, and worded as our failure — never an empty list. */
+function loadFailure(error: unknown): Error {
+  return toFriendlyError(error, { entity: 'material', fallback: 'Failed to load the materials for this part.' });
+}
 
 const CHUNK_PARENTS = 200;
 const CHUNK_IDS = ID_CHUNK;
@@ -58,7 +74,7 @@ async function loadBomLines(madePartIds: string[]): Promise<BomRow[]> {
         .order('sequence', { ascending: true });
       if (error) {
         console.error('Error loading BOM lines for material check:', error);
-        throw error;
+        throw loadFailure(error);
       }
       return (data ?? []) as BomRow[];
     }),
@@ -80,7 +96,7 @@ async function loadStockFacts(childIds: string[]): Promise<Map<string, MaterialS
         .in('id', ids);
       if (error) {
         console.error('Error loading material stock facts:', error);
-        throw error;
+        throw loadFailure(error);
       }
       return data ?? [];
     }),
@@ -123,7 +139,7 @@ async function loadConversionFactors(
         .in('from_unit', fromUnits);
       if (error) {
         console.error('Error loading unit conversions for material check:', error);
-        throw error;
+        throw loadFailure(error);
       }
       return data ?? [];
     }),
@@ -169,7 +185,7 @@ async function loadIssued(
         .order('created_at', { ascending: true });
       if (error) {
         console.error('Error loading job consumption:', error);
-        throw error;
+        throw loadFailure(error);
       }
       return data ?? [];
     }),
@@ -202,7 +218,7 @@ async function loadIssued(
 async function buildRequirementsFor(
   companyId: string,
   jobParts: JobPartRow[],
-): Promise<Array<{ jobPart: JobPartRow; requirements: MaterialRequirement[] }>> {
+): Promise<Array<{ jobPart: JobPartRow; requirements: MaterialCheckRow[] }>> {
   if (jobParts.length === 0) return [];
 
   const madePartIds = [...new Set(jobParts.map((jp) => jp.madePartId))];
@@ -213,9 +229,10 @@ async function buildRequirementsFor(
   const jobIds = [...new Set(jobParts.map((jp) => jp.jobId))];
 
   // Wave 2: everything below depends only on the BOM, so it all goes at once.
-  const [stockByPart, issued] = await Promise.all([
+  const [stockByPart, issued, onOrder] = await Promise.all([
     loadStockFacts(childIds),
     loadIssued(companyId, jobIds),
+    getOnOrderForParts(companyId, childIds),
   ]);
 
   const conversions = await loadConversionFactors(
@@ -249,20 +266,58 @@ async function buildRequirementsFor(
           issued: seen?.quantity ?? 0,
           hasDiscrepancy: seen?.hasDiscrepancy ?? false,
           heatNumbers: seen?.heatNumbers ?? [],
+          // Loaded, so a material with nothing coming is a true 0 — never left null.
+          onOrder: onOrder.get(line.child_part_id)?.onOrder ?? 0,
+          onDraft: onOrder.get(line.child_part_id)?.onDraft ?? 0,
+          onOrderRefs: onOrderRefsFor(onOrder.get(line.child_part_id)),
         }),
       ];
     }),
   }));
 }
 
-/** J4 for one job part — the job page card. */
+/**
+ * The POs behind a material's on-order figures, one per PO (two lines of the same material on
+ * one PO are one entry): sent ones first, by when they are due, then drafts.
+ */
+function onOrderRefsFor(entry: PartOnOrder | undefined): MaterialOnOrderRef[] {
+  if (!entry) return [];
+  const byPo = new Map<string, MaterialOnOrderRef>();
+  for (const ref of entry.refs) {
+    const key = `${ref.vendorPurchaseOrderId}:${ref.isDraft}`;
+    const prior = byPo.get(key);
+    if (!prior) {
+      byPo.set(key, {
+        vendorPurchaseOrderId: ref.vendorPurchaseOrderId,
+        poNumber: ref.poNumber,
+        stockQuantity: ref.stockQuantity,
+        expectedOn: ref.expectedOn,
+        isDraft: ref.isDraft,
+      });
+      continue;
+    }
+    prior.stockQuantity += ref.stockQuantity;
+    if (ref.expectedOn && (!prior.expectedOn || ref.expectedOn < prior.expectedOn)) prior.expectedOn = ref.expectedOn;
+  }
+  return [...byPo.values()].sort((a, b) => {
+    if (a.isDraft !== b.isDraft) return a.isDraft ? 1 : -1;
+    if (a.expectedOn !== b.expectedOn) {
+      if (a.expectedOn === null) return 1;
+      if (b.expectedOn === null) return -1;
+      return a.expectedOn < b.expectedOn ? -1 : 1;
+    }
+    return a.poNumber.localeCompare(b.poNumber);
+  });
+}
+
+/** J4 for one job part — the job page card, with what is on order for each material. */
 export async function getJobPartMaterialCheck(args: {
   companyId: string;
   jobId: string;
   jobPartId: string;
   madePartId: string;
   orderQuantity: number;
-}): Promise<MaterialRequirement[]> {
+}): Promise<MaterialCheckRow[]> {
   const built = await buildRequirementsFor(args.companyId, [{
     jobPartId: args.jobPartId,
     jobId: args.jobId,

@@ -692,10 +692,11 @@ can't tell what it's *for* — they see the controls, not the purpose. That's ho
 review: Add storage, Subdivide, Rename, Print labels, and no answer to "what am I supposed to do
 here?" Two fixes, prefer the first:
 
-1. **Give it the recurring job it's missing.** Storage's is counting and putting away — so `Count all
-   parts` is in the toolbar, `Count here` is the sheet's first action and the only one offered for
-   the `Unassigned` bucket. Better than explaining: it makes the page worth returning to rather than
-   merely legible.
+1. **Give it the recurring job it's missing.** Storage's is counting — `Count Inventory` on its
+   Inventory tab, `Bulk Adjust` on a unit, `Adjust` on a place. Better than explaining: it makes
+   the page worth returning to rather than merely legible. *(This named `Count all parts` and
+   `Count here`, both gone by 2026-09-09 — and with them, until 2026-11-12, every door to the count
+   worksheet.)*
 2. **Say plainly what the page is and isn't** — one or two sentences: what you're looking at, and
    where the adjacent thing happens instead ("adding and removing stock happens on the part itself").
    Naming what a page *doesn't* do is often the more useful half.
@@ -817,7 +818,7 @@ itself. As-built, verified 2026-08-03:
 | Pattern | Entities | Shape |
 |---|---|---|
 | **A — Reference entity** | Customers, Vendors | Back + Edit/Delete row → **title card** (name + identity chips inline on one row) → `<Grid container>` of two `size={{ xs: 12, md: 6 }}` cards, both `sx={{ height: '100%' }}` so their bottoms align → optional full-width footer. |
-| **B — Workflow / document entity** | Jobs, Quotes | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
+| **B — Workflow / document entity** | Jobs, Quotes, Vendor POs, RFQs *(the last two 2026-11, [purchasing.md](modules/purchasing.md#screens))* | **No title card**: entity number + status pill + badges inline on one row (`flex` + `gap: 2`) — don't stack the pill on its own line below the title, it looks orphaned. Metadata summary above, then the **full-width workhorse panel** (operations, line items), the reason the user opened the page. |
 | **C — Maturity-adaptive workspace** | Parts | Sticky identity header + URL-addressable tabs (`?tab=`), edited in place with auto-save on blur; no Edit mode, no `/parts/{id}/edit` route. Owned by [`modules/parts.md` § "Part detail workspace"](modules/parts.md). |
 
 *(Corrections 2026-08-03: this doc put **Parts** and **Work Centers** under Pattern A. Parts became

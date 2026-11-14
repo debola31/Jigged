@@ -11,6 +11,8 @@ import {
   paginate,
   urlOutput,
 } from '@/lib/mcp/tools/shared';
+import { VENDOR_PO_LINE_STATUSES, VENDOR_PO_STATUSES } from '@/lib/purchasing/vendorPoStatus';
+import { vendorPoPath } from '@/lib/purchasingRoutes';
 import { getSupabase } from '@/lib/supabase';
 import {
   getJobLifecycleStage,
@@ -20,6 +22,12 @@ import {
 } from '@/types/job';
 import { getAllJobs, getJobWithRelations } from '@/utils/jobsAccess';
 import { getJobPartMaterialCheck } from '@/utils/materialCheckAccess';
+import { listVendorPoLinesForJob } from '@/utils/vendorPoAccess';
+
+/** Today in UTC: Jigged's server clock judges "overdue" on a purchase order line. */
+const todayUtc = (): string => new Date().toISOString().slice(0, 10);
+
+const poLink = (env: CompanyToolEnv, poId: string): string | null => env.link(vendorPoPath(env.company.id, poId));
 
 const STAGES = [
   'not_started',
@@ -159,6 +167,26 @@ const jobPartOutput = z.object({
   operations: z.array(operationOutput),
 });
 
+const jobVendorPoLineOutput = z.object({
+  vendor_po_id: z.string(),
+  po_number: z.string().describe("The purchase order to a vendor (PO-1042) — the shop's order, not the customer's."),
+  po_status: z.enum(VENDOR_PO_STATUSES),
+  vendor: z.object({ vendor_id: z.string(), name: z.string(), url: urlOutput }),
+  line_number: z.number(),
+  kind: z.enum(['part', 'outside_service', 'other']).describe('A bought part or material, an outside step this vendor does, or anything else.'),
+  item: z.string().describe("The line's description."),
+  job_part_id: z.string().nullable(),
+  operation: z.string().nullable().describe('Outside lines: the routing step, e.g. "Op 30 Anodize".'),
+  quantity: z.number(),
+  unit: z.string(),
+  received_quantity: z.number(),
+  open_quantity: z.number().describe('Still to arrive; 0 once received or closed.'),
+  status: z.enum(VENDOR_PO_LINE_STATUSES),
+  expected_on: z.string().nullable(),
+  overdue: z.boolean().describe("Past its expected date, judged on Jigged's server clock (UTC)."),
+  url: urlOutput,
+});
+
 const jobDetail = {
   job_id: z.string(),
   job_number: z.string(),
@@ -168,7 +196,10 @@ const jobDetail = {
   due_date: z.string().nullable(),
   customer_id: z.string().nullable(),
   customer_name: z.string().nullable(),
-  customer_po_number: z.string().nullable(),
+  customer_po_number: z
+    .string()
+    .nullable()
+    .describe("The customer's PO number: the order the customer sent the shop. The shop's own POs to vendors are vendor_po_lines."),
   quote_id: z.string().nullable(),
   quote_number: z.string().nullable(),
   payment_terms: z.string().nullable(),
@@ -182,6 +213,9 @@ const jobDetail = {
   completed_at: z.string().nullable(),
   created_at: z.string(),
   parts: z.array(jobPartOutput),
+  vendor_po_lines: z
+    .array(jobVendorPoLineOutput)
+    .describe("The job's lines on purchase orders to vendors (bought parts, material, outside steps), as its Vendor POs row shows them. Archived POs are left out."),
   url: urlOutput,
 };
 
@@ -222,9 +256,10 @@ export const getJob = defineCompanyTool({
   name: 'get_job',
   title: 'Get a job',
   description:
-    'Returns one job in full: stage, due date, customer, PO, quote, terms, shipping details and ' +
-    'addresses, and each part with its quantity, price and routing steps (status, work center or ' +
-    'outside vendor, estimates, instructions). Find a job by id or by job number.',
+    "Returns one job in full: stage, due date, customer, the customer's PO number, quote, terms, " +
+    'shipping details and addresses, and each part with its quantity, price and routing steps ' +
+    '(status, work center or outside vendor, estimates, instructions); and the lines for it on ' +
+    "purchase orders to vendors with what has arrived. Find a job by id or by job number.",
   access: 'read',
   input: jobRef,
   output: jobDetail,
@@ -232,6 +267,7 @@ export const getJob = defineCompanyTool({
     const found = await findJob(args, env);
     if ('message' in found) return { ok: false, message: found.message };
     const { job, archived } = found;
+    const poLines = await listVendorPoLinesForJob(job.id, { today: todayUtc() });
     return {
       ok: true,
       data: {
@@ -284,6 +320,25 @@ export const getJob = defineCompanyTool({
             notes: op.notes,
           })),
         })),
+        vendor_po_lines: poLines.map((l) => ({
+          vendor_po_id: l.vendorPurchaseOrderId,
+          po_number: l.poNumber,
+          po_status: l.poStatus,
+          vendor: { vendor_id: l.vendorId, name: l.vendorName, url: companyLink(env, `/vendors/${l.vendorId}`) },
+          line_number: l.lineNumber,
+          kind: l.lineKind,
+          item: l.description,
+          job_part_id: l.jobPartId,
+          operation: l.operationLabel,
+          quantity: l.quantity,
+          unit: l.unit,
+          received_quantity: l.receivedQuantity,
+          open_quantity: l.openQuantity,
+          status: l.status,
+          expected_on: l.expectedOn,
+          overdue: l.isLate,
+          url: poLink(env, l.vendorPurchaseOrderId),
+        })),
         url: companyLink(env, `/jobs/${job.id}`),
       },
     };
@@ -303,8 +358,22 @@ const requirementOutput = z.object({
   on_hand: z.number(),
   issued: z.number().describe('Already taken from stock for this job.'),
   remaining_to_issue: z.number().nullable(),
-  short_by: z.number().nullable(),
+  short_by: z.number().nullable().describe('Against what is on hand: stock still on a purchase order is not on the shelf.'),
   heat_numbers: z.array(z.string()),
+  on_order: z.number().nullable().describe('On sent purchase orders to vendors and still to arrive, in the stock unit.'),
+  on_draft: z.number().nullable().describe('On draft purchase orders not sent yet, in the stock unit.'),
+  on_order_pos: z
+    .array(
+      z.object({
+        vendor_po_id: z.string(),
+        po_number: z.string(),
+        quantity: z.number().describe('Still to arrive on it, in the stock unit.'),
+        expected_on: z.string().nullable(),
+        draft: z.boolean(),
+        url: urlOutput,
+      }),
+    )
+    .describe('The purchase orders to vendors behind those figures: sent ones first, then drafts.'),
 });
 
 export const getJobMaterialCheck = defineCompanyTool({
@@ -312,8 +381,8 @@ export const getJobMaterialCheck = defineCompanyTool({
   title: 'Check a job\'s material',
   description:
     'For each part on a job, lists the material its bill of materials needs for the order ' +
-    'quantity, what is on hand, what was already issued to the job, and how much is short. Find ' +
-    'the job by id or by job number.',
+    'quantity, what is on hand, what was already issued to the job, how much is short, and what is ' +
+    'on order for it on purchase orders to vendors (drafts apart). Find the job by id or by job number.',
   access: 'read',
   input: jobRef,
   output: {
@@ -359,6 +428,16 @@ export const getJobMaterialCheck = defineCompanyTool({
             remaining_to_issue: r.remainingToIssue,
             short_by: r.shortBy,
             heat_numbers: r.heatNumbers,
+            on_order: r.onOrder ?? null,
+            on_draft: r.onDraft ?? null,
+            on_order_pos: (r.onOrderRefs ?? []).map((ref) => ({
+              vendor_po_id: ref.vendorPurchaseOrderId,
+              po_number: ref.poNumber,
+              quantity: ref.stockQuantity,
+              expected_on: ref.expectedOn,
+              draft: ref.isDraft,
+              url: poLink(env, ref.vendorPurchaseOrderId),
+            })),
           })),
         };
       }),

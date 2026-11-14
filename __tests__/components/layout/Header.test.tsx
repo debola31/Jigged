@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import userEvent from '@testing-library/user-event';
 import { render, screen } from '../../test-utils';
-import Header from '@/components/layout/Header';
+import Header, { getPageTitle as headerTitle } from '@/components/layout/Header';
+import { getPageTitle as feedbackTitle } from '@/components/feedback/FeedbackDialog';
 
 const mockSignOut = vi.fn();
 vi.mock('@/components/providers/AuthProvider', () => ({
@@ -28,6 +29,9 @@ const mockUseDemoMode = vi.fn();
 vi.mock('@/components/providers/DemoModeProvider', () => ({
   useDemoMode: () => mockUseDemoMode(),
 }));
+
+// FeedbackDialog is imported only for its title rules; its access module is never called here.
+vi.mock('@/utils/feedbackAccess', () => ({ createFeedback: vi.fn(), notifyFeedback: vi.fn() }));
 
 vi.mock('@/components/layout/PageTitleProvider', () => ({
   usePageTitle: () => ({ title: null }),
@@ -92,5 +96,34 @@ describe('Header', () => {
     render(<Header />);
 
     expect(screen.queryByRole('button', { name: /alert/i })).not.toBeInTheDocument();
+  });
+});
+
+/**
+ * Both title readers — the header and the feedback dialog — name every purchasing page from the
+ * one route table (lib/purchasingRoutes.ts). A purchasing path that fell through to the generic
+ * rules would read "New …" or "Dashboard", and a feedback report filed from it would be tagged with
+ * a page the person was not on.
+ */
+describe('purchasing page titles', () => {
+  const cases: Array<[string, string]> = [
+    ['/dashboard/c1/purchasing', 'Purchasing'],
+    ['/dashboard/c1/purchasing/orders/new', 'New Purchase Order'],
+    ['/dashboard/c1/purchasing/orders/0b8e6c1e-5d1a-4c6e-9f00-1d2c3b4a5e6f', 'Purchase Order'],
+    ['/dashboard/c1/purchasing/rfqs/new', 'New RFQ'],
+    ['/dashboard/c1/purchasing/rfqs/abc', 'RFQ'],
+  ];
+
+  it.each(cases)('the header titles %s "%s"', (path, title) => {
+    expect(headerTitle(path)).toBe(title);
+  });
+
+  it.each(cases)('the feedback dialog titles %s "%s" too', (path, title) => {
+    expect(feedbackTitle(path)).toBe(title);
+  });
+
+  it('leaves every other page to its own rules', () => {
+    expect(headerTitle('/dashboard/c1/quotes/new')).toBe('New Quote');
+    expect(feedbackTitle('/dashboard/c1/jobs')).toBe('Jobs');
   });
 });

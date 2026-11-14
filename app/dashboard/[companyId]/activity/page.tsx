@@ -40,6 +40,8 @@ const FILTERS: { label: string; types?: ActivityType[] }[] = [
   // Stock movements. The owner had no shop-wide view of these at all — `getRecentActivity`
   // existed but its only caller was the operator's phone.
   { label: 'Inventory', types: ['inventory'] },
+  // Purchase orders to vendors: a revision sent, a delivery received. Archived POs never appear.
+  { label: 'Purchasing', types: ['purchasing'] },
 ];
 
 function ActivityRow({ item }: { item: ActivityItem }) {

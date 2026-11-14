@@ -224,3 +224,103 @@ def test_get_provider_prefers_qbo_but_the_db_forbids_both(monkeypatch):
         qbd_row={"conductor_end_user_id": "end_usr_9", "environment": "sandbox"},
     )
     assert get_provider(db, "co-1").name == "qbo"
+
+
+# ───────────────────────── vendor purchase orders: both providers (QB12) ─────────────────────────
+# The PO push added fourteen provider primitives. The parity test above only ever
+# looked at QboProvider, which is how QbdProvider.list_customers ended up outside the
+# Protocol unnoticed. These run over BOTH providers, with that one method allowed by
+# name so a second stray method still fails.
+QBD_ALLOWLIST = {"list_customers"}
+
+
+def _protocol_member_names() -> set[str]:
+    return {n for n in AccountingProvider.__dict__ if not n.startswith("_")} | {
+        "name", "scope_id", "dedupes_replayed_creates"}
+
+
+def _protocol_method_names() -> set[str]:
+    return {n for n, v in AccountingProvider.__dict__.items()
+            if not n.startswith("_") and callable(v)}
+
+
+@pytest.mark.parametrize("impl_name, allow", [("qbo", set()), ("qbd", QBD_ALLOWLIST)])
+def test_every_public_method_of_both_providers_is_on_the_protocol(impl_name, allow):
+    from services.accounting.qbd import QbdProvider
+
+    impl = QboProvider if impl_name == "qbo" else QbdProvider
+    impl_names = {n for n in dir(impl) if not n.startswith("_") and callable(getattr(impl, n, None))}
+    extra = impl_names - _protocol_member_names() - allow
+    assert not extra, f"{impl.__name__} exposes methods absent from the Protocol: {extra}"
+
+
+@pytest.mark.parametrize("impl_name", ["qbo", "qbd"])
+def test_both_providers_implement_every_protocol_method(impl_name):
+    from services.accounting.qbd import QbdProvider
+
+    impl = QboProvider if impl_name == "qbo" else QbdProvider
+    missing = {n for n in _protocol_method_names() if not callable(getattr(impl, n, None))}
+    assert not missing, f"{impl.__name__} lacks Protocol methods: {missing}"
+
+
+def test_the_purchase_order_primitives_are_on_the_protocol():
+    """Plan §3.11's list, by name: a rename on one side fails here, not at a push."""
+    assert {
+        "vendor_name_problem", "find_vendor_candidates", "create_vendor",
+        "list_purchase_accounts", "list_ap_accounts", "list_purchase_items",
+        "create_purchase_item", "resolve_ship_method_id", "build_purchase_order_payload",
+        "create_purchase_order", "read_purchase_order", "update_purchase_order",
+        "find_created_purchase_order", "purchase_order_deep_link",
+        "check_purchasing_preferences",
+    } <= _protocol_method_names()
+
+
+def test_qbo_purchase_order_deep_link_uses_the_pagereq_shape():
+    """The same sign-in-surviving shape as invoices (see invoice_deep_link), aimed at
+    the purchase-order page. UNVERIFIED for POs until manual check M-1."""
+    url = _qbo({"environment": "sandbox", "realm_id": "9130"}).purchase_order_deep_link("77")
+    assert url == ("https://sandbox.qbo.intuit.com/login?deeplinkcompanyid=9130"
+                   "&pagereq=purchaseorder%3FtxnId%3D77")
+
+
+def test_qbd_has_no_purchase_order_deep_link(monkeypatch):
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    assert _qbd().purchase_order_deep_link("2FBE0-1797378826") is None
+
+
+def test_vendor_name_rules_differ_by_provider(monkeypatch):
+    """QuickBooks Desktop caps a vendor name at 41 characters; Online allows 500.
+    Both refuse a colon, a tab or a line break."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    name_42 = "A" * 42
+    assert _qbd().vendor_name_problem(name_42) is not None
+    assert _qbo().vendor_name_problem(name_42) is None
+    for provider in (_qbo(), _qbd()):
+        assert provider.vendor_name_problem("Acme: Plating") is not None
+
+
+def test_both_providers_name_their_invoice_item_and_connection(monkeypatch):
+    """The purchase-item picker refuses the invoice item by id; each provider keeps it
+    in a different column."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    qbo = _qbo({"id": "conn-1", "realm_id": "r", "default_item_id": "1"})
+    assert qbo.connection_id == "conn-1"
+    assert qbo.invoice_item_ids == ("1",)
+    qbd_provider = _qbd({"id": "conn-2", "conductor_end_user_id": "end_usr_1",
+                         "environment": "sandbox", "default_service_item_id": "80000010-1"})
+    assert qbd_provider.connection_id == "conn-2"
+    assert qbd_provider.invoice_item_ids == ("80000010-1",)
+    assert _qbo().invoice_item_ids == ()
+
+
+def test_qbo_ship_method_and_terms_cost_nothing_in_fake_mode(monkeypatch):
+    """QUICKBOOKS_FAKE covers terms too: an E2E push must not reach Intuit to look
+    one up. None is the same best-effort answer an unresolvable term gets."""
+    monkeypatch.setenv("QUICKBOOKS_ENVIRONMENT", "sandbox")
+    monkeypatch.setenv("QUICKBOOKS_FAKE", "1")
+    monkeypatch.setattr(qb, "resolve_term_id", lambda *a, **k: pytest.fail("looked up a term"))
+    assert _qbo().resolve_term_id("Net 30") is None
+    import services.quickbooks_desktop as qbd_service
+
+    monkeypatch.setattr(qbd_service, "resolve_term_id", lambda *a, **k: pytest.fail("looked up a term"))
+    assert _qbd().resolve_term_id("Net 30") is None

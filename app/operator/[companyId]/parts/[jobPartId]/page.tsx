@@ -27,6 +27,7 @@ import { useSetOperatorChrome, useOperatorNav } from '@/components/operator/Oper
 import JobFeed from '@/components/operator/JobFeed';
 import PartReferenceRow from '@/components/operator/PartReferenceRow';
 import type { JobTravelerOperation } from '@/types/operator';
+import { productionStatusLabel } from '@/types/job';
 
 const cardSx = { bgcolor: 'rgba(26, 31, 74, 0.55)', backdropFilter: 'blur(8px)' };
 
@@ -177,7 +178,8 @@ export default function OperatorJobTravelerPage() {
             <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.5, flexShrink: 0 }}>
               <Chip
                 size="small"
-                label={traveler.production_status}
+                // In words: the raw value printed "in_progress" on the operator's phone.
+                label={productionStatusLabel(traveler.production_status)}
                 color={
                   traveler.production_status === 'in_progress'
                     ? 'primary'
@@ -218,7 +220,7 @@ export default function OperatorJobTravelerPage() {
             {traveler.customer_po_number && (
               <Box>
                 <Typography variant="caption" color="text.secondary" display="block">
-                  PO #
+                  Customer PO #
                 </Typography>
                 <Typography variant="body2" fontWeight={600}>
                   {traveler.customer_po_number}

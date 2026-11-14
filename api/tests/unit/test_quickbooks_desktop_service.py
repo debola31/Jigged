@@ -389,3 +389,142 @@ def test_address_uses_quickbooks_desktop_key_names():
 def test_address_is_none_when_there_is_nothing_to_send():
     assert qbd.to_qbd_address(None) is None
     assert qbd.to_qbd_address({}) is None
+
+
+# ───────────────────────── the invoice item ─────────────────────────
+# Changing the income account in Settings clears default_service_item_id so the next push
+# re-resolves the item. Until 2026-11-12 the re-resolve found "Machined Parts" by name and reused
+# it whatever it posted to, so revenue went on landing in the OLD account. The item is now used
+# only when it posts to the chosen account; otherwise the push is refused and nothing in
+# QuickBooks is edited (docs/modules/quickbooks-desktop.md, "Changing the income account").
+class _Db:
+    """Records the one write resolve_default_item makes: caching the item on the connection."""
+
+    def __init__(self):
+        self.updates: list[dict] = []
+
+    def table(self, name):
+        assert name == "quickbooks_desktop_connections"
+        return self
+
+    def update(self, values):
+        self.updates.append(values)
+        return self
+
+    def eq(self, *a):
+        return self
+
+    def execute(self):
+        return None
+
+
+def _conn(**over):
+    base = {"conductor_end_user_id": "end_usr_x", "environment": "sandbox",
+            "default_service_item_id": None, "default_income_account_id": "ACCT-NEW"}
+    base.update(over)
+    return base
+
+
+def _one_way(account_id, full_name="Income:Machining", **over):
+    item = {"id": "ITEM-1", "name": "Machined Parts", "fullName": "Machined Parts",
+            "isActive": True,
+            "salesOrPurchaseDetails": {"postingAccount": {"id": account_id, "fullName": full_name}}}
+    item.update(over)
+    return item
+
+
+def _no_writes(*a, **k):
+    pytest.fail("resolve_default_item must not write to QuickBooks here")
+
+
+def test_the_cached_item_is_used_without_asking_quickbooks(monkeypatch):
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: pytest.fail("must not call out"))
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    db = _Db()
+    assert qbd.resolve_default_item(db, "co-1", _conn(default_service_item_id="ITEM-9")) == "ITEM-9"
+    assert db.updates == []
+
+
+def test_an_item_posting_to_another_account_is_refused_not_edited(monkeypatch):
+    """The bug itself: the re-resolve found the item and reused it, so a changed income account
+    moved nothing. Refused instead -- and never fixed by editing the item: Jigged changes only
+    the POs it sent to QuickBooks, and the item may carry the shop's own hand-keyed invoices."""
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [_one_way("ACCT-OLD", "Income:Old Sales")])
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    db = _Db()
+    with pytest.raises(qbd.QbdInvoiceItemConflict) as exc:
+        qbd.resolve_default_item(db, "co-1", _conn())
+    assert "Machined Parts" in str(exc.value)
+    assert "Income:Old Sales" in str(exc.value), "the sentence must name where it posts today"
+    assert "Settings" in str(exc.value)
+    assert db.updates == [], "a refused item must not be cached"
+
+
+def test_an_item_posting_to_the_chosen_account_is_reused_and_cached(monkeypatch):
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [_one_way("ACCT-NEW")])
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    db = _Db()
+    assert qbd.resolve_default_item(db, "co-1", _conn()) == "ITEM-1"
+    assert db.updates == [{"default_service_item_id": "ITEM-1"}]
+
+
+@pytest.mark.parametrize("income,expense,allowed", [
+    ("ACCT-NEW", "ACCT-COGS", True),
+    ("ACCT-OLD", "ACCT-NEW", False),
+], ids=["income-matches", "only-expense-matches"])
+def test_a_two_way_item_is_judged_by_its_income_account(monkeypatch, income, expense, allowed):
+    """A two-way service item (used by a subcontractor) carries an income AND an expense account.
+    An invoice posts to the income one -- the purchasing path reads the expense one instead."""
+    item = {"id": "ITEM-2", "name": "Machined Parts", "isActive": True,
+            "salesOrPurchaseDetails": None,
+            "salesAndPurchaseDetails": {"incomeAccount": {"id": income, "fullName": "Income:X"},
+                                        "expenseAccount": {"id": expense, "fullName": "COGS:Y"}}}
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [item])
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    if allowed:
+        assert qbd.resolve_default_item(_Db(), "co-1", _conn()) == "ITEM-2"
+    else:
+        with pytest.raises(qbd.QbdInvoiceItemConflict):
+            qbd.resolve_default_item(_Db(), "co-1", _conn())
+
+
+def test_an_inactive_namesake_is_refused_rather_than_collided_with(monkeypatch):
+    """QuickBooks names are unique across inactive items too, so creating a second "Machined
+    Parts" would fail on the name. The lookup includes inactive items and says what to do."""
+    seen: dict = {}
+
+    def _fake_list(path, end_user_id, params):
+        seen.update(params)
+        return [_one_way("ACCT-NEW", isActive=False)]
+
+    monkeypatch.setattr(qbd, "_list", _fake_list)
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    with pytest.raises(qbd.QbdInvoiceItemConflict, match="inactive"):
+        qbd.resolve_default_item(_Db(), "co-1", _conn())
+    assert seen.get("status") == "all"
+
+
+def test_a_missing_item_is_created_on_the_chosen_account(monkeypatch):
+    calls: list[tuple] = []
+
+    def _fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs.get("json_body")))
+        return {"id": "ITEM-NEW"}
+
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [])
+    monkeypatch.setattr(qbd, "_request", _fake_request)
+    db = _Db()
+    assert qbd.resolve_default_item(db, "co-1", _conn()) == "ITEM-NEW"
+    assert [(m, p) for m, p, _ in calls] == [("POST", "/service-items")]
+    assert calls[0][2]["salesOrPurchaseDetails"]["postingAccountId"] == "ACCT-NEW"
+    assert db.updates == [{"default_service_item_id": "ITEM-NEW"}]
+
+
+def test_no_item_is_resolved_before_an_account_is_chosen(monkeypatch):
+    """The first push is refused until an admin picks the account -- now even when an item of
+    that name already exists. Reusing it would post to whatever account it happens to carry,
+    which is a guess."""
+    monkeypatch.setattr(qbd, "_list", lambda *a, **k: [_one_way("ACCT-ANY")])
+    monkeypatch.setattr(qbd, "_request", _no_writes)
+    with pytest.raises(qbd.QbdNotConnected, match="income account"):
+        qbd.resolve_default_item(_Db(), "co-1", _conn(default_income_account_id=None))

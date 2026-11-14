@@ -472,9 +472,12 @@ So it is rule 1 throughout:
   words and carries the fix — a **Subscribe** button, for the one role that can use
   it. That is the "explain on attempt" half.
 - [`SubscriptionRequiredNotice`](../components/billing/SubscriptionRequiredNotice.tsx)
-  adds the explanation *before* the attempt on the five create routes, so nobody
+  adds the explanation *before* the attempt on **every create route**, so nobody
   fills a whole form to find out. It is an explanation, **not** a disable — the form
-  and its submit are untouched.
+  and its submit are untouched. Nothing checks that a new `…/new` page renders it, so
+  `grep -l SubscriptionRequiredNotice app/` is the list. ⚠ *This said "the five create
+  routes" until 2026-11, when purchasing's RFQ form made it six; the PO form is a
+  create route too.*
 
 Two details generalise beyond billing:
 

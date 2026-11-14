@@ -17,7 +17,6 @@ const stock = (over: Partial<MaterialStockFacts> & { partId: string }): Material
   partName: over.partId.toUpperCase(),
   primaryUnit: 'each',
   onHand: 0,
-  isLocationTracked: false,
   isArchived: false,
   ...over,
 });
@@ -162,5 +161,52 @@ describe('buildRequirement', () => {
   it('labels an archived material rather than dropping the row', () => {
     const r = req({ stock: stock({ partId: 'p1', onHand: 0, isArchived: true }) });
     expect(r.status).toBe('archived');
+  });
+});
+
+/**
+ * On order beside the shortage (plan §3.10 "Where on-order appears", criterion B4).
+ *
+ * The Materials card gains an On order column fed from `part_on_order`, but "Short by" keeps
+ * answering J4's question — what is missing RIGHT NOW. Stock on a PO is not on the shelf, so it is
+ * carried alongside the shortage and never subtracted from it.
+ */
+describe('buildRequirement — on order and on draft (B4)', () => {
+  const refs = [
+    { vendorPurchaseOrderId: 'po-1', poNumber: 'PO-1042', stockQuantity: 144, expectedOn: '2026-11-20', isDraft: false },
+    { vendorPurchaseOrderId: 'po-2', poNumber: 'PO-1043', stockQuantity: 288, expectedOn: null, isDraft: true },
+  ];
+
+  it('carries on order, on draft and the PO references through to the row', () => {
+    const r = req({ onOrder: 144, onDraft: 288, onOrderRefs: refs });
+    expect(r.onOrder).toBe(144);
+    expect(r.onDraft).toBe(288);
+    expect(r.onOrderRefs).toEqual(refs);
+  });
+
+  it('leaves the shortage exactly as it was — on order is not on the shelf', () => {
+    const without = req({ bomQuantity: 30, orderQuantity: 1, stock: stock({ partId: 'p1', onHand: 10 }) });
+    const withOrders = req({
+      bomQuantity: 30, orderQuantity: 1, stock: stock({ partId: 'p1', onHand: 10 }),
+      onOrder: 500, onDraft: 500, onOrderRefs: refs,
+    });
+    expect(withOrders.shortBy).toBe(20);
+    expect(withOrders.status).toBe('short');
+    expect(withOrders.shortBy).toBe(without.shortBy);
+    expect(withOrders.remainingToIssue).toBe(without.remainingToIssue);
+  });
+
+  it('says "not loaded" rather than 0 when the caller supplied no on-order figures', () => {
+    const r = req();
+    expect(r.onOrder).toBeNull();
+    expect(r.onDraft).toBeNull();
+    expect(r.onOrderRefs).toEqual([]);
+  });
+
+  it('copies the references, so a caller mutating its array cannot change the row', () => {
+    const mine = [...refs];
+    const r = req({ onOrder: 144, onDraft: 288, onOrderRefs: mine });
+    mine.pop();
+    expect(r.onOrderRefs).toHaveLength(2);
   });
 });

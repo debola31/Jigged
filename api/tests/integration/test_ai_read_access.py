@@ -93,14 +93,18 @@ def test_no_ai_readable_table_still_shows_archived_rows(supabase_admin):
 
     apply_ai_read_access() now appends the clause for any table with a deleted_at
     column, so the supported path cannot reintroduce this. A hand-written
-    parent-scoped policy still can, which is what this catches.
+    parent-scoped policy still can, and so can a company-only policy on a table
+    whose rows belong to a soft-deletable parent, which is what this catches.
     """
     res = supabase_admin.rpc("ai_policies_missing_soft_delete_filter", {}).execute()
     assert res.data == [], (
         f"AI-readable tables whose policy does not filter deleted_at: {res.data}. "
         "Archived rows are visible to the model there, and it will eventually "
         "report them as live. Re-run public.apply_ai_read_access() on the table, "
-        "or add the clause by hand if it is parent-scoped."
+        "or add the clause by hand if it is parent-scoped -- and if a NOT NULL "
+        "key names a soft-deletable parent the row belongs to, require that "
+        "parent live in the policy, through that key. A key that only REFERS to "
+        "its parent goes on the guard's reference_keys list, with its reason."
     )
 
 
@@ -158,6 +162,351 @@ async def test_the_sandbox_cannot_see_an_archived_job():
             )
         await admin.close()
         await ro.close()
+
+
+@_needs_ro
+async def test_an_archived_vendors_contacts_and_addresses_are_invisible():
+    """The children of an archived parent are archived too, as far as the model can tell.
+
+    vendor_contacts and vendor_addresses have no deleted_at of their own, and until
+    20261112193919 their policies scoped the vendor's company and nothing else -- so "who do we
+    call at Thermal One?" answered for a vendor no screen shows. A live vendor's rows are the
+    control: without them this passes when the policy hides everything.
+    """
+    import uuid
+
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    company_id = None
+    try:
+        company_id = await admin.fetchval(
+            "INSERT INTO public.companies (name) VALUES ($1) RETURNING id",
+            f"ai-archived-vendor-{uuid.uuid4().hex[:8]}",
+        )
+        vendors = {}
+        for label, archived in (("live", False), ("archived", True)):
+            vendor_id = await admin.fetchval(
+                "INSERT INTO public.vendors (company_id, name, deleted_at) "
+                "VALUES ($1, $2, CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"{label} plating", archived,
+            )
+            await admin.execute(
+                "INSERT INTO public.vendor_contacts (vendor_id, name, role) "
+                "VALUES ($1, 'Pat Dock', 'shipping_receiving')", vendor_id)
+            await admin.execute(
+                "INSERT INTO public.vendor_addresses (vendor_id, address_line1, city, is_default) "
+                "VALUES ($1, '1 Dock St', 'Akron', true)", vendor_id)
+            vendors[label] = vendor_id
+
+        await ro.execute(f"SET jigged.company_id = '{company_id}'")
+        for table in ("vendor_contacts", "vendor_addresses"):
+            seen = {r["vendor_id"] for r in await ro.fetch(f"SELECT vendor_id FROM public.{table}")}
+            assert vendors["archived"] not in seen, (
+                f"the sandbox can see an archived vendor's {table}")
+            assert vendors["live"] in seen, (
+                f"the sandbox cannot see a live vendor's {table} -- the policy hides too much")
+    finally:
+        if company_id is not None:
+            # vendors cascade from the company, and contacts and addresses from the vendor.
+            await admin.execute("DELETE FROM public.companies WHERE id = $1", company_id)
+        await admin.close()
+        await ro.close()
+
+
+@_needs_ro
+async def test_the_soft_delete_guard_reads_the_parent_a_policy_scopes_through():
+    """The guard has to catch this class, not just this instance.
+
+    Until 20261112193919 ai_policies_missing_soft_delete_filter() looked only at a table's OWN
+    deleted_at, so vendor_contacts -- which has none -- passed while its vendor was archived.
+    Put back the old policy, inside a transaction that is rolled back, and the guard must name it.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    try:
+        tr = admin.transaction()
+        await tr.start()
+        try:
+            await admin.execute("DROP POLICY ai_readonly_select ON public.vendor_contacts")
+            await admin.execute(
+                "CREATE POLICY ai_readonly_select ON public.vendor_contacts "
+                "FOR SELECT TO jigged_ai_readonly USING (vendor_id IN ("
+                "SELECT v.id FROM public.vendors v "
+                "WHERE v.company_id = (current_setting('jigged.company_id', true))::uuid))"
+            )
+            flagged = {
+                r["table_name"] for r in await admin.fetch(
+                    "SELECT table_name FROM public.ai_policies_missing_soft_delete_filter()")
+            }
+            assert "vendor_contacts" in flagged, (
+                "a child policy that ignores its parent's deleted_at is invisible to the guard")
+        finally:
+            await tr.rollback()
+    finally:
+        await admin.close()
+
+
+@_needs_ro
+async def test_an_archived_quotes_lines_and_an_archived_parts_tiers_are_invisible():
+    """A quote's lines go with the quote, and a part's price tiers with the part.
+
+    quote_line_items and part_pricing_tiers carry their own company_id, so until 20261112193919
+    their policies said "this company" and never read the parent at all -- which also kept them
+    out of the guard's sight, since its second branch judges only the tables a policy reads.
+    "What was on the quotes we lost?" would have summed the lines of quotes no screen shows.
+
+    The live quote's lines and the live part's tiers are the control. So is the live quote's line
+    that names the ARCHIVED part: a line belongs to its quote, and part_id only refers.
+    """
+    import uuid
+
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    company_id = None
+    try:
+        tag = uuid.uuid4().hex[:8]
+        company_id = await admin.fetchval(
+            "INSERT INTO public.companies (name) VALUES ($1) RETURNING id",
+            f"ai-archived-quote-{tag}",
+        )
+        parts, tiers, quotes = {}, {}, {}
+        for label, archived in (("live", False), ("archived", True)):
+            parts[label] = await admin.fetchval(
+                "INSERT INTO public.parts (company_id, part_name, primary_unit, deleted_at) "
+                "VALUES ($1, $2, 'ea', CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"{label} bracket {tag}", archived,
+            )
+            tiers[label] = await admin.fetchval(
+                "INSERT INTO public.part_pricing_tiers "
+                "(company_id, part_id, sequence, quantity, markup_percent) "
+                "VALUES ($1, $2, 1, 10, 25) RETURNING id",
+                company_id, parts[label],
+            )
+            quotes[label] = await admin.fetchval(
+                "INSERT INTO public.quotes (company_id, quote_number, deleted_at) "
+                "VALUES ($1, $2, CASE WHEN $3 THEN now() END) RETURNING id",
+                company_id, f"Q-{label}-{tag}", archived,
+            )
+
+        line = (
+            "INSERT INTO public.quote_line_items "
+            "(company_id, quote_id, part_id, sequence, quantity, unit_price) "
+            "VALUES ($1, $2, $3, $4, 5, 12.50) RETURNING id"
+        )
+        # The archived quote's line names the LIVE part, so only the quote can hide it.
+        archived_quote_line = await admin.fetchval(line, company_id, quotes["archived"], parts["live"], 1)
+        live_quote_line = await admin.fetchval(line, company_id, quotes["live"], parts["live"], 1)
+        live_quote_archived_part_line = await admin.fetchval(
+            line, company_id, quotes["live"], parts["archived"], 2)
+
+        await ro.execute(f"SET jigged.company_id = '{company_id}'")
+        seen = {r["id"] for r in await ro.fetch("SELECT id FROM public.quote_line_items")}
+        assert archived_quote_line not in seen, "the sandbox can see an archived quote's lines"
+        assert live_quote_line in seen, (
+            "the sandbox cannot see a live quote's lines -- the policy hides too much")
+        assert live_quote_archived_part_line in seen, (
+            "a live quote's line naming an archived part is hidden -- part_id is a reference, "
+            "and the line belongs to its quote")
+
+        seen = {r["id"] for r in await ro.fetch("SELECT id FROM public.part_pricing_tiers")}
+        assert tiers["archived"] not in seen, "the sandbox can see an archived part's pricing tiers"
+        assert tiers["live"] in seen, (
+            "the sandbox cannot see a live part's pricing tiers -- the policy hides too much")
+    finally:
+        if company_id is not None:
+            # Parts, quotes, lines and tiers all cascade from the company.
+            await admin.execute("DELETE FROM public.companies WHERE id = $1", company_id)
+        await admin.close()
+        await ro.close()
+
+
+# The other rows that belong to a soft-deletable parent through a NOT NULL key, found by the
+# guard's third branch the day it was written. Each case is the child, its parent, and one query
+# of (child_id, parent_id) pairs, run as the sandbox to find a live parent whose children it can
+# see and as postgres to list every child that parent has.
+#
+# The cases after `shipments` are GRANDCHILDREN, reaching the archived row through a table in
+# between. Each is hidden either by reading the grandparent itself (the slip receipts, the PO
+# receipts, the RFQ responses) or by reading the table in between and letting that table's policy
+# do it (routing_operations, the price breaks, the packing-slip lines), since RLS applies inside a
+# policy's subquery too. Where the table in between has no deleted_at of its own -- all but
+# part_vendors -- the guard cannot see the chain, and this list is the only thing that says so;
+# see "The soft-delete guard sees one level of ownership" in docs/modules/ai-insights.md.
+_CHILDREN_OF_ARCHIVED_PARENTS = [
+    ("routings", "parts",
+     "SELECT r.id AS child_id, r.part_id AS parent_id FROM public.routings r"),
+    ("vendor_services", "vendors",
+     "SELECT s.id AS child_id, s.vendor_id AS parent_id FROM public.vendor_services s"
+     " WHERE s.deleted_at IS NULL"),
+    ("part_vendors", "parts",
+     "SELECT pv.id AS child_id, pv.part_id AS parent_id FROM public.part_vendors pv"
+     " WHERE pv.deleted_at IS NULL"),
+    ("part_vendors", "vendors",
+     "SELECT pv.id AS child_id, pv.vendor_id AS parent_id FROM public.part_vendors pv"
+     " WHERE pv.deleted_at IS NULL"),
+    ("material_lots", "parts",
+     "SELECT l.id AS child_id, l.part_id AS parent_id FROM public.material_lots l"
+     " WHERE l.deleted_at IS NULL"),
+    ("outside_shipments", "jobs",
+     "SELECT s.id AS child_id, s.job_id AS parent_id FROM public.outside_shipments s"),
+    ("shipments", "jobs",
+     "SELECT s.id AS child_id, s.job_id AS parent_id FROM public.shipments s"),
+    ("routing_operations", "parts",
+     "SELECT o.id AS child_id, r.part_id AS parent_id FROM public.routing_operations o"
+     " JOIN public.routings r ON r.id = o.routing_id"),
+    ("part_vendor_price_breaks", "vendors",
+     "SELECT b.id AS child_id, pv.vendor_id AS parent_id FROM public.part_vendor_price_breaks b"
+     " JOIN public.part_vendors pv ON pv.id = b.part_vendor_id WHERE pv.deleted_at IS NULL"),
+    ("outside_shipment_receipts", "jobs",
+     "SELECT x.id AS child_id, s.job_id AS parent_id FROM public.outside_shipment_receipts x"
+     " JOIN public.outside_shipments s ON s.id = x.outside_shipment_id"),
+    ("shipment_line_items", "jobs",
+     "SELECT li.id AS child_id, s.job_id AS parent_id FROM public.shipment_line_items li"
+     " JOIN public.shipments s ON s.id = li.shipment_id"),
+    ("vendor_purchase_order_receipts", "vendor_purchase_orders",
+     "SELECT x.id AS child_id, x.vendor_purchase_order_id AS parent_id"
+     " FROM public.vendor_purchase_order_receipts x"),
+    ("vendor_rfq_responses", "vendor_rfqs",
+     "SELECT x.id AS child_id, i.vendor_rfq_id AS parent_id FROM public.vendor_rfq_responses x"
+     " JOIN public.vendor_rfq_invitations i ON i.id = x.vendor_rfq_invitation_id"),
+]
+
+
+@_needs_ro
+@pytest.mark.parametrize(
+    "child, parent, pairs", _CHILDREN_OF_ARCHIVED_PARENTS,
+    ids=[f"{c}-of-{p}" for c, p, _ in _CHILDREN_OF_ARCHIVED_PARENTS],
+)
+async def test_a_child_is_archived_with_its_parent(child, parent, pairs):
+    """Archive a seeded parent, and the sandbox loses every child it could see a moment before.
+
+    The before-count is the control: it proves the rows were reachable, so a policy that hides
+    everything cannot pass. Committed and put back in `finally`, like the archived-job test above,
+    because the sandbox reads on its own connection.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    ro = await _connect_as_the_ai_role()
+    parent_id = None
+    archived = False
+    try:
+        live: dict = {}
+        for r in await admin.fetch(
+            f"SELECT DISTINCT x.parent_id, p.company_id FROM ({pairs}) x "
+            f"JOIN public.{parent} p ON p.id = x.parent_id WHERE p.deleted_at IS NULL"
+        ):
+            live.setdefault(r["company_id"], []).append(r["parent_id"])
+        for company_id, parent_ids in live.items():
+            await ro.execute(f"SET jigged.company_id = '{company_id}'")
+            parent_id = await ro.fetchval(
+                f"SELECT x.parent_id FROM ({pairs}) x WHERE x.parent_id = ANY($1::uuid[]) LIMIT 1",
+                parent_ids,
+            )
+            if parent_id is not None:
+                break
+        if parent_id is None:
+            pytest.skip(f"the seed has no {child} row the sandbox can see under a live {parent}")
+
+        children = [
+            r["child_id"] for r in await admin.fetch(
+                f"SELECT x.child_id FROM ({pairs}) x WHERE x.parent_id = $1", parent_id)
+        ]
+        count = f"SELECT count(*) FROM public.{child} WHERE id = ANY($1::uuid[])"
+        assert await ro.fetchval(count, children) >= 1, (
+            f"the sandbox cannot see {child} of a live {parent} -- the policy hides too much")
+
+        await admin.execute(f"UPDATE public.{parent} SET deleted_at = now() WHERE id = $1", parent_id)
+        archived = True
+        assert await ro.fetchval(count, children) == 0, (
+            f"the sandbox can still see {child} of an archived {parent}")
+    finally:
+        if archived:
+            await admin.execute(f"UPDATE public.{parent} SET deleted_at = NULL WHERE id = $1", parent_id)
+        await admin.close()
+        await ro.close()
+
+
+@_needs_ro
+async def test_the_soft_delete_guard_flags_a_child_whose_policy_never_reads_its_parent():
+    """The guard's third branch: rows that BELONG to a soft-deletable parent need a policy that reads it.
+
+    The second branch judges only the tables a policy reads, so a policy that reads none -- "this
+    company" and nothing else -- passed whatever its parent's state, which is how
+    quote_line_items and part_pricing_tiers did. A NOT NULL foreign key says a row belongs to its
+    parent; pg_depend says whether the policy reads that parent THROUGH that key. A synthetic child
+    of parts with two such keys, inside a transaction that is rolled back.
+    """
+    import asyncpg
+
+    admin_dsn = os.getenv("AI_READONLY_DATABASE_URL", "").replace(
+        "jigged_ai_readonly", "postgres"
+    )
+    admin = await asyncpg.connect(admin_dsn)
+    probe = "zz_soft_delete_guard_probe"
+    company = "company_id = (current_setting('jigged.company_id', true))::uuid"
+
+    def live_through(key: str) -> str:
+        return (f"EXISTS (SELECT 1 FROM public.parts p "
+                f"WHERE p.id = {probe}.{key} AND p.deleted_at IS NULL)")
+
+    async def with_policy(using: str) -> bool:
+        """Put this policy on the probe; is the probe flagged?"""
+        await admin.execute(f"DROP POLICY IF EXISTS ai_readonly_select ON public.{probe}")
+        await admin.execute(
+            f"CREATE POLICY ai_readonly_select ON public.{probe} "
+            f"FOR SELECT TO jigged_ai_readonly USING ({using})")
+        flagged = await admin.fetch(
+            "SELECT table_name FROM public.ai_policies_missing_soft_delete_filter()")
+        return probe in {r["table_name"] for r in flagged}
+
+    try:
+        tr = admin.transaction()
+        await tr.start()
+        try:
+            await admin.execute(
+                f"CREATE TABLE public.{probe} ("
+                " id uuid PRIMARY KEY DEFAULT gen_random_uuid(),"
+                " company_id uuid NOT NULL,"
+                " part_id uuid NOT NULL REFERENCES public.parts(id),"
+                " component_id uuid NOT NULL REFERENCES public.parts(id))")
+            await admin.execute(f"ALTER TABLE public.{probe} ENABLE ROW LEVEL SECURITY")
+
+            assert await with_policy(company), (
+                "a company-only policy on a child of a soft-deletable parent passes the guard")
+            assert await with_policy(f"{company} AND {live_through('component_id')}"), (
+                "reading the parent through one key satisfies the guard for the other key too")
+            assert not await with_policy(
+                f"{company} AND {live_through('part_id')} AND {live_through('component_id')}"
+            ), "the guard flags a policy that requires the parent live through every key"
+
+            # The boundary: a nullable key names a reference, never an owner.
+            await admin.execute(
+                f"ALTER TABLE public.{probe} ALTER COLUMN part_id DROP NOT NULL, "
+                "ALTER COLUMN component_id DROP NOT NULL")
+            assert not await with_policy(company), (
+                "the guard flags a nullable key -- a row can exist without that parent")
+        finally:
+            await tr.rollback()
+    finally:
+        await admin.close()
 
 
 @_needs_ro
@@ -260,6 +609,17 @@ async def test_schema_context_describes_only_real_readable_columns():
             ghosts = sorted(described[table] - real)
             if ghosts:
                 problems.append(f"{table}: described column(s) do not exist: {', '.join(ghosts)}")
+            # Per COLUMN, not only per table: shipments and the outside-processing slips are
+            # granted by column list with the actor columns withheld, so a table the role can
+            # read may still hold a described column it cannot.
+            withheld = [
+                col for col in sorted(described[table] & real)
+                if not await conn.fetchval(
+                    "SELECT has_column_privilege('jigged_ai_readonly', $1, $2, 'SELECT')",
+                    f"public.{table}", col)
+            ]
+            if withheld:
+                problems.append(f"{table}: described column(s) withheld from the AI role: {', '.join(withheld)}")
     finally:
         await conn.close()
 
@@ -408,3 +768,128 @@ async def test_an_ungranted_table_refuses_at_the_database():
             await conn.fetch(f'SELECT 1 FROM public."{target}" LIMIT 1')
     finally:
         await conn.close()
+
+
+# ===========================================================================
+# Purchasing (plan §3.12 "AI readability", §5.1; M5)
+#
+# The two tests above that check SCHEMA_CONTEXT against the database and run every semantics.md
+# reference query are what make these sections TRUE; the three below make sure the sections
+# EXIST — otherwise the model would answer "what's on order?" by re-deriving a status the views
+# already compute, the is_quote_open lesson (20260909115308) all over again.
+# ===========================================================================
+
+PURCHASING_CONTEXT_OBJECTS = {
+    "vendor_purchase_orders", "vendor_purchase_order_lines", "vendor_purchase_order_receipts",
+    "vendor_purchase_order_status", "vendor_purchase_order_line_status", "part_on_order",
+    "part_vendor_last_purchase", "part_vendors", "part_vendor_price_breaks", "vendor_rfq_status",
+}
+# Exempt from the AI: superseded prices would read as current, numbering is plumbing, and the
+# QuickBooks tables hold third-party ids.
+PURCHASING_AI_EXEMPT = {
+    "vendor_purchase_order_revisions", "purchasing_document_series", "quickbooks_vendor_map",
+    "quickbooks_purchasing_setup", "quickbooks_purchase_order_links", "quickbooks_purchase_order_line_links",
+}
+
+
+def _context_sections() -> dict[str, str]:
+    import re
+
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    sections: dict[str, str] = {}
+    current = None
+    for line in SCHEMA_CONTEXT.splitlines():
+        heading = re.match(r"^###\s+([a-z_][a-z0-9_]*)", line)
+        if heading:
+            current = heading.group(1)
+            sections[current] = ""
+        elif current:
+            sections[current] += line + "\n"
+    return sections
+
+
+def test_schema_context_describes_purchasing_through_its_views():
+    """[M5] The tables, the five-way status views and on-order are described; the exempt
+    tables are not; and the context says what a model would otherwise get wrong: statuses come
+    from the views, "late" is the predicate, outside lines are received on slips, receipts are
+    filtered on `voided_at IS NULL`, and `jobs.customer_po_number` is the CUSTOMER's PO."""
+    import re
+
+    from tools.schema_context import SCHEMA_CONTEXT
+
+    sections = _context_sections()
+    missing = sorted(PURCHASING_CONTEXT_OBJECTS - set(sections))
+    assert not missing, f"SCHEMA_CONTEXT does not describe: {missing}"
+    described_exempt = sorted(PURCHASING_AI_EXEMPT & set(sections))
+    assert not described_exempt, f"SCHEMA_CONTEXT describes tables the AI cannot read: {described_exempt}"
+
+    assert "public.is_vendor_purchase_order_late(" in SCHEMA_CONTEXT
+    assert "vendor_purchase_order_status" in sections["vendor_purchase_orders"], (
+        "the PO table does not send the model to the status view")
+    assert "outside_shipments" in sections["vendor_purchase_order_lines"], (
+        "the lines do not say outside work is received on its vendor packing slip")
+    assert "voided_at IS NULL" in sections["vendor_purchase_order_receipts"]
+    assert re.search(r"customer_po_number.*customer'?s\s+(po|purchase order)", sections["jobs"], re.I), (
+        "jobs.customer_po_number is not described as the customer's PO")
+
+
+def test_semantics_defines_the_purchasing_terms_with_reference_sql():
+    """[M5] On order, Open PO, Late PO, Last PO price and Open value (at PO price) each have a
+    definition, and their reference SQL reads the shared definitions — which
+    test_every_reference_query_in_semantics_runs then executes as the AI role."""
+    import re
+
+    from services.insights_service import SEMANTICS_PATH
+
+    text = SEMANTICS_PATH.read_text(encoding="utf-8")
+    headings = [h.strip().lower() for h in re.findall(r"^##\s+(.+)$", text, re.MULTILINE)]
+    for term in ("on order", "open po", "late po", "last po price", "open value"):
+        assert any(h.startswith(term) for h in headings), f"semantics.md has no '## {term}' definition"
+
+    sql = "\n".join(re.findall(r"```sql\n(.*?)```", text, re.DOTALL))
+    for name in ("part_on_order", "vendor_purchase_order_status", "is_vendor_purchase_order_late",
+                 "part_vendor_last_purchase"):
+        assert name in sql, f"no reference query in semantics.md uses {name}"
+
+
+# ===========================================================================
+# Outside processing: the vendor packing slips, and what comes back on them
+# ===========================================================================
+
+OUTSIDE_SLIP_TABLES = {"outside_shipments", "outside_shipment_receipts"}
+# 20260903203741 grants both by column list; these columns are never granted, so never described.
+OUTSIDE_SLIP_WITHHELD = {
+    "created_by", "received_by", "voided_by", "closed_by", "notes", "note",
+    "ship_to_address", "ship_to_contact", "vendor_address_id", "vendor_contact_id",
+}
+
+
+def test_schema_context_describes_the_outside_slips():
+    """Readable by the AI role since 20260903203741, and never described until 2026-11-12 -- so
+    "what is out at the plater?" had no table to query. Both sections exist, say to drop voided
+    rows, and name no withheld column; test_schema_context_describes_only_real_readable_columns
+    then holds every column they do name to the grant itself."""
+    import re
+
+    sections = _context_sections()
+    missing = sorted(OUTSIDE_SLIP_TABLES - set(sections))
+    assert not missing, f"SCHEMA_CONTEXT does not describe: {missing}"
+
+    column = re.compile(r"(?:^-\s*|,\s*)([a-z_][a-z0-9_]*)\s*:", re.MULTILINE)
+    for table in sorted(OUTSIDE_SLIP_TABLES):
+        assert "voided_at IS NULL" in sections[table], f"{table} does not say to drop voided rows"
+        leaked = sorted(set(column.findall(sections[table])) & OUTSIDE_SLIP_WITHHELD)
+        assert not leaked, f"{table} describes columns the AI role is not granted: {leaked}"
+
+    for col in ("quantity", "due_back_on", "closed_at", "voided_at", "vendor_purchase_order_line_id"):
+        assert re.search(rf"\b{col}:", sections["outside_shipments"]), f"outside_shipments omits {col}"
+    assert re.search(r"\bquantity_good:", sections["outside_shipment_receipts"])
+
+
+def test_the_quickbooks_purchasing_tables_are_sensitive():
+    """[M5, QB11] Blocked at both layers: no grant, and a whole-word entry in SENSITIVE_TABLES."""
+    from tools.schema_context import SENSITIVE_TABLES
+
+    quickbooks = {t for t in PURCHASING_AI_EXEMPT if t.startswith("quickbooks_")}
+    assert quickbooks <= SENSITIVE_TABLES, sorted(quickbooks - SENSITIVE_TABLES)

@@ -959,12 +959,27 @@ def list_qb_terms(db: Client, company_id: str) -> list[dict]:
     more. Jigged offers these as the payment-terms picker options so that any
     term chosen on a quote already exists in QBO and SalesTermRef always
     resolves — no mapping table, no drift."""
+    # Hermetic under QUICKBOOKS_FAKE, like term resolution on a push: opening a payment-terms
+    # picker on a fake-connected company used to send the fake token to Intuit, whose 401 and
+    # failed refresh then flagged the connection reconnect_required for the rest of the run.
+    # The five QBO ships, so the picker shows what a fresh QBO company would. Never in production.
+    if os.getenv("QUICKBOOKS_FAKE") and _environment() != "production":
+        return [dict(term) for term in _FAKE_QBO_TERMS]
     rows = qb_query(db, company_id, "select * from Term where Active = true").get("Term", [])
     return [
         {"id": t["Id"], "name": t.get("Name", ""), "due_days": t.get("DueDays")}
         for t in rows
         if t.get("Name")
     ]
+
+
+_FAKE_QBO_TERMS = (
+    {"id": "E2E-TERM-1", "name": "Due on receipt", "due_days": 0},
+    {"id": "E2E-TERM-2", "name": "Net 10", "due_days": 10},
+    {"id": "E2E-TERM-3", "name": "Net 15", "due_days": 15},
+    {"id": "E2E-TERM-4", "name": "Net 30", "due_days": 30},
+    {"id": "E2E-TERM-5", "name": "Net 60", "due_days": 60},
+)
 
 
 # Intuit's documented maximum length for Term.Name.

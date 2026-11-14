@@ -210,6 +210,68 @@ async def test_double_submit_creates_one_invoice(supabase_admin, seeded_user_a, 
         _cleanup(supabase_admin, cid)
 
 
+# ───────────────────────── the invoice item ─────────────────────────
+async def test_a_changed_income_account_is_never_posted_through_the_old_item(
+    supabase_admin, seeded_user_a, monkeypatch
+):
+    """Settings → income account clears the cached item so the push re-resolves it. Until
+    2026-11-12 the re-resolve reused "Machined Parts" whatever it posted to, so revenue stayed in
+    the old account. Now the push is refused before any invoice exists, nothing in QuickBooks is
+    written, and the same request succeeds once the item posts to the chosen account."""
+    cid = seeded_user_a["company_id"]
+    token = seeded_user_a["access_token"]
+    _cleanup(supabase_admin, cid)
+    _seed_connection(supabase_admin, cid)
+    seed = _seed_job(supabase_admin, cid)
+    item_id = "80000010-1000000000"
+    posts_to = {"id": "170000-OLD", "fullName": "Income:Old Sales"}
+
+    def _list(path, end_user_id, params):
+        assert path == "/service-items", f"unexpected Conductor list {path}"
+        return [{"id": item_id, "name": "Machined Parts", "isActive": True,
+                 "salesOrPurchaseDetails": {"postingAccount": dict(posts_to)}}]
+
+    def _no_write(*a, **k):
+        pytest.fail("Jigged must not write to QuickBooks to settle the invoice item")
+
+    created: list[dict] = []
+    monkeypatch.setattr(qbdservice, "_list", _list)
+    monkeypatch.setattr(qbdservice, "_request", _no_write)
+    monkeypatch.setattr(
+        qbdservice, "create_invoice",
+        lambda eu, payload, *, request_id: created.append(payload)
+        or {"id": "QBD-INV-9", "doc_number": "1109", "sync_token": "1"},
+    )
+    rid = str(uuid4())
+    try:
+        saved = await _post(token, f"/api/quickbooks-desktop/{cid}/income-account",
+                            {"income_account_id": "170000-NEW"})
+        assert saved.status_code == 200, saved.text
+
+        refused = await _post(token, f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice",
+                              _body(seed["job_part_id"], 4, rid))
+        assert refused.status_code == 409, refused.text
+        assert refused.json()["detail"]["code"] == "qbd_invoice_item_conflict"
+        assert "Income:Old Sales" in refused.json()["detail"]["message"]
+        assert created == [], "no invoice may be sent through an item posting elsewhere"
+        assert _links(supabase_admin, cid)[0]["status"] == "error", (
+            "refused before any create, so provably not in QuickBooks and reclaimable in place")
+
+        # The admin changes the item's income account in QuickBooks; the SAME request retries.
+        posts_to.update({"id": "170000-NEW", "fullName": "Income:Machining"})
+        sent = await _post(token, f"/api/quickbooks/{cid}/jobs/{seed['job_id']}/invoice",
+                           _body(seed["job_part_id"], 4, rid))
+        assert sent.status_code == 200, sent.text
+        assert [line["itemId"] for line in created[0]["lines"]] == [item_id]
+        links = _links(supabase_admin, cid)
+        assert len(links) == 1 and links[0]["status"] == "created"
+        conn = supabase_admin.table("quickbooks_desktop_connections").select(
+            "default_service_item_id").eq("company_id", cid).single().execute().data
+        assert conn["default_service_item_id"] == item_id
+    finally:
+        _cleanup(supabase_admin, cid)
+
+
 # ───────────────────────── unknown outcome ─────────────────────────
 async def test_unknown_outcome_parks_for_verification_and_counts_nothing(
     supabase_admin, seeded_user_a, monkeypatch

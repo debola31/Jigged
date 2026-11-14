@@ -49,7 +49,7 @@ Each of these is **dead**; the row records why, so it does not get rebuilt.
 |---|---|---|
 | `routing_materials` table (routing-level materials) | `parts_bom` on the part | One BOM per manufactured part; cost roll-up pulls material cost from BOM child parts, not a routing list. (An earlier *per-operation* materials model preceded the routing-level one — both are gone.) |
 | `routing_nodes` table name | `routing_operations` | The UI is a list, not a canvas — hence no stored x/y position either |
-| `routing_operations.external_setup_cost` column | nothing | External work bills once per part, so setup is internal-only. Dropped by `20260623022617_drop_external_setup_cost.sql`. **Still referenced by the importer — see [#549 below](#known-importer-bug-549).** |
+| `routing_operations.external_setup_cost` column | nothing | External work bills once per part, so setup is internal-only. Dropped by `20260623022617_drop_external_setup_cost.sql`. Nothing references it any more — see [#549 below](#dropped-external-setup-cost-549). |
 | Server-side per-batch `sequence` auto-numbering on import | client-side `numberRoutingOpsInFileOrder` | It reset each 500-row batch, renumbering any part whose steps straddled a batch boundary. (Per-entity `/execute` keeps it as a fallback when called directly with no `sequence` mapping.) |
 | Drag-and-drop reordering | up/down arrow buttons | DnD **was** built (`@dnd-kit/sortable`) and torn out in `03f4a76`: arrows are more familiar than drag for small-shop users |
 | "Save Routing" button | auto-save on every change | Nothing to forget to click — a routing edited and left unsaved was lost work. See [Linear Routing Builder](#linear-routing-builder) |
@@ -193,26 +193,29 @@ Three-step handshake:
   internal → `setup_minutes` / `cycle_minutes_per_unit` / `labor_rate_override`; external →
   `external_unit_price`. An external-only field on an internal row is rejected.
 
-### Known importer bug (#549)
+### Dropped external setup cost (#549)
 
-> **Known importer bug (#549):** the import pipeline (`api/routes/routings_import_routes.py`,
-> `api/models/routings_import_models.py`) still maps and validates an `external_setup_cost`
-> field, but that column was dropped from `routing_operations` (migration
-> `20260623022617_drop_external_setup_cost.sql` — external work bills once per part, so setup
-> is internal-only). The stale importer reference is tracked in #549.
+`external_setup_cost` was dropped from `routing_operations` by
+`20260623022617_drop_external_setup_cost.sql`: external work bills once per part, so setup is
+internal-only. Every reference that outlived the column is now gone.
 
-Still true as of 2026-08-03: the column is absent from `types/database.ts` and
-`supabase/migrations/`, yet the importer maps, validates
-(`invalid_external_setup_cost`), and writes it. The covering test mocks Supabase, so it
-passes on a column that does not exist. The same stale reference also survives in
-`api/routes/parts_import_routes.py` and `api/tools/schema_context.py` — the second feeds the
-AI's schema context, so the model is still told about a dropped column in one place
-(`:375`) while being told at `:305` that it was dropped.
+- **The routings importer** no longer maps, validates or writes it.
+  [`test_routings_import_api.py`](../../api/tests/integration/test_routings_import_api.py)
+  pins its absence from the written operation.
+- **The last two, removed 2026-11-12 with the purchasing PR:**
+  - `api/routes/parts_import_routes.py` no longer counts it as a sign that an import carries
+    routing columns.
+  - [`api/tools/schema_context.py`](../../api/tools/schema_context.py) no longer tells the
+    insights model it is a cost input for external operations. Another line in the same file
+    said it was dropped, so the model was told both.
+- **`api/services/insights_service.py` and the METRIC_TOOLS list**, in the file now named
+  [`api/tools/chat_tools.py`](../../api/tools/chat_tools.py), lost theirs earlier. They sat
+  inside the predefined metric-tool path, which was deleted whole: some stale references are
+  cheapest to fix by deleting the code that carries them.
 
-**Two of the four are gone.** `api/services/insights_service.py` and the METRIC_TOOLS list
-(in the file now named [`api/tools/chat_tools.py`](../../api/tools/chat_tools.py)) held theirs
-inside the predefined metric-tool path, which was deleted whole — a reminder that some stale
-references are cheapest to fix by deleting the code that carries them.
+**Withdrawn:** "Known importer bug (#549): the import pipeline still maps and validates an
+`external_setup_cost` field." That stopped being true when the importer was fixed; this doc
+kept saying it until 2026-11-12.
 
 ---
 
@@ -362,7 +365,7 @@ still automation-pending. Doc-vs-code divergences from the earlier audit are on 
 | Yield: made-child batch pinning; per-part cost does not step with order quantity; a fractional quantity moves the cost at a batch of 1; a shared diamond-BOM child stays linear | **C** › `calculateRoutingCost — yield / batch pinning` (8 it) |
 | Setup amortizes across tier quantity; qty ≤ 0 → 1; `null` unit price when markup is null; per-unit base qty-invariant apart from setup | **C** › `calculateTierPricing` (4 it) |
 | Validate: happy path groups ops; unknown work center fails; `MISCELLANEOUS` routes when present, fails when absent; external-only field on an internal row rejected | **I** › `TestRoutingsValidate` (5 tests) |
-| Execute: internal `labor_rate_override` written; external cost fields used; re-import upserts `(routing_id, sequence)` instead of 500-ing | **I** › `TestRoutingsExecute` (3 tests) — the external test asserts `external_setup_cost`, the dropped column ([#549](#known-importer-bug-549)) |
+| Execute: internal `labor_rate_override` written; an outside step targets its service, with its price; a name two vendors share is an error unless `vendor_name` says which, and an archived vendor's service is never a target; re-import upserts `(routing_id, sequence)` instead of 500-ing | **I** › `TestRoutingsExecute` (6 tests) — the external test asserts the dropped `external_setup_cost` is absent ([#549](#dropped-external-setup-cost-549)) |
 | Bought parts show no routing panel | manual: `WorkspaceTab.tsx` (`showRoutingPanel = part.source === 'made'`) |
 | Work-center picker locked in edit mode | manual: `RoutingOperationRowEditor` (`disabled={isEdit}`); `RoutingOperationsList.handleEditorSave` never rewrites `workCenterId` in the edit branch |
 | No standalone routings page or `/routing/new`\|`/routing/edit` route | manual: no routings dir under `app/dashboard/[companyId]/`; `PartRoutingPanel` is the only editor |

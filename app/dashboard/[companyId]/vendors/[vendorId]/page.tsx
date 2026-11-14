@@ -54,8 +54,16 @@ import {
   updateVendor,
   checkVendorNameExists,
   deleteVendor,
-  getPartsByPreferredVendor,
 } from '@/utils/vendorsAccess';
+import { listVendorParts } from '@/utils/partVendorsAccess';
+import type { VendorPartRow } from '@/types/partVendor';
+import { PART_VENDOR_STATUS_CONFIG } from '@/lib/purchasing/vendorPoStatus';
+import { formatShortDate } from '@/lib/purchasing/priceDefault';
+import { todayLocalISODate } from '@/lib/localDate';
+import StatusDot from '@/components/common/StatusDot';
+import VendorTermsCard from '@/components/vendors/VendorTermsCard';
+import VendorPurchaseOrdersCard from '@/components/vendors/VendorPurchaseOrdersCard';
+import VendorRfqsCard from '@/components/vendors/VendorRfqsCard';
 import {
   getContactsForVendor,
   deleteVendorContact,
@@ -65,16 +73,10 @@ import { roleDisplayLabel } from '@/types/vendorContact';
 import type { VendorContact } from '@/types/vendorContact';
 import { VendorContactModal } from '@/components/vendors';
 
-interface LinkedPart {
-  id: string;
-  part_name: string;
-  primary_unit: string | null;
-}
-
 // Stable empty fallbacks so the derived lists keep a constant identity while
 // the first load is in flight (and on a vendor with no linked records).
 const EMPTY_CONTACTS: VendorContact[] = [];
-const EMPTY_PARTS: LinkedPart[] = [];
+const EMPTY_PARTS: VendorPartRow[] = [];
 const EMPTY_SERVICES: VendorService[] = [];
 const EMPTY_OUTSIDE: OutsideOperation[] = [];
 const EMPTY_ADDRESSES: VendorAddress[] = [];
@@ -172,6 +174,8 @@ export default function VendorDetailPage() {
   const router = useRouter();
   const companyId = params.companyId as string;
   const vendorId = params.vendorId as string;
+  // The caller's local date, for "Expired" on a price sheet.
+  const [today] = useState(todayLocalISODate);
 
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -222,7 +226,10 @@ export default function VendorDetailPage() {
         };
       }
       const [parts, services, contacts, addresses, allOutside] = await Promise.all([
-        getPartsByPreferredVendor(vendorId),
+        // The approved-vendor list: every live part this vendor supplies, preferred or not. A
+        // preferred vendor is always on it (the database keeps that true), so nothing the old
+        // preferred-only read listed drops off.
+        listVendorParts(vendorId, { today }),
         getVendorServicesForVendor(vendorId),
         getContactsForVendor(vendorId),
         getAddressesForVendor(vendorId),
@@ -245,7 +252,7 @@ export default function VendorDetailPage() {
         );
       return { vendor: v, parts, services, contacts, addresses, outside, daysOut };
     },
-    [vendorId],
+    [vendorId, today],
     {
       onError: (err) =>
         setError(err instanceof Error ? err.message : 'Failed to load vendor'),
@@ -862,8 +869,10 @@ export default function VendorDetailPage() {
           />
         </Grid>
 
-        {/* Parts supplied — today's "Linked Parts" accordion, promoted to a
-            plain card with an honest name. */}
+        {/* Parts supplied — from the parts' approved-vendor lists, so a second source counts and
+            not only the preferred one. Each row says how the vendor stands on that part (Approved,
+            Conditional, Do not use — the list's own words), and the star is the preferred
+            vendor. The sheet's price and terms live on the part's Buying tab. */}
         <Grid size={{ xs: 12, md: 6 }}>
           <Card elevation={2} sx={{ height: '100%' }}>
             <CardContent>
@@ -873,23 +882,47 @@ export default function VendorDetailPage() {
               <Divider sx={{ mb: 2 }} />
               {linkedParts.length === 0 ? (
                 <Typography variant="body2" color="text.secondary">
-                  No parts list {vendor.name} as their preferred supplier.
+                  No parts list {vendor.name} as a supplier.
                 </Typography>
               ) : (
                 <List dense disablePadding>
-                  {linkedParts.map((p) => (
-                    <ListItem key={p.id} disablePadding>
-                      <ListItemButton
-                        component={NextLink}
-                        href={`/dashboard/${companyId}/parts/${p.id}`}
-                      >
-                        <ListItemText
-                          primary={p.part_name}
-                          secondary={p.primary_unit ? `Unit: ${p.primary_unit}` : null}
-                        />
-                      </ListItemButton>
-                    </ListItem>
-                  ))}
+                  {linkedParts.map((p) => {
+                    const status = PART_VENDOR_STATUS_CONFIG[p.status];
+                    const detail = [
+                      p.vendorPartNumber ? `Their P/N ${p.vendorPartNumber}` : null,
+                      `Purchase unit: ${p.purchaseUnit}`,
+                      p.leadTimeDays !== null ? `${p.leadTimeDays} day lead time` : null,
+                      p.validUntil ? `prices valid to ${formatShortDate(p.validUntil)}` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(' · ');
+                    return (
+                      <ListItem key={p.partVendorId} disablePadding>
+                        <ListItemButton
+                          component={NextLink}
+                          href={`/dashboard/${companyId}/parts/${p.partId}`}
+                        >
+                          <ListItemText
+                            primary={
+                              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}>
+                                {p.isPreferred && (
+                                  <Tooltip title="Preferred vendor for this part">
+                                    <StarIcon fontSize="small" sx={{ color: 'primary.main' }} aria-label="Preferred" />
+                                  </Tooltip>
+                                )}
+                                <Typography variant="body2" sx={{ fontWeight: 500 }}>
+                                  {p.partName}
+                                </Typography>
+                                <StatusDot label={status.label} color={status.color} />
+                                {p.isExpired && <Chip size="small" variant="outlined" label="Prices expired" />}
+                              </Box>
+                            }
+                            secondary={detail}
+                          />
+                        </ListItemButton>
+                      </ListItem>
+                    );
+                  })}
                 </List>
               )}
             </CardContent>
@@ -950,6 +983,25 @@ export default function VendorDetailPage() {
               </Typography>
             </CardContent>
           </Card>
+        </Grid>
+
+        {/* Buying from this vendor. Each card loads on its own, so a purchasing read that fails
+            costs that card a Retry and never this page. */}
+        <Grid size={{ xs: 12, md: 6 }}>
+          <VendorPurchaseOrdersCard companyId={companyId} vendorId={vendorId} vendorName={vendor.name} />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          <VendorRfqsCard companyId={companyId} vendorId={vendorId} vendorName={vendor.name} />
+        </Grid>
+        <Grid size={{ xs: 12, md: 6 }}>
+          {/* Keyed by vendor: the card holds the picked value, seeded once from the vendor read. */}
+          <VendorTermsCard
+            key={vendor.id}
+            companyId={companyId}
+            vendorId={vendor.id}
+            vendorName={vendor.name}
+            terms={vendor.default_payment_terms ?? null}
+          />
         </Grid>
 
       </Grid>
@@ -1047,7 +1099,7 @@ export default function VendorDetailPage() {
             <Alert severity="info" sx={{ mt: 2 }}>
               Referenced by{' '}
               {supplies
-                ? `${linkedParts.length} part${linkedParts.length === 1 ? '' : 's'} (preferred supplier)`
+                ? `${linkedParts.length} part${linkedParts.length === 1 ? '' : 's'} it supplies`
                 : null}
               {supplies && outside ? ' and ' : ''}
               {outside

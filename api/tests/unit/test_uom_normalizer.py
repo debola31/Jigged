@@ -38,6 +38,15 @@ class TestNormalizeUomAlias:
     def test_unknown_value_returns_none(self):
         assert normalize_uom_alias("widgets") is None
 
+    def test_per_hundred_and_per_thousand_are_canonical(self):
+        # Purchasing criterion L3: lib/unitPresets.ts gained these count presets, and the
+        # importer's canonical set mirrors it (pinned by __tests__/lib/unitPresets.test.ts).
+        assert normalize_uom_alias("Hundred") == "hundred"
+        assert normalize_uom_alias("thousand") == "thousand"
+        # No "C" / "M" alias: "m" already means meters.
+        assert normalize_uom_alias("m") == "meters"
+        assert normalize_uom_alias("c") is None
+
 
 class TestResolveUnitsForRows:
     def test_no_uom_column_returns_empty(self):

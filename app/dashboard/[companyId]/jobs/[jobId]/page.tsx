@@ -55,10 +55,14 @@ import { OutsideShipmentPreviewDialog } from '@/components/outsideShipments';
 import { CreateShipmentModal } from '@/components/shipments';
 import PackingSlipPreviewDialog from '@/components/shipments/PackingSlipPreviewDialog';
 import PushToQuickBooksDialog from '@/components/jobs/PushToQuickBooksDialog';
+import JobPartBuyingLine, { JobVendorPosSummary, noOperationsSlot } from '@/components/jobs/JobPartBuyingLine';
 import {
   getJobPartInvoiceSummaries,
   type JobPartInvoiceSummary,
 } from '@/utils/quickbooksAccess';
+import { listVendorPoLinesForJob } from '@/utils/vendorPoAccess';
+import { useLoad } from '@/hooks/useLoad';
+import { todayLocalISODate } from '@/lib/localDate';
 
 export default function JobDetailPage() {
   const params = useParams();
@@ -128,6 +132,25 @@ export default function JobDetailPage() {
   const searchParams = useSearchParams();
   const deepLinkedOpId = searchParams.get('op');
 
+  /**
+   * THE JOB'S VENDOR PO LINES, read once and handed to every surface that shows them: the
+   * operation cards (the PO a step ships against, or "Create PO"), the bought-part line and the
+   * Vendor POs row. One read, so the three can never disagree about which POs the job is on.
+   * `null` until it lands and after a failure — never an empty list standing in for "unknown".
+   */
+  const [today] = useState(todayLocalISODate);
+  const {
+    data: poLinesData,
+    error: poLinesError,
+    refresh: refreshPoLines,
+    reload: reloadPoLines,
+  } = useLoad(() => listVendorPoLinesForJob(jobId, { today }), [jobId, today]);
+  const vendorPoLines = poLinesError ? null : poLinesData;
+  const poLinesPending = poLinesData === null && !poLinesError;
+
+  // Which parts with no operations are BOUGHT — for the buying line that replaces "No operations
+  // on this part." under them — comes with the job read itself (`parts.source`): no second read.
+
 
   const fetchJob = useCallback(async () => {
     try {
@@ -176,12 +199,14 @@ export default function JobDetailPage() {
    *   - `activityVersion` re-runs OperationsPanel's own quantity ledgers, which
    *     nothing outside that component can reach
    *   - `fetchJob` re-reads the job row for the status chips
+   *   - `refreshPoLines` re-reads the job's vendor PO lines: a send links a slip to one, a receipt
+   *     moves its received figure, and "Also close the PO line" closes it
    */
   const refreshAfterWrite = useCallback(async () => {
     await reloadActivity();
     setActivityVersion((n) => n + 1);
-    await fetchJob();
-  }, [reloadActivity, fetchJob]);
+    await Promise.all([fetchJob(), refreshPoLines()]);
+  }, [reloadActivity, fetchJob, refreshPoLines]);
 
   useEffect(() => {
     // Data-fetch-on-mount false positive: fetchJob's setState all runs after
@@ -462,7 +487,11 @@ export default function JobDetailPage() {
               wrong one sends a customer's paperwork to a plater. A job's vendor
               slips live on the OPERATION that produced them (expand it for the
               slip history) and in the Jobs-page drawer, which is where "what is
-              out" is actually asked. */
+              out" is actually asked.
+
+              Vendor POs get no menu either, for the same reason and one more: they already show
+              where they act — the bought-part line, the operation card, the Materials card — and
+              the Job Details card lists them in one "Vendor POs" row. */
           }
           {parts.length > 0 && (
             <InvoicesMenu
@@ -607,6 +636,10 @@ export default function JobDetailPage() {
                       <Typography fontWeight={500}>{formatShipDate(job.due_date)}</Typography>
                     </Box>
                   )}
+
+                  {/* Only when the job is on a vendor PO: the row is an index, and an empty index
+                      is noise. "Vendor", because "PO" alone is the customer's (right column). */}
+                  <JobVendorPosSummary companyId={companyId} lines={vendorPoLines} />
                 </Box>
 
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
@@ -664,6 +697,15 @@ export default function JobDetailPage() {
                 <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
                   {parts.map((part) => {
                     const summary = summariesByPart.get(part.id);
+                    // Under a part with no operations: its buying line, or the old sentence.
+                    const slot = part.job_operations?.length
+                      ? null
+                      : noOperationsSlot({
+                          jobPartId: part.id,
+                          partSource: part.parts?.source,
+                          lines: vendorPoLines,
+                          pending: poLinesPending,
+                        });
                     return (
                       <Box key={part.id}>
                         {/* Per-part fulfillment is shown as the "X of Y shipped" text below,
@@ -724,8 +766,24 @@ export default function JobDetailPage() {
                             // subtitle; without this it would repeat the process
                             // name twice, which reads as a rendering bug.
                             partName={part.parts?.part_name ?? null}
+                            vendorPoLines={vendorPoLines}
                           />
-                        ) : (
+                        ) : slot === 'buying' ? (
+                          // A bought part has nothing to make, so it is `completed` from the
+                          // start; what it waits on is a PO. Receiving never moves its status.
+                          <JobPartBuyingLine
+                            companyId={companyId}
+                            jobId={job.id}
+                            partId={part.part_id}
+                            jobPartId={part.id}
+                            lines={vendorPoLines}
+                            canBuy={
+                              part.fulfillment_status !== 'fully_shipped' &&
+                              job.production_status !== 'cancelled'
+                            }
+                            onRetry={() => void reloadPoLines()}
+                          />
+                        ) : slot === 'plain' ? (
                           <Typography
                             variant="body2"
                             color="text.secondary"
@@ -733,7 +791,7 @@ export default function JobDetailPage() {
                           >
                             No operations on this part.
                           </Typography>
-                        )}
+                        ) : null}
                         <Box sx={{ mt: 2 }}>
                           <JobPartMaterialsCard
                             partId={part.part_id}

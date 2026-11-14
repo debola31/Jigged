@@ -71,7 +71,39 @@ function inStockUnit(basis: UnitBasis, quantityInBomUnit: number): number | null
   return null;
 }
 
-/** One material row, fully derived. */
+/**
+ * One purchase order a material is on — a row of the Materials card's On order column
+ * ("PO-1042 · 3/4"; drafts muted, "+144 on draft").
+ */
+export interface MaterialOnOrderRef {
+  vendorPurchaseOrderId: string;
+  poNumber: string;
+  /** What is still to arrive on it, in the material's stock unit. */
+  stockQuantity: number;
+  expectedOn: string | null;
+  /** A draft: netted on the buy list, never counted as on order. */
+  isDraft: boolean;
+}
+
+/**
+ * On order beside the shortage (plan §3.10, criterion B4). From `part_on_order`, in stock units.
+ * `null` means the caller did not load it — never a silent 0, which would read "nothing on order".
+ */
+export interface MaterialOnOrder {
+  onOrder: number | null;
+  onDraft: number | null;
+  onOrderRefs: MaterialOnOrderRef[];
+}
+
+export type MaterialRequirementWithOnOrder = MaterialRequirement & MaterialOnOrder;
+
+/**
+ * One material row, fully derived.
+ *
+ * On order and on draft are CARRIED, never netted: "Short by" answers J4's question — what is
+ * missing from the shelf right now — and stock on a purchase order is not on the shelf. The buy
+ * list (lib/purchasing/buyList.ts) is where orders are netted against need.
+ */
 export function buildRequirement(args: {
   bomLineId: string;
   bomQuantity: number;
@@ -83,10 +115,17 @@ export function buildRequirement(args: {
   hasDiscrepancy: boolean;
   /** Distinct heats on this job's takes of this material. Optional so pure callers stay short. */
   heatNumbers?: string[];
-}): MaterialRequirement {
+  /** `part_on_order.on_order_quantity` for the material (sent, open lines), in stock units. */
+  onOrder?: number | null;
+  /** `part_on_order.on_draft_quantity` for the material, in stock units. */
+  onDraft?: number | null;
+  /** The POs behind those figures. */
+  onOrderRefs?: readonly MaterialOnOrderRef[];
+}): MaterialRequirementWithOnOrder {
   const {
     bomLineId, bomQuantity, bomUnit, orderQuantity,
     stock, customFactor, issued, hasDiscrepancy, heatNumbers = [],
+    onOrder = null, onDraft = null, onOrderRefs = [],
   } = args;
 
   const requiredInBomUnit = requiredQuantity(orderQuantity, bomQuantity);
@@ -120,5 +159,8 @@ export function buildRequirement(args: {
     shortBy,
     status,
     basis,
+    onOrder,
+    onDraft,
+    onOrderRefs: onOrderRefs.map((ref) => ({ ...ref })),
   };
 }

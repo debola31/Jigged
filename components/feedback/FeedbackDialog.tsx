@@ -19,9 +19,16 @@ import { useAuth } from '@/components/providers/AuthProvider';
 import { createFeedback, notifyFeedback } from '@/utils/feedbackAccess';
 import MissingFieldsNotice from '@/components/common/MissingFieldsNotice';
 import { PARTS_SUBROUTES } from '@/lib/partsSubroutes';
+import { purchasingPageTitle } from '@/lib/purchasingRoutes';
 
-function getPageTitle(pathname: string): string {
+/** Exported so the title rules can be tested against the header's (they must agree). */
+export function getPageTitle(pathname: string): string {
   const segments = pathname.split('/').filter(Boolean);
+
+  // The same route table the header reads, so a report filed from a purchasing page is tagged
+  // with the title the person saw.
+  const purchasingTitle = purchasingPageTitle(pathname);
+  if (purchasingTitle !== null) return purchasingTitle;
 
   if (segments.includes('quotes')) {
     if (segments.includes('new')) return 'New Quote';

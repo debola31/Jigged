@@ -16,6 +16,8 @@ import { registerJobWriteTools } from '@/lib/mcp/tools/jobsWrites';
 import { registerOverviewTools } from '@/lib/mcp/tools/overview';
 import { registerPartTools } from '@/lib/mcp/tools/parts';
 import { registerPartWriteTools } from '@/lib/mcp/tools/partsWrites';
+import { registerPurchasingTools } from '@/lib/mcp/tools/purchasing';
+import { registerPurchasingWriteTools } from '@/lib/mcp/tools/purchasingWrites';
 import { registerQueryTools } from '@/lib/mcp/tools/query';
 import { registerQuoteTools } from '@/lib/mcp/tools/quotes';
 import { registerQuoteWriteTools } from '@/lib/mcp/tools/quotesWrites';
@@ -109,10 +111,12 @@ export function registerJiggedTools(server: ToolTarget): void {
   registerInventoryTools(server);
   registerShippingTools(server);
   registerInvoiceTools(server);
+  registerPurchasingTools(server);
   registerQueryTools(server);
 
   // Changes, one area at a time; the consequential ones (convert, cancel, void, archive, the
-  // QuickBooks push, imports) are marked destructive so the assistant asks before running them.
+  // QuickBooks pushes, imports, closing or voiding on a purchase order to a vendor) are marked
+  // destructive so the assistant asks before running them.
   registerCustomerWriteTools(server);
   registerVendorWriteTools(server);
   registerPartWriteTools(server);
@@ -122,6 +126,7 @@ export function registerJiggedTools(server: ToolTarget): void {
   registerInventoryWriteTools(server);
   registerShippingWriteTools(server);
   registerInvoiceWriteTools(server);
+  registerPurchasingWriteTools(server);
   registerImportTools(server);
   registerChatUploadTools(server);
   registerArchiveTools(server);

@@ -1,8 +1,9 @@
 # QuickBooks Desktop
 
-How Jigged pushes invoices into a **locally installed** QuickBooks Desktop, via
-[Conductor](https://conductor.is). The companion to [invoicing.md](invoicing.md), which owns the
-billing model itself — this doc owns only what is different about Desktop.
+How Jigged pushes invoices — and, since 2026-11, vendor purchase orders — into a **locally
+installed** QuickBooks Desktop, via [Conductor](https://conductor.is). The companion to
+[invoicing.md](invoicing.md), which owns the billing model, and to [purchasing.md](purchasing.md),
+which owns the PO push — this doc owns only what is different about Desktop.
 
 **A company connects EITHER QuickBooks Online OR QuickBooks Desktop, never both.** That is a
 database invariant (`assert_single_accounting_provider()`, a BEFORE INSERT trigger on both
@@ -113,7 +114,8 @@ surface may claim to show "the invoice total"**.
 - **The income account is chosen by an admin, never guessed** — the one required setup step, and
   the first push is refused until it is done, because wrong revenue accounts are invisible until
   month end. When the company file has exactly one income account it is selected automatically:
-  that is not a guess, it is a question with a single possible answer.
+  that is not a guess, it is a question with a single possible answer. Changing it later is
+  [below](#changing-the-income-account).
 - **There is no bulk customer-matching step.** Customers are resolved on the invoice being sent —
   link to an existing one or create it — exactly as the QuickBooks Online path does. Asking a shop
   to reconcile their whole customer list before they have invoiced anything is work without a
@@ -131,6 +133,38 @@ surface may claim to show "the invoice total"**.
   building is awake is not. The reachability signal the Desktop path *does* have is the explicit
   Test connection button, which is a different question — is the file reachable at all — and it is
   already there.
+
+---
+
+## Changing the income account
+
+**As built 2026-11-12.** Every invoice line posts under one service item, **"Machined Parts"**, and
+the item — not the invoice — carries the income account. Saving a new account in Settings clears
+`default_service_item_id`, so the next push re-resolves the item. **That re-resolve reuses the item
+only when it is active and posts to the chosen account** (the income account of a two-way item);
+otherwise the push answers **409 `qbd_invoice_item_conflict`** with a sentence naming where the item
+posts and the two fixes, before any invoice exists, so the link is `error` and the same request
+retries in place. A missing item is created on the chosen account. Nothing in QuickBooks is written to
+settle it ([`resolve_default_item`](../../api/services/quickbooks_desktop.py)).
+
+| Option | Verdict |
+|---|---|
+| Change the item's account from Jigged, future transactions only | **Rejected.** Conductor exposes it (`updateExistingTransactionsAccount: false`), but the item may be the shop's own, carrying hand-keyed invoices whose future revenue would move too, and the integration card promises Jigged changes nothing in QuickBooks but the POs it sent. An unspecified flag is documented as *"QuickBooks will prompt the user"* — no one is at the Web Connector to answer — and `false` is unverified on a company file |
+| Create a second item named for the account | **Rejected.** A 31-character, colon-free name per account clutters the item list on every change, prints a different item on invoices, and still has to check the account it finds |
+| **Refuse with a sentence; a person changes the item in QuickBooks, or picks its account in Settings** | **Chosen.** No transaction is touched and no account guessed; QuickBooks' own dialog asks about existing transactions, where the bookkeeper can answer it |
+
+**Withdrawn:** *"a change must re-resolve it rather than keep pointing at the old one"* (the Settings
+route, until 2026-11-12) — wrong because re-resolving by name found the same item, so revenue stayed in
+the old account with nothing said. The same reuse also adopted a pre-existing "Machined Parts" on the
+first push with no account chosen; the account is now required before the lookup.
+
+**Named gaps.** Saving makes no QuickBooks call, so it works with the shop PC off — and the refusal
+arrives at the next push, not in Settings. A **cached** item is not re-checked on every push: an
+account changed in QuickBooks afterwards is the shop's own decision, and the next Settings save
+re-resolves. Pinned by `test_quickbooks_desktop_service.py` (the invoice item section, 8 tests),
+`test_quickbooks_routes_helpers.py` (1) and
+`test_a_changed_income_account_is_never_posted_through_the_old_item` in
+[`test_quickbooks_desktop_routes.py`](../../api/tests/integration/test_quickbooks_desktop_routes.py).
 
 ---
 
@@ -166,6 +200,7 @@ safe — so an `error` row still holding it is reclaimed *in place* rather than 
 | Web Connector offline / QuickBooks closed (`qbd_offline`) | 409 | **no** — warning log only |
 | Unknown outcome (`qbd_verify`) | 409 | one deliberate `capture_message` (a 409 is not auto-captured, and unconfirmed money must reach the queue) |
 | Setup never finished | 409 | no |
+| Invoice item posts to another income account, or is inactive (`qbd_invoice_item_conflict`) | 409 | no |
 | QuickBooks rejected the request | 502 | yes (auto, via the Starlette integration) |
 | Our Conductor key rejected | 503 | yes — this one is ours |
 
@@ -188,6 +223,62 @@ drifting from QuickBooks' own.
 
 A cold cache degrades to Jigged's presets rather than failing, and `resolve_term_id` still creates
 whatever term is chosen at push time.
+
+---
+
+## Purchase orders
+
+**Added 2026-11.** The push, its state machine and its error map are one implementation for both
+providers ([purchasing.md](purchasing.md#quickbooks-push)); what differs on Desktop is below.
+**What Jigged may change in QuickBooks is only the POs it sent there** — the integration card says
+*"Jigged never deletes anything in QuickBooks, and changes only the POs it sent there"*, replacing
+"never changes anything", which an Update made untrue.
+
+| | Desktop | Why |
+|---|---|---|
+| PO number | **Jigged sends its own as `refNumber` — the opposite of invoices**, which QuickBooks numbers | The vendor holds a document with Jigged's number; the QuickBooks PO has to match it. A duplicate is still accepted silently, hence the bookkeeper's [numbering advice](purchasing.md#what-the-bookkeeper-does-differently) |
+| 11 characters | `refNumber`'s limit, so it is the PO number's CHECK; numbers are fixed at `PO-0001` on, so `PO-99999999` is the last one minted | A longer number could never be sent. The push's `qbd_po_number_too_long` is a defensive second check; the column already holds every number to 11 |
+| Notes to vendor | `vendorMessage` — **prints**, 99 characters, cut with "…" | The PDF carries the full text |
+| `Jigged PO-1042 Rev 2 · link` | `memo` — **does not print**, 4,095 characters | The **names are the opposite of Online's**, where `Memo` prints and `PrivateNote` does not |
+| Lines | `rate`, never `amount`; quantity and rate in the purchase unit | As for invoices: Conductor ignores `rate` when `amount` is sent |
+| Need-by | `expectedDate` | Online has no field for it — its `DueDate` means payment due |
+| Ship method | matched by name, **never created** | A typo in *ship via* would become a permanent entry in the company file |
+| Ship-to | cut to QuickBooks' caps (lines 41, city 31, state 21, postal code 13, country 31), with a warning | An address is a label, so it is cut; a vendor name is an identity, so it is refused |
+| AP account | none — Desktop POs carry no accounts-payable account | |
+
+**Items:** a **one-way non-inventory item** posting to an expense, cost-of-goods-sold or other-expense
+account — one general purchases item by default, all three line kinds on it, the founder's *"1
+general thing"* ([purchasing.md](purchasing.md#decisions)). A name is 31 characters at most, with
+no colon. Item names are unique across **every** item type, so both the non-inventory and service
+lists are searched, and a same-named item is reused **only** when it already posts to the chosen
+account — the rule the invoice item follows too since 2026-11-12
+([above](#changing-the-income-account)). POs exist only while *Inventory and
+purchase orders are active* is on (Edit → Preferences → Items & Inventory); **Check QuickBooks**
+reads `purchasesAndVendors.isUsingInventory`. Custom numbering is not a question here: Desktop always
+takes the `refNumber`.
+
+**The read before the write.** Update, close and reopen read the PO once, by id, inside the click:
+`revisionNumber`, the line ids, and each line's received and billed state. Sending `lines` replaces
+them all, so existing ids are kept and a new line is `-1`. `isManuallyClosed` exists on **update
+only** — a create cannot close — at header and line level, and **cannot return to false once the PO
+is received in full**, which is `qb_cannot_reopen`. A QuickBooks line Jigged never sent, or a received
+or billed line the edit would remove or shrink, refuses the push with nothing written.
+
+**Recovery is the invoice path's, for a PO:** no idempotency key, so a create that times out is an
+unknown outcome, **probed once** — `vendorIds` plus a one-day `transactionDate` window, matched on
+`externalId` client-side, never `refNumbers` or `ids`, whose miss fails the request — then adopted or
+parked `needs_verification` with one `capture_message`, and **never retried automatically**. It blocks
+only that PO; **Check again** is the way out. An update whose outcome is unknown is read back: the
+token unchanged means it did not land (released, and a retry is safe — an update cannot duplicate);
+moved with every line as sent means it did (adopted); anything else waits for a person.
+
+**Disconnecting clears the purchasing setup** (its rows hang off the connection row
+`ON DELETE CASCADE`), and the Disconnect dialog says so; the vendor map is kept, like the customer
+map.
+
+**Unverified until manual check M-2 on a sample company file:** the stale-revision code (`3200` in the
+qbXML SDK), the "not found" shape of a deleted PO, which edits a received line refuses, and whether
+`vendorMessage` prints while `memo` does not.
 
 ---
 
@@ -264,6 +355,8 @@ company file.
 | Provider seam (protocol + both adapters) | [api/services/accounting/](../../api/services/accounting) |
 | Connection lifecycle and terms refresh | [api/routes/quickbooks_desktop_routes.py](../../api/routes/quickbooks_desktop_routes.py) |
 | Invoice push, including customer resolution (shared with QBO) | [api/routes/quickbooks_routes.py](../../api/routes/quickbooks_routes.py) |
+| Vendor PO push and purchasing setup (shared with QBO) | [api/routes/quickbooks_purchasing_routes.py](../../api/routes/quickbooks_purchasing_routes.py) |
+| Vendor PO payload, items, vendors and the recovery probe | [api/services/quickbooks_desktop_purchasing.py](../../api/services/quickbooks_desktop_purchasing.py) |
 | Schema | [20260816043137_quickbooks_desktop_provider.sql](../../supabase/migrations/20260816043137_quickbooks_desktop_provider.sql) |
 | Settings UI | [QuickBooksIntegrationCard.tsx](../../components/settings/QuickBooksIntegrationCard.tsx) |
 | Frontend client | [utils/quickbooksDesktop.ts](../../utils/quickbooksDesktop.ts) |

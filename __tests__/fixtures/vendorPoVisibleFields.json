@@ -1,0 +1,50 @@
+{
+  "$comment": [
+    "THE VENDOR-VISIBLE FIELD LIST (plan 3.3, criterion P3), as data. The keys of",
+    "save_vendor_purchase_order's patch that change the vendor's copy of a SENT purchase",
+    "order: after a send, the first save changing any of them bumps the revision once per",
+    "send cycle. The internal keys never bump it.",
+    "",
+    "ONE LIST, THREE COPIES, pinned together by __tests__/lib/purchasing/vendorPoVisibleFields.test.ts:",
+    "  - lib/purchasing/vendorPoVisibleFields.ts (the PO form's 'Save as Rev N+1' prediction)",
+    "  - this file",
+    "  - the four tuples in api/tests/integration/purchasing_support.py (the DB tests' parameters),",
+    "    named like the four lists below; that file may load this one instead of copying it.",
+    "",
+    "line_set_changes: adding or removing a line also changes the vendor's copy.",
+    "fixed_once_sent_fields: on the vendor's copy, but a sent PO refuses to change them (P4).",
+    "job_part_id carries the job (a line moved to another job's part prints that job number).",
+    "line_kind and job_operation_id print too, but no list holds them: an existing line's kind",
+    "and routing step are fixed, draft or sent, so only adding or removing a line moves them."
+  ],
+  "vendor_visible_header_fields": [
+    "vendor_contact_id",
+    "vendor_address_id",
+    "ship_to_kind",
+    "ship_to_vendor_id",
+    "ship_to_vendor_address_id",
+    "ship_to_customer_id",
+    "ship_to_customer_address_id",
+    "need_by_on",
+    "payment_terms",
+    "ship_via",
+    "notes_to_vendor"
+  ],
+  "vendor_visible_line_fields": [
+    "part_id",
+    "description",
+    "vendor_part_number",
+    "quantity",
+    "unit",
+    "unit_price",
+    "need_by_on",
+    "cert_required",
+    "job_id",
+    "job_part_id",
+    "work_center_id"
+  ],
+  "internal_header_fields": ["internal_notes"],
+  "internal_line_fields": ["promised_on"],
+  "line_set_changes": ["line_added", "line_removed"],
+  "fixed_once_sent_fields": ["vendor_id", "ordered_on"]
+}

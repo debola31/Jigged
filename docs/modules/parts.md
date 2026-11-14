@@ -79,7 +79,7 @@ deal by overriding a price **on the quote**, never on the part. Both surfaces ar
 | primary_unit | Text | Stocking/costing unit. Effectively NOT NULL via the `parts_requires_unit` CHECK |
 | quantity | Numeric | On-hand (default 0). Only ever changed through `inventory_transactions`, never the part form |
 | reorder_point | Numeric | Low-stock threshold, nullable |
-| preferred_vendor_id | UUID FK | Supplier **label** for a bought part — see the procurement note below |
+| preferred_vendor_id | UUID FK | Supplier **label** for a bought part — see the procurement note below. Since 2026-11 the trigger `ensure_preferred_vendor_is_listed` keeps a live approved-vendor row for it and refuses another company's vendor or a Do-not-use one |
 | costing_batch_quantity | Numeric | Batch size the part is costed at as a made child (`compute_part_cost_at_qty`) |
 | deleted_at | Timestamp | Archive marker; nullable. See [Delete](#delete--archive-soft-delete-never-blocks) |
 | created_at / updated_at | Timestamp | — |
@@ -310,8 +310,10 @@ founder looked here and concluded place-scoped counting did not exist. Dropping 
 took the button with it, so that lesson had to be paid for a second way: the `inventory_locations`
 flag was **removed entirely** (Aug 2026), which makes the Storage board a place every tenant
 actually has, not one a toggle can take away. Counting is
-reached from Storage, and from a part's own Storage tab. `/inventory/count` itself is unchanged
-and still accepts `?from=`.
+reached from Storage → Inventory: `Count Inventory` in its toolbar, and `Count all N locations` in
+a split part's side rail. ⚠ *Neither existed from 2026-09-09, when the part page's Storage tab took
+the last door with it, to 2026-11-12.* `/inventory/count` itself is unchanged and still accepts
+`?from=`.
 
 ### Part create — `/dashboard/{companyId}/parts/new`
 
@@ -337,6 +339,7 @@ Tabs, URL-addressable via `?tab=`:
 | Workspace (default) | *(none)* | Always — identity, cost/pricing, routing, BOM |
 | Storage | `inventory` | Always — every part is stockable. Slug stays `inventory` for deep-link back-compat |
 | Usage | `usage` | Always — jobs and quotes referencing this part |
+| Buying | `buying` | **Bought parts only** (2026-11, [`BuyingTab`](../../components/parts/workspace/tabs/BuyingTab.tsx)) — the approved vendors, their price sheets, purchase history and *Use as part cost*; `?tab=buying` on a made part falls back. Owned by [purchasing.md](purchasing.md#approved-vendors-price-sheets-use-as-part-cost) |
 | Files | `files` | Always |
 | Activity | `history` | Always. Slug stays `history` for deep-link back-compat |
 
@@ -486,7 +489,16 @@ sheet is now a column in the Pricing grid; see
 > **Withdrawn:** cost tiers as a property of the (part, vendor) pair — wrong because it forced a
 > which-vendor-wins resolution step for no gain. Cost is a property of the **part**; the vendor is a
 > pure supplier label (`parts.preferred_vendor_id`) and switching it does **not** swap or discard the
-> ladder. Multi-vendor sheets / RFQ / POs are deferred to a future purchasing module ([#571]).
+> ladder.
+>
+> ⚠ *This note went on: "Multi-vendor sheets / RFQ / POs are deferred to a future purchasing module
+> ([#571])." They came back 2026-11 — **as purchasing data, not as cost**
+> ([purchasing.md](purchasing.md#approved-vendors-price-sheets-use-as-part-cost)).* The approved
+> vendor list (`part_vendors`) and per-vendor price sheets (`part_vendor_price_breaks`) say what a
+> vendor charges and default a PO line's price; **the estimate path stays part-level** — quoting
+> reads `part_pricing_tiers` alone, and no which-vendor-wins step returned. **The only purchasing
+> writer of a tier is the explicit *Use as part cost***, on the part's Buying tab: it previews every
+> tier, then sets `cost_per_unit` in place, keeping tier ids, quantities and markups.
 
 - **Preferred vendor lives here only.** It is not duplicated on the part-details/identity card —
   that field renders only in the create flow

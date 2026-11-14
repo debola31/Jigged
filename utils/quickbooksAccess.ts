@@ -45,12 +45,69 @@ export const QB_ERROR = {
   desktopNotConnected: 'qbd_not_connected',
   /** Intuit's API did not answer while we were reading payment status back. The
    *  stored mirror is still shown as-is — a read we could not make must never be
-   *  written down, and "couldn't check" is never "unpaid". */
+   *  written down, and "couldn't check" is never "unpaid". A vendor-PO push that got
+   *  no answer carries it too: the next send resumes the same attempt. */
   onlineUnreachable: 'qbo_unreachable',
+
+  // ── Vendor purchase orders (plan §3.11's error map). Each is a 409 whose message is
+  //    already a sentence saying where to fix it; none is a Jigged defect. ──
+  /** QuickBooks is not connected, or needs reconnecting (Settings → QuickBooks). */
+  notConnected: 'qb_not_connected',
+  /** QuickBooks Online asked Jigged to slow down (HTTP 429). A retry in a minute works. */
+  onlineBusy: 'qbo_busy',
+  /** Purchase orders are off on this QuickBooks Online plan or company. */
+  onlinePurchaseOrdersUnavailable: 'qbo_purchase_orders_unavailable',
+  vendorPoDraft: 'vendor_po_draft',
+  vendorPoUnsentRevision: 'vendor_po_unsent_revision',
+  vendorPoArchived: 'vendor_po_archived',
+  vendorPoLineUnpriced: 'vendor_po_line_unpriced',
+  desktopPoNumberTooLong: 'qbd_po_number_too_long',
+  /** Items (or Online's accounts-payable account) not chosen; `details.missing` names them. */
+  setupRequired: 'qb_setup_required',
+  itemNameTaken: 'qb_item_name_taken',
+  referenceInactive: 'qb_reference_inactive',
+  /** Several QuickBooks vendors look alike; `details.candidates` lists them. */
+  vendorChoiceRequired: 'qb_vendor_choice_required',
+  vendorNameInvalid: 'qb_vendor_name_invalid',
+  vendorNameTaken: 'qb_vendor_name_taken',
+  vendorInactive: 'qb_vendor_inactive',
+  purchaseOrderMissing: 'qb_po_missing',
+  foreignLines: 'qb_foreign_lines',
+  lineInUse: 'qb_line_in_use',
+  cannotReopen: 'qb_cannot_reopen',
+  changedInQuickBooks: 'qb_changed_in_quickbooks',
 } as const;
 
+/** Every code a vendor-PO push or its setup answers with as a 409: conditions the shop
+ *  can fix, each with a sentence. The dialog shows the message and reports nothing. */
+export const VENDOR_PO_PUSH_REFUSAL_CODES: ReadonlySet<string> = new Set<string>([
+  QB_ERROR.notConnected,
+  QB_ERROR.desktopUnreachable,
+  QB_ERROR.onlinePurchaseOrdersUnavailable,
+  QB_ERROR.onlineBusy,
+  QB_ERROR.vendorPoDraft,
+  QB_ERROR.vendorPoUnsentRevision,
+  QB_ERROR.vendorPoArchived,
+  QB_ERROR.vendorPoLineUnpriced,
+  QB_ERROR.desktopPoNumberTooLong,
+  QB_ERROR.setupRequired,
+  QB_ERROR.itemNameTaken,
+  QB_ERROR.referenceInactive,
+  QB_ERROR.vendorChoiceRequired,
+  QB_ERROR.vendorNameInvalid,
+  QB_ERROR.vendorNameTaken,
+  QB_ERROR.vendorInactive,
+  QB_ERROR.purchaseOrderMissing,
+  QB_ERROR.foreignLines,
+  QB_ERROR.lineInUse,
+  QB_ERROR.cannotReopen,
+  QB_ERROR.changedInQuickBooks,
+  QB_ERROR.desktopVerify,
+  QB_ERROR.desktopBlocked,
+]);
+
 /** True when QuickBooks simply is not reachable right now — the shop PC being off
- *  for Desktop, Intuit not answering for Online.
+ *  for Desktop, Intuit not answering (or asking Jigged to slow down) for Online.
  *
  *  Every surface uses this to choose warning-with-retry over error. Third-party
  *  downtime is the expected path, not a defect — which is also why this module
@@ -60,7 +117,19 @@ export function isQuickBooksUnreachable(err: unknown): boolean {
     err instanceof QuickBooksError &&
     (err.code === QB_ERROR.desktopUnreachable ||
       err.code === QB_ERROR.desktopNotConnected ||
-      err.code === QB_ERROR.onlineUnreachable)
+      err.code === QB_ERROR.onlineUnreachable ||
+      err.code === QB_ERROR.onlineBusy)
+  );
+}
+
+/** True for a vendor-PO push refusal the shop can act on: a 409 with a known code,
+ *  whose message says what happened and where to fix it. Never a Sentry report. */
+export function isVendorPoPushRefusal(err: unknown): boolean {
+  return (
+    err instanceof QuickBooksError &&
+    err.status === 409 &&
+    err.code !== undefined &&
+    VENDOR_PO_PUSH_REFUSAL_CODES.has(err.code)
   );
 }
 
@@ -144,11 +213,15 @@ export interface QuickBooksInvoiceLink {
 export class QuickBooksError extends Error {
   status?: number;
   code?: string;
-  constructor(message: string, status?: number, code?: string) {
+  /** The whole structured `detail`, for the fields a refusal carries beyond its code
+   *  and message: `candidates` (vendor choice), `missing` (setup), `link_id` (verify). */
+  details?: Record<string, unknown>;
+  constructor(message: string, status?: number, code?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = 'QuickBooksError';
     this.status = status;
     this.code = code;
+    this.details = details;
   }
 }
 
@@ -187,14 +260,16 @@ async function qbRequest<T>(
     const rawDetail = (err as { detail?: unknown }).detail;
     let message = `QuickBooks request failed (${response.status})`;
     let code: string | undefined;
+    let details: Record<string, unknown> | undefined;
     if (typeof rawDetail === 'string') {
       message = rawDetail;
-    } else if (rawDetail && typeof rawDetail === 'object') {
+    } else if (rawDetail && typeof rawDetail === 'object' && !Array.isArray(rawDetail)) {
       const d = rawDetail as { message?: string; code?: string };
       message = d.message ?? message;
       code = d.code;
+      details = { ...rawDetail };
     }
-    throw new QuickBooksError(message, response.status, code);
+    throw new QuickBooksError(message, response.status, code, details);
   }
 
   return (await response.json()) as T;
@@ -643,4 +718,255 @@ export async function listQuickBooksTerms(
   } catch {
     return { connected: false, terms: [] };
   }
+}
+
+// ───────────────────────── Vendor purchase orders (plan §3.11) ─────────────────────────
+//
+// "PO" alone means the customer's PO in Jigged, so everything here says vendor PO.
+// Jigged pushes the PO; bills stay in QuickBooks. Every function below except
+// getQuickBooksPurchasingSetup reaches QuickBooks, so each is called from a click --
+// never a mount, a render or a poll (QB1). Snake_case shapes are the routes' JSON
+// verbatim, like PushResult and PreflightResult above.
+
+/** The kind of a vendor-PO line; each kind posts under its own QuickBooks item. */
+export type PurchaseLineKind = 'part' | 'outside_service' | 'other';
+
+/** What a push does to the QuickBooks copy. `none`: QuickBooks already holds exactly this. */
+export type VendorPoQuickBooksOperation = 'create' | 'update' | 'close' | 'reopen' | 'none';
+
+/** One line kind's QuickBooks item, as Settings → QuickBooks → Purchasing shows it. */
+export interface QuickBooksPurchaseItemSetting {
+  line_kind: PurchaseLineKind;
+  setup_key: string;
+  qb_id: string | null;
+  qb_name: string | null;
+  posting_account_id: string | null;
+  posting_account_name: string | null;
+  created_in_quickbooks: boolean;
+}
+
+/** The two answers "Check QuickBooks" stores. null: QuickBooks did not say. */
+export interface QuickBooksPurchasingPreferences {
+  purchase_orders_enabled: boolean | null;
+  custom_txn_numbers: boolean | null;
+  checked_at?: string | null;
+}
+
+export interface QuickBooksPurchasingSetup {
+  connected: boolean;
+  provider: QuickBooksProvider | null;
+  items: QuickBooksPurchaseItemSetting[];
+  /** The default: one general purchases item filling all three line kinds. */
+  one_item_for_all: boolean;
+  /** QuickBooks Online only. */
+  ap_account: { qb_id: string | null; qb_name: string | null } | null;
+  preferences: QuickBooksPurchasingPreferences | null;
+  /** Setup keys not chosen yet: item:part, item:outside_service, item:other, ap_account. */
+  missing: string[];
+}
+
+export interface QuickBooksAccount {
+  id: string;
+  full_name: string | null;
+  type: string | null;
+}
+
+export interface QuickBooksPurchaseItem {
+  id: string;
+  name: string | null;
+  type: string | null;
+  posting_account_id: string | null;
+  posting_account_name: string | null;
+  /** Posts to an expense, cost-of-goods-sold or other-expense account, so a purchase
+   *  may use it. The invoice item is never listed at all. */
+  eligible: boolean;
+}
+
+/** Use an existing item, or create one posting to `qb_account_id`. */
+export interface QuickBooksPurchaseItemChoice {
+  action: 'use_existing' | 'create';
+  qb_item_id?: string;
+  qb_account_id?: string;
+  name?: string;
+}
+
+/** One item for every line kind (the default), or a per-kind split. */
+export type QuickBooksPurchaseItemsChoice =
+  | { allKinds: QuickBooksPurchaseItemChoice }
+  | { byKind: Partial<Record<PurchaseLineKind, QuickBooksPurchaseItemChoice>> };
+
+export interface QuickBooksPreferencesCheck extends QuickBooksPurchasingPreferences {
+  provider: QuickBooksProvider;
+  checked_at: string;
+  /** Sentences for the panel: purchase orders off, numbers QuickBooks will replace. */
+  warnings: string[];
+}
+
+export interface VendorPoVendorCandidate {
+  qb_id: string;
+  display_name: string | null;
+}
+
+export interface VendorPoPreflightVendor {
+  status: 'mapped' | 'exact_match' | 'candidates' | 'unmatched';
+  qb_vendor_id: string | null;
+  candidates: VendorPoVendorCandidate[];
+  jigged_vendor_id: string;
+  jigged_name: string;
+  /** Why QuickBooks can't take this name as a NEW vendor (Desktop: over 41 characters,
+   *  a colon, a tab or a line break). Refused, never shortened: link one instead. */
+  name_problem: string | null;
+}
+
+export interface VendorPoQuickBooksLink {
+  id: string;
+  status: 'pending' | 'created' | 'error' | 'needs_verification';
+  operation: string | null;
+  last_failure: 'ambiguous' | 'rejected' | null;
+  qb_po_id: string | null;
+  /** What QuickBooks calls it -- its own number when custom numbers are off. */
+  qb_doc_number: string | null;
+  /** Null for QuickBooks Desktop: there is no web app to link into. */
+  qb_url: string | null;
+  qb_closed: boolean;
+  pushed_revision: number | null;
+  /** Changed in Jigged since it was sent to QuickBooks. A database fact, no QuickBooks call. */
+  out_of_date: boolean;
+}
+
+export interface VendorPoPushPreflight {
+  connected: boolean;
+  provider?: QuickBooksProvider;
+  /** False for QuickBooks Desktop: do not pre-open a tab for a link that will not exist. */
+  has_deep_links?: boolean;
+  operation?: VendorPoQuickBooksOperation;
+  /** An earlier attempt is unconfirmed: verify it before sending again. */
+  blocked?: { code: string; link_id: string; message: string } | null;
+  /** Why this PO can't be sent yet (a draft, an unsent revision, an unpriced line...). */
+  refusal?: { code: string; message: string } | null;
+  /** Setup keys this PO needs that nobody has chosen yet. */
+  setup_missing?: string[];
+  vendor?: VendorPoPreflightVendor | null;
+  link?: VendorPoQuickBooksLink | null;
+  /** What QuickBooks will hold differently from the vendor's PDF. */
+  warnings?: string[];
+}
+
+/** Only needed when preflight found similar vendor names: link one, or create a new one. */
+export interface VendorPoVendorDecision {
+  action: 'use_existing' | 'create';
+  qb_vendor_id?: string;
+}
+
+export interface VendorPoPushResult {
+  operation?: VendorPoQuickBooksOperation;
+  qb_po_id?: string | null;
+  doc_number?: string | null;
+  url?: string | null;
+  /** The PO was already in QuickBooks (an unconfirmed attempt that had landed). */
+  already_existed?: boolean;
+  /** Nothing changed since the last send, so QuickBooks was not called at all. */
+  already_up_to_date?: boolean;
+  warnings?: string[];
+  link_id?: string;
+  /** A send of this PO is already running (a double-click, another tab). */
+  in_progress?: boolean;
+}
+
+export interface VendorPoLinkVerifyResult {
+  outcome: 'adopted' | 'released' | 'in_progress';
+  qb_po_id?: string | null;
+  doc_number?: string | null;
+  url?: string | null;
+}
+
+/** The purchasing setup, read from Jigged's own tables. The ONE call here that never
+ *  reaches QuickBooks, so the Settings panel may make it on mount. */
+export function getQuickBooksPurchasingSetup(companyId: string): Promise<QuickBooksPurchasingSetup> {
+  return qbRequest<QuickBooksPurchasingSetup>(`/${companyId}/purchasing/setup`);
+}
+
+/** Admin, on "Choose item": QuickBooks' non-inventory and service items, each marked
+ *  eligible or not, with the accounts a new item may post to. */
+export function listQuickBooksPurchaseItems(
+  companyId: string,
+): Promise<{ items: QuickBooksPurchaseItem[]; accounts: QuickBooksAccount[] }> {
+  return qbRequest(`/${companyId}/purchasing/items`);
+}
+
+/** Admin, on click: purchase (expense / COGS / other-expense) and, for QuickBooks
+ *  Online, accounts-payable accounts. */
+export function listQuickBooksPurchaseAccounts(
+  companyId: string,
+): Promise<{ accounts: QuickBooksAccount[]; ap_accounts: QuickBooksAccount[] }> {
+  return qbRequest(`/${companyId}/purchasing/accounts`);
+}
+
+/** Admin: the QuickBooks item(s) purchases post under. `allKinds` fills all three line
+ *  kinds with one item (the default); `byKind` splits them. Verified server-side by
+ *  posting account; the invoice item is refused. */
+export function setQuickBooksPurchaseItems(
+  companyId: string,
+  choice: QuickBooksPurchaseItemsChoice,
+): Promise<{ saved: boolean; items: QuickBooksPurchaseItemSetting[]; one_item_for_all: boolean }> {
+  const body = 'allKinds' in choice ? { all_kinds: choice.allKinds } : { by_kind: choice.byKind };
+  return qbRequest(`/${companyId}/purchasing/items`, { method: 'POST', body });
+}
+
+/** Admin, QuickBooks Online only: the accounts-payable account POs carry, when the
+ *  company has more than one (with exactly one, the first send uses it). */
+export function setQuickBooksApAccount(
+  companyId: string,
+  qbAccountId: string,
+): Promise<{ saved: boolean; ap_account: { qb_id: string; qb_name: string | null } }> {
+  return qbRequest(`/${companyId}/purchasing/ap-account`, {
+    method: 'POST',
+    body: { qb_account_id: qbAccountId },
+  });
+}
+
+/** Admin "Check QuickBooks": are purchase orders on, and will QuickBooks keep Jigged's
+ *  numbers? Stored for QuickBooks Online. */
+export function checkQuickBooksPreferences(companyId: string): Promise<QuickBooksPreferencesCheck> {
+  return qbRequest(`/${companyId}/purchasing/check-preferences`, { method: 'POST' });
+}
+
+/** What sending this vendor PO would do. Call it when the dialog OPENS from its button,
+ *  never on page load: on a first send it searches QuickBooks' vendors. */
+export function preflightVendorPoPush(
+  companyId: string,
+  vendorPoId: string,
+): Promise<VendorPoPushPreflight> {
+  return qbRequest(`/${companyId}/vendor-pos/${vendorPoId}/preflight`, { method: 'POST', body: {} });
+}
+
+/**
+ * Send, update, close or reopen this vendor PO in QuickBooks -- the server works out
+ * which. There is deliberately no request id here: the server mints every one, which is
+ * what makes a double-click or a second tab produce one QuickBooks PO, and lets a lost
+ * answer be resumed rather than repeated.
+ *
+ * Rejects with a QuickBooksError: isVendorPoPushRefusal() for a sentence the shop can
+ * act on, isQuickBooksUnreachable() for a retry, isQuickBooksUnverified() for "check
+ * QuickBooks, then verify".
+ */
+export function pushVendorPo(
+  companyId: string,
+  vendorPoId: string,
+  vendor?: VendorPoVendorDecision,
+): Promise<VendorPoPushResult> {
+  return qbRequest(`/${companyId}/vendor-pos/${vendorPoId}/push`, {
+    method: 'POST',
+    body: vendor ? { vendor } : {},
+  });
+}
+
+/** Settle a send nobody could confirm (QuickBooks Desktop): adopt the PO QuickBooks
+ *  holds, or release the attempt so the next send can go. The only way out of
+ *  "needs checking" -- a human action, never an automatic retry. */
+export function verifyVendorPoLink(
+  companyId: string,
+  linkId: string,
+): Promise<VendorPoLinkVerifyResult> {
+  return qbRequest(`/${companyId}/vendor-po-links/${linkId}/verify`, { method: 'POST', body: {} });
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import posthog from 'posthog-js';
 import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
@@ -42,9 +42,16 @@ import {
 export default function QuickBooksDesktopPanel({
   companyId,
   onDisconnected,
+  purchasingSetupNeeded,
+  children,
 }: {
   companyId: string;
   onDisconnected: () => void;
+  /** From the Purchasing panel's own setup read (Jigged's database, no QuickBooks call).
+   *  Undefined until that read lands, so nothing is claimed about purchasing before it has. */
+  purchasingSetupNeeded?: boolean;
+  /** Further setup sections — the Purchasing panel — drawn above Disconnect. */
+  children?: ReactNode;
 }) {
   // useLoad rather than a hand-rolled effect: every setState happens inside the
   // async callback, which is what keeps this off react-hooks/set-state-in-effect.
@@ -210,9 +217,10 @@ export default function QuickBooksDesktopPanel({
 
       <Divider sx={{ my: 2 }} />
 
-      {/* Exactly ONE setup step, and the server enforces it: invoices are
+      {/* ONE setup step for invoices, and the server enforces it: invoices are
           refused until an income account is chosen, because revenue landing in
-          the wrong account is invisible until month end.
+          the wrong account is invisible until month end. Vendor POs have their own
+          step (the purchases item), summarised below and set in Purchasing.
           Customer matching is deliberately NOT here. It happens at push time, the
           same way the QuickBooks Online path works -- link to an existing
           customer or create one, on the invoice you are actually sending. A bulk
@@ -272,6 +280,33 @@ export default function QuickBooksDesktopPanel({
           )}
         </Box>
       </Stack>
+
+      {purchasingSetupNeeded !== undefined && (
+        <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ mb: 2 }}>
+          {purchasingSetupNeeded ? (
+            <RadioButtonUncheckedIcon fontSize="small" color="warning" sx={{ mt: 0.4 }} />
+          ) : (
+            <CheckCircleIcon fontSize="small" color="success" sx={{ mt: 0.4 }} />
+          )}
+          <Box sx={{ flex: 1 }}>
+            <Typography variant="body2" fontWeight={500}>
+              {purchasingSetupNeeded ? 'Purchasing setup needed' : 'Purchasing'}
+            </Typography>
+            <Typography variant="body2" color="text.secondary">
+              {purchasingSetupNeeded
+                ? "Vendor POs can't be sent to QuickBooks until you choose the item they post under, in Purchasing below."
+                : 'Done. Vendor POs can be sent to QuickBooks.'}
+            </Typography>
+          </Box>
+        </Stack>
+      )}
+
+      {children && (
+        <>
+          <Divider sx={{ my: 3 }} />
+          {children}
+        </>
+      )}
 
       <Divider sx={{ my: 3 }} />
 
